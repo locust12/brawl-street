@@ -1,0 +1,531 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Brawl Street</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="Brawl Street, the meme coin platform fighter.">
+<!-- SOCIAL PREVIEW. Without these, every share of brawlstreet.lol on X, Telegram or Discord renders
+     as a bare link with no image -- which is most of how anyone arrives here. og:image is RELATIVE
+     on purpose: scrapers resolve it against the page URL, and an absolute brawlstreet.lol would be
+     an external host, which the portal build's own audit rejects. The absolute og:url is stripped
+     from portal builds by make_clean for the same reason. 1920x1086 key art is inside both X's
+     1.91:1 summary_large_image crop and Telegram's. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Brawl Street">
+<meta property="og:title" content="Brawl Street - the free to play 3D platform fighter">
+<meta property="og:description" content="42 fighters, 18 stages, up to four players on one keyboard. No install, plays in your browser.">
+<meta property="og:image" content="assets/keyart.jpg">
+<meta property="og:image:width" content="1920">
+<meta property="og:image:height" content="1086">
+<meta property="og:image:alt" content="Brawl Street key art">
+<meta property="og:url" content="https://brawlstreet.lol/play/">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@BrawlStreetGame">
+<meta name="twitter:creator" content="@BrawlStreetGame">
+<meta name="twitter:title" content="Brawl Street - the free to play 3D platform fighter">
+<meta name="twitter:description" content="42 fighters, 18 stages, up to four players on one keyboard. No install, plays in your browser.">
+<meta name="twitter:image" content="assets/keyart.jpg">
+<!-- Added to the home screen the game runs without Safari's chrome, which also settles the canvas:
+     a collapsing URL bar resizes the viewport mid-fight and the frame stretches while it moves. -->
+<link rel="manifest" href="assets/manifest.webmanifest">
+<meta name="theme-color" content="#050507">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Brawl Street">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"}}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,700;1,700;1,800;1,900&family=JetBrains+Mono:wght@500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap">
+<style>
+[hidden]{display:none!important}   /* the artifact host adds this; the page also runs standalone on brawlstreet.lol/play */
+/* ===== Brawl Street design system (matches the brawl street site) ===== */
+:root{
+  --bg:#050507;--bg2:#0a0b10;--bg3:#101219;--ink:#050507;
+  --panel:rgba(12,13,20,.78);--panel2:rgba(255,255,255,.06);--glass:rgba(16,18,28,.62);
+  --line:rgba(255,255,255,.09);--line2:rgba(255,255,255,.18);
+  --text:#f4f5f8;--muted:#9398a8;--dim:#5d6272;
+  --red:#ff2a4a;--red2:#ff6a3d;--cyan:#27e1ff;--blue:#2a6bff;--gold:#ffc83d;--lime:#3dff8a;--pink:#ff4fd8;--violet:#8b5cf6;
+  --chrome:linear-gradient(180deg,#ffffff 0%,#eef0f5 38%,#9aa1b3 50%,#ffffff 58%,#c9ced9 100%);
+  --irid:linear-gradient(100deg,var(--red) 0%,var(--red2) 100%);
+  --display:"Barlow Condensed","Arial Narrow",Impact,sans-serif;
+  --ui:"Space Grotesk",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  --cut:14px;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--ui);overflow:hidden;-webkit-font-smoothing:antialiased;
+  -webkit-user-select:none;user-select:none;touch-action:none;-webkit-tap-highlight-color:transparent}
+#game{position:fixed;inset:0;width:100%;height:100%;display:block;background:transparent}
+button{font-family:var(--ui);color:inherit}
+button:focus-visible,.pick:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
+img{display:block;max-width:100%}
+
+/* ---------- screens ---------- */
+.screen{position:fixed;inset:0;display:flex;align-items:safe center;justify-content:center;overflow-y:auto;overflow-x:hidden;
+  padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));
+  background:radial-gradient(70% 90% at 0% 30%,rgba(255,42,74,.20),transparent 60%),radial-gradient(70% 90% at 100% 30%,rgba(42,107,255,.22),transparent 60%),rgba(5,5,7,.62)}
+.screen.solid{background:radial-gradient(60% 80% at 0% 25%,rgba(255,42,74,.26),transparent 62%),radial-gradient(60% 80% at 100% 25%,rgba(42,107,255,.28),transparent 62%),
+  linear-gradient(rgba(5,5,7,.84),rgba(5,5,7,.93)),#050507 center/cover no-repeat var(--tb-art,none)}
+.screen.solid::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:repeating-linear-gradient(0deg,rgba(255,255,255,.022) 0 1px,transparent 1px 3px),linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px) 0 0/64px 64px,linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px) 0 0/64px 64px;
+  -webkit-mask:radial-gradient(90% 80% at 50% 45%,#000 30%,transparent 100%);mask:radial-gradient(90% 80% at 50% 45%,#000 30%,transparent 100%)}
+.screen > *{position:relative;z-index:1}
+.wrap{width:min(1180px,100%);display:flex;flex-direction:column;gap:18px}
+/* corner brackets like the site hero */
+.brk{position:fixed;width:26px;height:26px;border:0 solid rgba(255,255,255,.4);pointer-events:none;z-index:2}
+.brk.tl{left:14px;top:14px;border-left-width:1px;border-top-width:1px}.brk.tr{right:14px;top:14px;border-right-width:1px;border-top-width:1px}
+.brk.bl{left:14px;bottom:14px;border-left-width:1px;border-bottom-width:1px}.brk.br{right:14px;bottom:14px;border-right-width:1px;border-bottom-width:1px}
+
+.logo{font-family:var(--display);font-style:italic;font-weight:900;font-size:clamp(44px,10vw,112px);line-height:.88;margin:0;text-transform:uppercase;
+  background:var(--chrome);-webkit-background-clip:text;background-clip:text;color:transparent;text-align:center}
+.tag{font-size:clamp(15px,2.2vw,18px);color:var(--muted);text-align:center;margin:0 auto;max-width:48ch;text-wrap:balance}
+.h2{font-family:var(--display);font-style:italic;font-weight:900;font-size:clamp(32px,4.6vw,60px);line-height:.9;margin:0;letter-spacing:-.005em;text-wrap:balance;
+  background:var(--chrome);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 3px 0 rgba(0,0,0,.5))}
+.eyebrow{font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--red);display:flex;align-items:center;gap:10px}
+.eyebrow::before{content:"";width:22px;height:2px;background:var(--red);box-shadow:0 0 10px var(--red)}
+.row{display:flex;flex-wrap:wrap;gap:12px;justify-content:center}
+
+/* ---------- buttons ---------- */
+.btn{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:48px;padding:0 24px;font-weight:700;font-size:15px;letter-spacing:.01em;
+  border:0;border-radius:2px;cursor:pointer;color:#fff;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px var(--line2);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);transition:transform .15s,background .2s;white-space:nowrap;overflow:hidden;isolation:isolate}
+.btn:hover{background:rgba(255,255,255,.12)}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:var(--red);box-shadow:none;border-radius:0;clip-path:polygon(12px 0,100% 0,calc(100% - 12px) 100%,0 100%);padding:0 34px;min-height:54px;font-size:16px}
+.btn.primary:hover{background:#ff3d5b}
+.btn.primary::after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(105deg,transparent 35%,rgba(255,255,255,.45) 50%,transparent 65%);transform:translateX(-130%);transition:transform .7s}
+.btn.primary:hover::after{transform:translateX(130%)}
+.btn.small{font-size:13px;padding:0 16px;min-height:38px}
+.btn.primary.small{min-height:42px;padding:0 22px}
+.btn[disabled]{opacity:.4;pointer-events:none}
+.panel{background:var(--glass);box-shadow:inset 0 0 0 1px var(--line);padding:18px;backdrop-filter:blur(14px) saturate(1.3);-webkit-backdrop-filter:blur(14px) saturate(1.3);
+  clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% 100%,var(--cut) 100%,0 calc(100% - var(--cut)))}
+.note{font-size:13px;color:var(--muted);text-align:center;margin:0}
+.chip{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  padding:6px 10px;border-radius:0;box-shadow:inset 0 0 0 1px var(--line2);background:rgba(5,5,7,.55);color:var(--muted)}
+#load3d{min-width:200px;justify-content:center}
+#load3d i{display:inline-block;height:3px;width:110px;background:rgba(255,255,255,.1);overflow:hidden}
+#load3d i b{display:block;height:100%;width:0;background:var(--red);box-shadow:0 0 8px var(--red);transition:width .3s}
+.selbar{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:flex-end}
+
+/* ---------- character select (Tekken layout, built by 85_menu.js) ---------- */
+#scSelect{align-items:stretch;padding:0}
+.sel{position:relative;width:100%;min-height:100%;display:grid;grid-template-rows:auto 1fr auto;gap:10px;padding:max(16px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(14px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left));box-sizing:border-box}
+.sel-top{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
+.sel-mid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,min(760px,54vw)) minmax(0,1fr);gap:14px;align-items:center;min-height:0}
+.hero{position:relative;height:100%;min-height:340px;display:flex;flex-direction:column;justify-content:flex-end;--c:var(--red)}
+.hero.p2{--c:var(--cyan);align-items:flex-end;text-align:right}
+.hero .art{position:absolute;inset:0 -6% 60px;display:flex;align-items:flex-end;justify-content:center;pointer-events:none}
+.hero .art::before{content:"";position:absolute;left:10%;right:10%;bottom:4%;height:18%;background:radial-gradient(50% 50% at 50% 50%,color-mix(in srgb,var(--c) 55%,transparent),transparent 70%);filter:blur(10px)}
+.hero .art img{position:relative;max-height:100%;max-width:100%;object-fit:contain;filter:drop-shadow(0 0 22px color-mix(in srgb,var(--c) 45%,transparent)) drop-shadow(0 20px 30px rgba(0,0,0,.6));animation:heroIn .45s cubic-bezier(.2,1,.3,1) both}
+.hero.p2 .art img{transform:scaleX(-1)}
+body.show3d .hero .art img{opacity:0}
+@keyframes heroIn{from{opacity:0;translate:-30px 0;filter:blur(6px) brightness(2)}to{opacity:1;translate:0 0}}
+.hero.p2 .art img{animation-name:heroIn2}
+@keyframes heroIn2{from{opacity:0;translate:30px 0;filter:blur(6px) brightness(2)}to{opacity:1;translate:0 0}}
+/* the plate used to fade to .3 alpha at its far edge, so the blurb and the stat rows sat on bare
+   portrait art and could not be read (runs/menus2/03_select.jpg). It now never drops below .72, and
+   the art carries a scrim into it so the panel does not start on a hard line. */
+.hero .plate{position:relative;z-index:1;display:flex;flex-direction:column;gap:4px;padding:10px 16px 12px;background:linear-gradient(90deg,rgba(5,5,7,.93),rgba(5,5,7,.72));box-shadow:inset 3px 0 0 var(--c);max-width:100%}
+.hero.p2 .plate{background:linear-gradient(270deg,rgba(5,5,7,.93),rgba(5,5,7,.72));box-shadow:inset -3px 0 0 var(--c);align-items:flex-end}
+.hero .art::after{content:"";position:absolute;left:0;right:0;bottom:0;height:42%;background:linear-gradient(to bottom,transparent,rgba(5,5,7,.62));pointer-events:none}
+.hero .who{font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.1em;color:var(--c)}
+.hero .nm{font-family:var(--display);font-style:italic;font-weight:900;font-size:clamp(38px,5.2vw,78px);line-height:.86;text-transform:uppercase;background:var(--chrome);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 3px 0 rgba(0,0,0,.55))}
+.hero .ttl{font-family:var(--display);font-style:italic;font-weight:700;font-size:18px;letter-spacing:.04em;text-transform:uppercase;color:var(--c)}
+.hero .bl{font-size:13px;color:#c4cad8;max-width:34ch}
+.hero .stats{display:grid;grid-template-columns:auto 130px;gap:4px 10px;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:4px}
+.hero.p2 .stats{direction:rtl}
+.hero .stats .bar{height:4px;background:rgba(255,255,255,.08);align-self:center;overflow:hidden}
+.hero .stats .bar i{display:block;height:100%;background:var(--c);box-shadow:0 0 8px var(--c);transition:width .35s}
+.grid-wrap{display:flex;flex-direction:column;gap:8px;align-items:stretch;min-width:0}
+.roster{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:5px}
+.pick{--c:var(--line2);position:relative;aspect-ratio:1;padding:0;border:0;cursor:pointer;overflow:hidden;background:
+  linear-gradient(160deg,rgba(255,42,74,.18),transparent 45%),linear-gradient(340deg,rgba(42,107,255,.2),transparent 45%),linear-gradient(#141722,#0a0b11);
+  clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px));transition:transform .12s,filter .12s}
+.pick::after{content:"";position:absolute;inset:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);pointer-events:none}
+.pick .face{position:absolute;inset:0;background-repeat:no-repeat;background-size:150% auto;background-position:50% 2%;transition:background-size .2s}
+.pick .nm{position:absolute;left:0;right:0;bottom:0;padding:10px 3px 3px;font-family:var(--display);font-style:italic;font-weight:800;font-size:12px;letter-spacing:.02em;text-transform:uppercase;text-align:center;
+  background:linear-gradient(transparent,rgba(5,5,7,.92) 55%);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pick:hover,.pick.cur{transform:translateY(-2px);filter:brightness(1.15)}
+.pick:hover .face,.pick.cur .face{background-size:165% auto}
+.pick.cur::after{box-shadow:inset 0 0 0 2px #fff,0 0 18px rgba(255,255,255,.5)}
+.pick .tags{position:absolute;top:2px;left:2px;display:flex;gap:2px;z-index:1}
+.pick .tags b{font-family:var(--mono);font-size:9px;font-weight:700;padding:1px 3px;color:#050507;background:var(--c)}
+.pick.picked::after{box-shadow:inset 0 0 0 2px var(--c)}
+.pick .st,.pick .stats,.pick canvas{display:none}
+.slots{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.slot{--c:#fff;position:relative;display:grid;grid-template-columns:44px 1fr;grid-template-rows:auto auto;column-gap:10px;align-items:center;min-height:62px;padding:7px 10px 7px 8px;cursor:pointer;
+  background:linear-gradient(90deg,color-mix(in srgb,var(--c) 18%,rgba(12,13,20,.9)),rgba(12,13,20,.75));box-shadow:inset 0 0 0 1px var(--line);
+  clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px));transition:filter .15s}
+.slot::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--c);box-shadow:0 0 10px var(--c)}
+.slot.active{box-shadow:inset 0 0 0 1px var(--c),0 0 0 0 transparent;filter:brightness(1.18)}
+/* The SELECTING flag is absolutely positioned, so nothing reserved room for it and the "KEYS: WASD"
+   button ran straight underneath it -- both were clipped (runs/p2s2/03_select.jpg, 1280x577).
+   The active slot now keeps a gutter on its top row wide enough for the label. */
+.slot.active::after{content:"SELECTING";position:absolute;right:8px;bottom:7px;font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--c);pointer-events:none}
+.slot.active .nm{padding-right:62px}
+.slot .face{grid-row:1/span 2;width:44px;height:44px;background:#0a0b11 no-repeat 50% 6%/180% auto;box-shadow:inset 0 0 0 1px var(--line2)}
+.slot canvas{display:none}
+.slot .who{display:flex;align-items:center;gap:8px;min-width:0}
+.slot .pn{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--c)}
+.slot .nm{font-family:var(--display);font-style:italic;font-weight:800;font-size:19px;line-height:1;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.slot .type{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;padding:3px 7px;border:0;background:rgba(255,255,255,.08);box-shadow:inset 0 0 0 1px var(--line2);cursor:pointer;color:var(--text)}
+.slot .type:hover{background:rgba(255,255,255,.16)}
+.slot.empty{display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--dim);text-transform:uppercase}
+.slot.empty::before{background:var(--dim);box-shadow:none}
+.sel-foot{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center}
+@media (max-width:900px){
+  .sel-mid{grid-template-columns:1fr 1fr;grid-template-rows:auto auto}
+  .grid-wrap{grid-column:1 / -1;grid-row:2}
+  .hero{min-height:200px;height:30vh}
+  .hero .nm{font-size:clamp(28px,8vw,46px)}
+  .hero .bl,.hero .stats{display:none}
+  .roster{grid-template-columns:repeat(auto-fill,minmax(52px,1fr))}
+  .slots{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .sel-foot{grid-template-columns:1fr}
+  .sel-foot .btn.primary{width:100%}
+  /* 9/22 night: the middle row could shrink below its content (min-height:0), so on a phone the roster ran
+     UNDER the slot cards and the Next button and ~8 fighters were hidden. Rows size to content here and the
+     footer rides the bottom of the scroll on a solid backing. */
+  .sel{grid-template-rows:auto auto auto}
+  .sel-mid{min-height:auto}
+  .sel-foot{position:sticky;bottom:0;z-index:5;margin:0 -18px;padding:10px 18px max(12px,env(safe-area-inset-bottom));background:linear-gradient(0deg,rgba(5,5,7,.98) 70%,rgba(5,5,7,0))}
+  .slot.empty{display:none}                 /* "+ Add fighter" at the top does the same; keeps the sticky footer short */
+  .slot{min-height:50px;padding:5px 8px 5px 6px} .slot .face{width:38px;height:38px}
+  .slot.active::after{display:none}       /* the glow already says which slot is picking; the label sat on the control chip */
+}
+
+/* 9/22 night, phones held sideways (short landscape, <= 500 px tall): the two 200 px hero panels pushed the roster below
+   the fold and the 148 px sticky footer covered the rest, so on first view there were NO fighters on screen (844x390:
+   roster at y 341, footer from y 242). The slot cards already name and show both picks: the big art goes, the roster
+   comes first, the header and footer fold into one row each. */
+@media (max-height:640px) and (orientation:landscape){
+  .sel{gap:6px;padding-top:max(8px,env(safe-area-inset-top));padding-bottom:0}
+  .sel-top{align-items:center;flex-wrap:nowrap}
+  .sel-top .eyebrow{display:none}
+  .sel-top .h2{font-size:26px}
+  .sel-mid{grid-template-columns:1fr;grid-template-rows:auto}
+  .hero{display:none}
+  .grid-wrap{grid-column:1;grid-row:1}
+  .roster{grid-template-columns:repeat(auto-fill,minmax(48px,1fr))}
+  .sel-foot{grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;padding:6px 64px max(8px,env(safe-area-inset-bottom)) 18px}   /* right: clear of the sound chip */
+  .sel-foot .btn.primary{width:auto;white-space:nowrap}
+  .slot{min-height:42px} .slot .face{width:32px;height:32px}
+}
+
+/* ---------- wager + stage ---------- *//* ---------- wager + stage ---------- */
+.wagers{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}
+.wcard{--c:#fff;position:relative;background:linear-gradient(90deg,color-mix(in srgb,var(--c) 14%,rgba(12,13,20,.88)),rgba(12,13,20,.72));box-shadow:inset 0 0 0 1px var(--line);padding:14px;display:flex;flex-direction:column;gap:10px;
+  clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,14px 100%,0 calc(100% - 14px))}
+.wcard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--c);box-shadow:0 0 10px var(--c)}
+.wcard .top{display:flex;align-items:center;gap:12px}
+.wcard canvas{width:52px;height:52px;background:#0a0b11}
+.wcard .pn{font-family:var(--display);font-style:italic;font-weight:800;font-size:22px;line-height:1;text-transform:uppercase;color:var(--text)}
+.wcard .pn::first-letter{color:var(--c)}
+.bal{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--muted);font-size:11px;letter-spacing:.04em}
+.stakes{display:flex;flex-wrap:wrap;gap:6px}
+.stake{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:700;font-size:13px;min-height:38px;padding:0 12px;border:0;cursor:pointer;min-width:58px;color:var(--text);
+  background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px var(--line2);clip-path:polygon(7px 0,100% 0,calc(100% - 7px) 100%,0 100%);transition:background .15s}
+.stake:hover{background:rgba(255,255,255,.14)}
+.stake.on{background:var(--red);box-shadow:none;color:#fff}
+.stake[disabled]{opacity:.35;pointer-events:none}
+.pot{display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center}
+.pot .v{font-family:var(--display);font-style:italic;font-weight:900;font-size:clamp(40px,6vw,68px);line-height:.9;color:var(--gold);text-shadow:0 0 30px rgba(255,200,61,.45);font-variant-numeric:tabular-nums}
+.stages{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.stagec{position:relative;border:0;overflow:hidden;cursor:pointer;background:#0a0b11;text-align:left;padding:0;color:var(--text);
+  clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px));transition:transform .15s,filter .15s}
+.stagec::after{content:"";position:absolute;inset:0;box-shadow:inset 0 0 0 1px var(--line2);pointer-events:none}
+.stagec:hover{transform:translateY(-2px);filter:brightness(1.12)}
+.stagec.on::after{box-shadow:inset 0 0 0 2px var(--red),inset 0 0 40px rgba(255,42,74,.35)}
+.stagec canvas{width:100%;aspect-ratio:16/8;display:block}
+.stagec div{position:absolute;left:0;right:0;bottom:0;padding:22px 12px 9px;font-family:var(--display);font-style:italic;font-weight:900;font-size:22px;line-height:1;text-transform:uppercase;
+  background:linear-gradient(transparent,rgba(5,5,7,.94) 55%)}
+.stagec small{display:block;font-family:var(--ui);font-style:normal;font-weight:500;font-size:11px;color:var(--muted);text-transform:none;margin-top:3px;letter-spacing:0}
+.stagec.on div::before{content:"SELECTED";position:absolute;right:12px;bottom:10px;font-family:var(--mono);font-style:normal;font-size:9px;letter-spacing:.1em;color:var(--red)}
+
+/* phone held sideways: stakes + stage (after the base rules above, which it overrides). The stage list started below
+   the fold and the Brawl bar covered the practice note. */
+@media (max-height:640px) and (orientation:landscape){
+  #scWager .wrap{gap:8px}
+  #scWager .eyebrow{display:none} #scWager .h2{font-size:26px}
+  .wcard{padding:8px 10px;gap:6px} .wcard canvas{width:38px;height:38px} .wcard .pn{font-size:18px}
+  .stake{min-height:30px;font-size:12px;min-width:46px;padding:0 9px}
+  .pot{padding:6px 10px;flex-direction:row;justify-content:center;gap:14px} .pot .v{font-size:30px} .pot .note{display:none}
+  .stages{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+  .stagec div{font-size:16px;padding:14px 8px 6px} .stagec small{display:none}
+}
+
+/* ---------- results ---------- */
+.winner{display:flex;flex-direction:column;align-items:center;gap:4px}
+.winner canvas{width:170px;height:170px}
+.winner .big{font-family:var(--display);font-style:italic;font-weight:900;font-size:clamp(40px,7vw,86px);line-height:.88;text-align:center;text-transform:uppercase}
+.payout{font-family:var(--display);font-style:italic;font-weight:800;font-size:30px;color:var(--gold);text-shadow:0 0 24px rgba(255,200,61,.4)}
+table.res{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:14px}
+table.res th{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);font-weight:700}
+table.res th,table.res td{padding:9px 8px;border-bottom:1px solid var(--line);text-align:right}
+table.res td:first-child{font-family:var(--display);font-style:italic;font-weight:800;font-size:18px;text-transform:uppercase}
+table.res th:first-child,table.res td:first-child{text-align:left}
+.tablewrap{overflow-x:auto}
+
+/* ---------- help ---------- */
+.keys{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+.keys h3{margin:0 0 10px;font-family:var(--display);font-style:italic;font-weight:900;font-size:24px;line-height:1}
+.keys dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0;font-size:14px}
+.keys dt{font-family:var(--mono);font-weight:700;font-size:12px;color:var(--red);align-self:center}
+.keys dd{margin:0;color:var(--muted)}
+
+/* ---------- in-match ---------- */
+#hudTop{position:fixed;left:50%;top:max(10px,env(safe-area-inset-top));transform:translateX(-50%);display:flex;gap:8px;align-items:center;pointer-events:none}
+/* the top-centre utility row: [pause] [sound] [?]. --util-y is published by the HUD (71_hud.js) so
+   these three always sit just under the clock plate and never over a fighter. */
+#pauseBtn{position:fixed;left:calc(50% - 44px);transform:translateX(-50%);top:var(--util-y,calc(max(12px,env(safe-area-inset-top)) + 64px));z-index:5;width:40px;height:30px;border:0;background:rgba(5,5,7,.6);box-shadow:inset 0 0 0 1px var(--line2);
+  font-family:var(--mono);font-weight:700;font-size:14px;cursor:pointer;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px))}
+#touch{position:fixed;inset:0;pointer-events:none;z-index:4}
+#stick{position:absolute;left:max(20px,env(safe-area-inset-left));bottom:max(20px,env(safe-area-inset-bottom));width:150px;height:150px;border-radius:50%;
+  border:1px solid rgba(255,255,255,.22);background:radial-gradient(rgba(255,255,255,.07),rgba(255,255,255,.02));pointer-events:auto;touch-action:none}
+#knob{position:absolute;left:50%;top:50%;width:62px;height:62px;margin:-31px 0 0 -31px;border-radius:50%;background:var(--irid);opacity:.9;box-shadow:0 0 22px rgba(255,42,74,.55)}
+#tbtns{position:absolute;right:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));width:210px;height:190px;pointer-events:none}
+.tb{position:absolute;width:70px;height:70px;border-radius:50%;border:1px solid rgba(255,255,255,.3);background:rgba(10,11,16,.55);
+  font-family:var(--display);font-style:italic;font-weight:900;font-size:17px;pointer-events:auto;touch-action:none;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.tb.on{background:rgba(255,255,255,.35)}
+.tb[data-k=attack]{right:0;bottom:40px;border-color:var(--red);color:var(--red)}
+.tb[data-k=special]{right:78px;bottom:0;border-color:var(--cyan);color:var(--cyan)}
+.tb[data-k=jump]{right:78px;bottom:96px;border-color:var(--lime);color:var(--lime)}
+.tb[data-k=shield]{right:150px;bottom:40px;width:58px;height:58px;font-size:13px;border-color:var(--violet);color:#c9b6ff}
+.tb[data-k=smash]{right:4px;bottom:122px;width:58px;height:58px;font-size:12px;border-color:var(--gold);color:var(--gold)}
+#rotate{position:fixed;inset:auto 16px max(16px,env(safe-area-inset-bottom)) 16px;text-align:center;font-size:13px;color:var(--muted);pointer-events:none}
+@media (orientation:landscape){#rotate{display:none}}
+
+/* ---------- bet arena ---------- */
+.arena .wrap{gap:14px}
+.abar{display:flex;flex-wrap:wrap;gap:10px 16px;justify-content:space-between;align-items:flex-end}
+.bals{display:flex;flex-wrap:wrap;gap:6px}
+.bal-chip{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;font-weight:700;padding:7px 10px;background:rgba(5,5,7,.6);box-shadow:inset 0 0 0 1px var(--line2)}
+.bal-chip b{color:var(--muted);font-weight:500;margin-left:5px}
+.card-row{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:stretch}
+.side{position:relative;background:linear-gradient(180deg,color-mix(in srgb,var(--c) 16%,rgba(12,13,20,.88)),rgba(12,13,20,.82));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--c) 45%,transparent);padding:14px;display:flex;flex-direction:column;gap:8px;min-width:0;
+  clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px))}
+.side.mine{box-shadow:inset 0 0 0 2px var(--c),inset 0 0 40px color-mix(in srgb,var(--c) 30%,transparent)}
+.side .hd{display:flex;gap:12px;align-items:center;min-width:0}
+.side canvas{width:84px;height:84px;flex:none;background:#0a0b11;box-shadow:0 0 0 2px var(--c),0 0 18px color-mix(in srgb,var(--c) 50%,transparent);clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px))}
+.side .nm{font-family:var(--display);font-style:italic;font-weight:900;font-size:clamp(26px,3.4vw,40px);line-height:.9;text-transform:uppercase;color:var(--text)}
+.side .ttl{font-family:var(--display);font-style:italic;font-weight:700;font-size:15px;text-transform:uppercase;color:var(--c)}
+.side .form{font-family:var(--mono);font-size:10px;letter-spacing:.04em;color:var(--muted);font-variant-numeric:tabular-nums}
+.side .pool{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-variant-numeric:tabular-nums}
+.side .pool .v{font-family:var(--display);font-style:italic;font-weight:800;font-size:clamp(20px,2.6vw,26px)}
+.side .mult{font-family:var(--display);font-style:italic;font-weight:900;font-size:clamp(26px,3.4vw,38px);color:var(--gold)}
+.side .share{height:4px;background:rgba(255,255,255,.08);overflow:hidden}
+.side .share i{display:block;height:100%;background:var(--c);box-shadow:0 0 8px var(--c);transition:width .3s}
+.side .betbtn{border:0;padding:0 12px;min-height:52px;font-weight:700;font-size:16px;cursor:pointer;color:#050507;background:var(--c);clip-path:polygon(10px 0,100% 0,calc(100% - 10px) 100%,0 100%)}
+.side .betbtn:hover{filter:brightness(1.1)}
+.side .betbtn[disabled]{opacity:.35;pointer-events:none}
+.side .yours{font-size:13px;min-height:1.3em;font-variant-numeric:tabular-nums;color:var(--text)}
+.vs{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-width:120px;text-align:center}
+.vs .clock{font-family:var(--display);font-style:italic;font-weight:900;font-size:clamp(44px,6vw,68px);font-variant-numeric:tabular-nums;line-height:.9}
+.vs .clock.hot{color:var(--red);text-shadow:0 0 24px rgba(255,42,74,.6)}
+.vs .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.vs .vsx{font-family:var(--display);font-style:italic;font-weight:900;font-size:44px;line-height:1;background:var(--chrome);-webkit-background-clip:text;background-clip:text;color:transparent}
+.slip{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;justify-content:center}
+.seg{display:inline-flex;box-shadow:inset 0 0 0 1px var(--line2)}
+.seg button{border:0;background:transparent;padding:0 18px;font-family:var(--mono);font-weight:700;font-size:13px;cursor:pointer;min-height:42px}
+.seg button.on{background:var(--red);color:#fff}
+.hist{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;align-items:center}
+.hist .h{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.06em;padding:4px 8px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--c) 60%,transparent);color:var(--c);background:rgba(5,5,7,.5)}
+.fair{font-size:12px;color:var(--muted);text-align:center;margin:0;text-wrap:balance}
+.fair code{color:var(--text);word-break:break-all;font-family:var(--mono)}
+#aLive{position:fixed;left:50%;top:calc(max(10px,env(safe-area-inset-top)) + 62px);transform:translateX(-50%);z-index:3;pointer-events:none;display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center;max-width:calc(100% - 24px)}
+#aLive .chip{background:rgba(5,5,7,.8);color:var(--text);font-variant-numeric:tabular-nums}
+#aLive .live{color:var(--red)}
+#aLive .live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--red);box-shadow:0 0 8px var(--red);animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.2}}
+#aLeaveLive{position:fixed;right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));z-index:5}
+.res-card{width:min(560px,100%);display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center}
+.res-card canvas{width:150px;height:150px;background:#0a0b11;box-shadow:0 0 0 2px var(--c,#fff),0 0 30px color-mix(in srgb,var(--c,#fff) 50%,transparent);clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px))}
+.res-card .big{font-family:var(--display);font-style:italic;font-weight:900;font-size:clamp(38px,6vw,64px);line-height:.9;text-transform:uppercase}
+.pl{font-family:var(--display);font-style:italic;font-weight:900;font-size:clamp(24px,3.6vw,34px);font-variant-numeric:tabular-nums}
+.pl.win{color:var(--lime)}.pl.lose{color:var(--red)}.pl.even{color:var(--muted)}
+@media (max-width:640px){
+  .card-row{grid-template-columns:1fr 1fr}
+  .vs{grid-column:1 / -1;grid-row:1;flex-direction:row;gap:12px;min-width:0}
+  .side{padding:10px;gap:6px}
+  .side .hd{flex-direction:column;align-items:flex-start;gap:6px}
+  .side canvas{width:52px;height:52px}
+  .side .ttl{display:none}
+  .side .pool{flex-direction:column;align-items:flex-start;gap:0}
+  .side .pool .v{font-size:16px}
+  .side .betbtn{font-size:14px}
+  .abar{align-items:center}
+}
+@media (prefers-reduced-motion:reduce){.btn,.pick,.stagec{transition:none}#aLive .live::before{animation:none}.hero .art img{animation:none}}
+</style>
+
+<canvas id="game" aria-label="Brawl Street arena"></canvas>
+
+<section class="screen" id="scTitle">
+  <div class="wrap" style="align-items:center">
+    <div class="row"><span class="chip" style="color:var(--gold)">Practice ETH mode</span><span class="chip" id="load3d">Loading 3D fighters <i><b id="load3dBar"></b></i></span></div>
+    <h1 class="logo">Brawl Street</h1>
+    <p class="tag">The meme coin platform fighter.</p>
+    <div class="row">
+      <button class="btn primary" id="bArena">Bet on the fights</button>
+      <button class="btn" id="bCpu">Fight the CPU</button>
+      <button class="btn" id="bVs">2 players, one keyboard</button>
+      <button class="btn" id="bHelp">Controls</button>
+    </div>
+    <p class="note" id="walletLine"></p>
+  </div>
+</section>
+
+<section class="screen solid" id="scSelect" hidden>
+  <div class="sel">
+    <header class="sel-top">
+      <div><div class="eyebrow">Step 01 / 03</div><h2 class="h2">Choose your fighter</h2></div>
+      <div class="row"><button class="btn small" id="bAddSlot">+ Add fighter</button><button class="btn small" id="bSelBack">Back</button></div>
+    </header>
+    <div class="sel-mid">
+      <div class="hero p1" id="heroP1"></div>
+      <div class="grid-wrap"><div class="roster" id="roster"></div></div>
+      <div class="hero p2" id="heroP2"></div>
+    </div>
+    <footer class="sel-foot">
+      <div class="slots" id="slots"></div>
+      <button class="btn primary" id="bToWager">Next: stakes &amp; stage ▶</button>
+    </footer>
+  </div>
+</section>
+
+<section class="screen solid" id="scWager" hidden>
+  <div class="wrap">
+    <div class="selbar">
+      <div><div class="eyebrow">Step 02 / 03</div><h2 class="h2">Stake your ETH</h2></div>
+      <button class="btn small" id="bWagBack">Back</button>
+    </div>
+    <div class="wagers" id="wagers"></div>
+    <div class="panel pot"><span class="eyebrow">Winner takes the pot</span><span class="v" id="potV">0.000 ETH</span>
+      <p class="note">Practice ETH. Nothing leaves your wallet. Real stakes run through online play.</p></div>
+    <div class="selbar"><div><div class="eyebrow">Step 03 / 03</div><h2 class="h2">Pick the stage</h2></div></div>
+    <div class="stages" id="stages"></div>
+    <div class="row" style="align-items:center">
+      <span class="eyebrow">Lives</span>
+      <div class="stakes" id="stockPick"></div>
+      <span class="eyebrow">Items</span>
+      <div class="stakes" id="itemPick"></div>
+    </div>
+    <div class="row"><button class="btn primary" id="bFight">Brawl ▶</button></div>
+  </div>
+</section>
+
+<section class="screen solid" id="scResults" hidden>
+  <div class="wrap" style="align-items:center">
+    <div class="winner"><canvas id="winCv" width="360" height="360"></canvas><div class="big" id="winName"></div><div class="payout" id="winPay"></div></div>
+    <div class="panel tablewrap" style="width:min(680px,100%)"><table class="res" id="resTable"></table></div>
+    <div class="row"><button class="btn primary" id="bRematch">Rematch</button><button class="btn" id="bReselect">Change fighters</button><button class="btn" id="bResTitle">Main menu</button></div>
+  </div>
+</section>
+
+<section class="screen solid" id="scHelp" hidden>
+  <div class="wrap">
+    <div class="selbar"><div><div class="eyebrow">Training</div><h2 class="h2">How to play</h2></div><button class="btn small" id="bHelpBack">Back</button></div>
+    <div class="keys">
+      <div class="panel"><h3>Player 1 · keyboard</h3><dl>
+        <dt>A D</dt><dd>Move</dd><dt>W / Space</dt><dd>Jump (twice in the air)</dd><dt>S</dt><dd>Crouch, fast fall, drop through</dd>
+        <dt>F</dt><dd>Attack</dd><dt>T</dt><dd>Smash attack (hold to charge)</dd><dt>G</dt><dd>Special</dd><dt>H</dt><dd>Shield, dodge, air dodge</dd>
+        <dt>E</dt><dd>Grab — the plain throw</dd><dt>R</dt><dd>Throw — your fighter's command throw</dd>
+        <dt>E + R</dt><dd>The command throw as well</dd><dt>Q</dt><dd>Drop the item you are holding</dd></dl></div>
+      <div class="panel"><h3>Player 2 · keyboard</h3><dl>
+        <dt>Arrows</dt><dd>Move, jump, crouch</dd><dt>K</dt><dd>Attack</dd><dt>I</dt><dd>Smash attack</dd><dt>L</dt><dd>Special</dd><dt>;</dt><dd>Shield</dd>
+        <dt>O</dt><dd>Grab</dd><dt>P</dt><dd>Throw (command throw)</dd><dt>U</dt><dd>Drop the item</dd>
+        <dt>Numpad</dt><dd>1 attack, 2 special, 3 shield, 5 smash, 4 grab, 6 throw, 0 drop</dd></dl></div>
+      <div class="panel"><h3>Throws · the Tekken part</h3><dl>
+        <dt>E · Grab</dt><dd>Everyone's plain throw. Catch them, then a direction picks front, back, up or down</dd>
+        <dt>R · Throw</dt><dd>Your fighter's own command throw: a suplex, a power bomb, a coin flip, a tail spin — one each, 53 of them</dd>
+        <dt>R from behind</dt><dd><b>BACK THROW.</b> Get behind them and R fires a completely different ultra — 1.75× the damage, and there is no escape from it. One per fighter</dd>
+        <dt>Startup</dt><dd>4 frames of wind-up, then the grab is live for 8 frames. Whiff it and you are wide open</dd>
+        <dt>Break out</dt><dd>Caught from the front? You get 20 frames. The button to press is printed over your head: E, R or E+R. The wrong one locks you out</dd>
+        <dt>Counter-hit</dt><dd>A throw that catches you mid-move only gives 14 frames to break</dd>
+        <dt>Duck</dt><dd>Hold Down and no throw can touch you. Throw beats block, duck beats throw, hits beat duck</dd>
+        <dt>Clash</dt><dd>Two command throws on the same frame bounce off each other</dd></dl></div>
+      <div class="panel"><h3>How fights work</h3><dl>
+        <dt>Down</dt><dd>Duck. Tap it on a soft platform to drop through, in the air to fall fast</dd>
+        <dt>Jump</dt><dd>Tap for a hop, hold for height. Everyone has two air jumps</dd>
+        <dt>Direction</dt><dd>Changes every attack and special (up, side, down, none)</dd>
+        <dt>Down + Attack</dt><dd>In the air: a down kick that spikes. Down-forward or down-back: a diagonal kick</dd>
+        <dt>Tap + hit</dt><dd>Direction and Attack together fire a smash</dd>
+        <dt>Shield on the hit</dt><dd>Parry: no pushback and you move first</dd>
+        <dt>Shield when you land</dt><dd>Tech: roll out of the knockdown instead of lying there</dd>
+        <dt>Shield + Attack</dt><dd>Grab, then a direction to throw. Holding an item, it throws the item (E does both too)</dd>
+        <dt>Shield + side</dt><dd>Roll past them</dd>
+        <dt>Attack + Special</dt><dd>Still works as the command throw, the same as R</dd>
+        <dt>Shield + Special</dt><dd>Half pump: burst out of a combo. Full pump: Pump Mode</dd>
+        <dt>Ledge</dt><dd>Fall near the edge to hang on. Jump or Up climbs</dd>
+        <dt>Items</dt><dd>Attack picks one up. Attack again uses it. <b>Q drops it</b> (one button), E or Shield + Attack throws it</dd>
+        <dt>Guns</dt><dd>Hold Up or Down while you fire to aim: a direction as well makes it a 45° diagonal, Up or Down alone is steep</dd>
+        <dt>Shield + Up</dt><dd>Taunt — every fighter has their own</dd>
+        <dt>Moon Ball</dt><dd>Break it to charge your Final Smash, then press Special</dd>
+        <dt>Pad</dt><dd>A attack, B special, X/Y jump, <b>LB grab, RB throw</b>, triggers shield, right stick smash, L3 drops the item</dd></dl></div>
+      <div class="panel"><h3>Weapons and items</h3><dl>
+        <dt>Bazooka</dt><dd>Rocket that explodes on contact, you too if you're close. Up/down tilts the aim. 3 shots</dd>
+        <dt>Shotgun</dt><dd>Five-pellet spread, strong up close. 4 shots</dd>
+        <dt>Machine gun</dt><dd>Fast bursts of bullets. 3 bursts</dd>
+        <dt>Sniper</dt><dd>Aim with the laser sight, one shot across the stage that goes through fighters. 2 shots</dd>
+        <dt>Banana bomb</dt><dd>Bounces, blows up, then five mini bananas scatter and blow up too</dd>
+        <dt>Holy bomb</dt><dd>Rare. Hangs in the air for a hallelujah, then a huge blast</dd>
+        <dt>TNT</dt><dd>Drop it, 45-second countdown, anyone can knock it around. Blows a hole in the stage</dd>
+        <dt>Grapple rope</dt><dd>Fire it up and forward, swing, up/down to reel, jump to let go. 4 uses</dd>
+        <dt>Jetpack</dt><dd>Hold jump in the air to fly, about 6 seconds of fuel</dd>
+        <dt>Supply crate</dt><dd>Parachutes in. Hit it open for a random item, or throw it</dd>
+        <dt>Bubble shield</dt><dd>Rare. Soaks the next 3 hits or 10 seconds, then pops</dd>
+        <dt>Pump pill</dt><dd>Power-up: stronger and faster for a while</dd></dl></div>
+    </div>
+  </div>
+</section>
+
+<section class="screen arena solid" id="scArena" hidden>
+  <div class="wrap">
+    <div class="abar">
+      <div><div class="eyebrow">Bet arena · <span id="aMode">Practice</span></div><h2 class="h2" id="aRound">Round 1</h2></div>
+      <div class="row" style="align-items:center"><div class="bals" id="aBals"></div><button class="btn small" id="aBack">Leave</button></div>
+    </div>
+    <div class="card-row">
+      <div class="side" id="aSide1"></div>
+      <div class="vs"><span class="lbl" id="aClockLbl">Bets close in</span><span class="clock" id="aClock">0:30</span><span class="vsx">VS</span><span class="lbl" id="aStage"></span></div>
+      <div class="side" id="aSide2"></div>
+    </div>
+    <div class="panel slip">
+      <div class="seg" id="aCur" role="group" aria-label="Currency"></div>
+      <div class="stakes" id="aAmts"></div>
+    </div>
+    <div class="hist" id="aHist"></div>
+    <p class="fair" id="aFair"></p>
+  </div>
+</section>
+
+<section class="screen" id="scArenaRes" hidden>
+  <div class="panel res-card">
+    <span class="eyebrow" id="rRound"></span>
+    <canvas id="rCv" width="300" height="300"></canvas>
+    <div class="big" id="rName"></div>
+    <div id="rPl"></div>
+    <p class="note" id="rNext"></p>
+    <button class="btn small" id="rLeave">Leave arena</button>
+  </div>
+</section>
+
+<div id="aLive" hidden></div>
+<button class="btn small" id="aLeaveLive" hidden>Leave</button>
+
+<button id="pauseBtn" hidden aria-label="Pause">II</button>
+<div id="touch" hidden>
+  <div id="stick"><div id="knob"></div></div>
+  <div id="tbtns">
+    <button class="tb" data-k="attack">HIT</button>
+    <button class="tb" data-k="special">SPEC</button>
+    <button class="tb" data-k="jump">JUMP</button>
+    <button class="tb" data-k="shield">GUARD</button>
+    <button class="tb" data-k="smash">SMASH</button>
+  </div>
+  <div id="rotate">Turn your phone sideways for the full arena</div>
+</div>

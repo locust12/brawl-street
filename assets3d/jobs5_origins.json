@@ -1,0 +1,104 @@
+{
+  "note": "Roster-originality swap (dev/NOTES-roster.md). New art for the fighters that shipped as a close likeness of somebody else's character or of a real person. Everything here is a WHOLLY INVENTED creature or persona designed from the fighter's gameplay role outward; no prompt names, references or styles after any existing character or real person, and none should ever be edited to. Output goes to assets3d/<id>_v2_ref.png -> assets/<id>_v2*, never over the shipped files, so the swap stays reversible per fighter (ORIGINS.ART in src/2f_origins.js).",
+  "pipeline": {
+    "1_image": "generate_image, model gpt_image_2_5, aspect 2:3, 1 credit -> save assets3d/<id>_v2_ref.png",
+    "2_3d": "generate_3d / image_to_3d, rigged, pbr, 20k, 35 credits -> assets3d/<id>_v2_raw.glb",
+    "3_ship": "python3 assets3d/glb_quantize.py assets3d/<id>_v2_raw.glb assets/<id>_v2_glb.wasm assets/<id>_v2_tex.jpg 512",
+    "4_cutout": "python3 assets3d/cutout.py assets3d/<id>_v2_ref.png assets/<id>_v2_cut.webp",
+    "5_portrait": "sips -Z 900 assets3d/<id>_v2_ref.png --out assets/<id>_v2.jpg",
+    "6_manifest": "add the four files per fighter to publish/files.json + files_all.json (255 file / 64 MB caps)",
+    "budget": "shipped fighters: glb median 303 KB (max 698), tex median 188 KB (max 293). Keep the new ones in that band \u2014 texsize 512 is what gets them there.",
+    "gltfpack_note": "gltfpack is the STAGE/prop path, not this one. If it is ever used on a fighter, `-kv -vtf` are mandatory: without them the UVs are stripped and the fighter renders as a flat silhouette. The fighter path above uses glb_quantize.py, which writes uint16 UVs itself.",
+    "cost": "36 credits per fighter (1 + 35). 17 fighters = 612. Balance at audit time 3257.7.",
+    "built": "bash assets3d/make_v2.sh <id> <glb_url> runs steps 1-5. Job ids in assets3d/jobs5_ids.json."
+  },
+  "style_suffix": "Full body head to toe, symmetrical A-pose facing the camera, arms down and angled out away from the body, hands open, feet shoulder-width apart. Stylized 3D character render in the style of a collectible vinyl figure: large head, chunky short limbs, clean readable silhouette, slightly glossy PBR materials. Soft even studio lighting with a gentle rim light, plain light grey seamless studio background, no cast shadow on the background, no text, no logos, no watermark.",
+  "prompts": {
+    "giga": {
+      "new_name": "BEACON",
+      "prompt": "An original invented creature: a tall lean humanoid lighthouse-spirit with smooth matte graphite-grey skin. Instead of hair it has a swept-back crest of six tall narrow glass quills that glow white-hot from root to tip. A flat ring of pale cyan light floats level at its waist without touching the body. Cloth wraps on the forearms and the shins, barefoot, bare chest with a faint deep-teal panel across it. A calm, faintly amused face with pale glowing eyes."
+    },
+    "ronin": {
+      "new_name": "WICK",
+      "prompt": "An original invented creature: a tall, very slender heron-headed duelist wearing a smooth bone-white beak mask, with long thin limbs. A high stiff collar over a long ink-black coat cut like a tall rectangular block that splits into two narrow tails at the waist, with one thin red vertical seam down the front. It holds a slim straight sword made of pale glowing cyan light in a reverse grip, carried level at the hip. Slate-grey wraps on the hands."
+    },
+    "gwei": {
+      "new_name": "GASKET",
+      "prompt": "An original invented character: a stout barrel-chested mechanical badger tradesman. Its head is fully enclosed in a rounded riveted brass diving helmet with ONE large circular amber glass lens and no face visible. Heavy oxide-teal canvas coveralls with big patch pockets, a leather bandolier of brass washers across the chest, thick scuffed work boots. Its right hand is a chunky mechanical pipe-wrench manipulator; its left is a thick leather work glove."
+    },
+    "shroom": {
+      "new_name": "THISTLE",
+      "prompt": "An original invented creature: a small woodland seed-sprite. Its body is a plump dark violet seed pod, ridged like a poppy head, standing on two short stubby legs with tiny bare feet, and it has long thin twig-like arms. It has TWO large round friendly black eyes set wide apart on the pod, with small gold irises and a tiny stitched mouth below them - an ordinary face, NOT a visor and NOT a single screen. A cream-coloured oval belly patch. On top of its head it wears a wide crown of dozens of fine white filament plumes like a dandelion clock, fanning out in a full circle.",
+      "note": "REWRITTEN. The first version described one wide visor-eye across the pod and came back reading as a well-known game character. Two ordinary eyes and a stitched mouth fixed it."
+    },
+    "kaiju": {
+      "new_name": "VAULT",
+      "prompt": "An original invented monster: an enormous hunched armoured crustacean-saurian titan with slate-blue plated hide and a cream underbelly. Worn on its back like a hermit crab's shell is a huge riveted steel bank vault door, complete with a round spoked handwheel and a combination dial facing outward, the seams around it glowing hot orange. A blunt heavy jaw with a furnace glow inside the mouth, small eyes, thick clawed feet, a short thick tail. No crown and no spikes."
+    },
+    "ember": {
+      "new_name": "PYRE",
+      "prompt": "An original invented creature: a big broad-shouldered vulture-drake with ragged charcoal-grey plumage that glows ember-orange in the gaps between the feathers. A bald pale bone-white skull face with a heavy hooked beak and small orange eyes. Two broad tattered wings trailing thin smoke. At the base of its back, a fan of six short glowing ember-orange quills. A soot-black chest and heavy scaled talons."
+    },
+    "turbo": {
+      "new_name": "REDLINE",
+      "prompt": "An original invented robot: a lean greyhound-proportioned courier android with a matte carbon-black chassis and exposed piston calves. Its face is a completely smooth brushed-steel plate with one horizontal amber light bar across it \u2014 no eyes, no mouth, no helmet. A long torn deep-red cloth banner hangs from its left shoulder only and trails past the knee. Its right forearm is deliberately oversized and heavily armoured with glowing amber heat vents along it. Chunky armoured boots."
+    },
+    "fro": {
+      "new_name": "LIMIT",
+      "prompt": "An original invented character: a slender figure wrapped head to foot in pale ash-grey binding cloth like a mummified clockwork duelist. It has no face at all, only one narrow horizontal slot of cold white light where eyes would be. One arm is free and wrapped in dark charcoal cloth; the other is still bound to the body. It holds a single long straight sword in a black lacquered scabbard, out level at hip height, in one hand. Barefoot."
+    },
+    "ape": {
+      "new_name": "BAGGER",
+      "prompt": "An original invented creature: a big shaggy ground-sloth bear with matted dun-brown fur, a long blunt snout, a heavy brow, small sleepy half-closed eyes and long curved cream-coloured forearm claws. A cream chest patch. Slung across its body on a wide strap is a huge bulging canvas sack with a small cyan tag tied to it. Broad flat feet."
+    },
+    "sifu": {
+      "new_name": "COUNCIL",
+      "prompt": "An original invented construct: a lean martial-arts golem assembled from mismatched parts. A single lacquered black torso with five differently coloured jade and carved stone limb segments bolted onto it \u2014 one arm ending in a carved snake's head, the other in a broad tiger's paw, one leg ending in a crane's talon and the other in a flat bear pad. A smooth featureless jade-green oval mask with five small glowing gold dots arranged in a ring on it. A crimson sash at the waist."
+    },
+    "mochi": {
+      "new_name": "BLOAT",
+      "prompt": "An original invented creature: a plump round pufferfish character in pale mint-cream, with a soft round body, two tiny stubby fin arms and two small webbed coral-pink feet. Big flat black eyes and a small round mouth. A row of short soft dorsal spines runs along the top of its head instead of ears. Coral-pink fin tips and cheeks. A tiny wooden mallet is tucked into a small leather strap on its back."
+    },
+    "trump": {
+      "new_name": "BULLION",
+      "prompt": "An original invented golem: a squat, immensely heavy humanoid built entirely out of stacked mismatched gold ingots bound together with dark iron banding straps. Short thick legs, very large heavy forearms and fists. It has no face, only a horizontal slot of warm glowing light where eyes would be, and a small barred iron hatch set into its chest. Scuffed and dented gold surfaces."
+    },
+    "topg": {
+      "new_name": "SHILL",
+      "prompt": "An original invented character: a lean, wired anthropomorphic bull terrier with a narrow egg-shaped head, tiny eyes, a permanent toothy grin and short tan-brown fur. He wears an unzipped white-and-gold tracksuit jacket over a bare chest, matching tracksuit trousers and white trainers. A thin wire headset microphone curls around to his mouth. Several thin gold chains. A phone in one hand, held without looking at it."
+    },
+    "techno": {
+      "new_name": "BOOSTER",
+      "prompt": "An original invented robot: a bipedal service drone built out of a scrapped rocket first stage. A squat cylindrical soot-white body with a scorched black heat-shield plate across the chest, four short stubby grid-fins where shoulders would be, two thick landing-leg legs with visible shock struts and wide flat footpads, and a black bell-shaped rocket nozzle at the base of its back. Its head is a small gimballed sensor pod with one wide glowing amber band. No face."
+    },
+    "mystic": {
+      "new_name": "SETTLE",
+      "prompt": "An original invented character: a wiry athletic fighter in a plain dark hooded sleeveless singlet with the hood up, the face hidden behind a smooth bone-pale mask with no mouth and one single vertical seam down the middle. The arms, shoulders and torso are covered in invented geometric hexagon glyph markings glowing cold green. The hands are wrapped in black cloth tape up to the forearm. Bare feet, plain dark shorts."
+    },
+    "hoodie": {
+      "new_name": "MARGIN",
+      "prompt": "An original invented robot: a compact low-slung armoured construct held in a permanent wrestling crouch. A broad steel clamp-shaped torso over a dark under-suit, two heavy oversized gripping forearms with visible ratchet teeth, short thick powerful legs and wide flat feet. Its head is a narrow horizontal visor with a small glowing red numeric counter readout on it. Grey steel plates with red seams."
+    },
+    "chop": {
+      "new_name": "WHIP",
+      "prompt": "An original invented creature: a lean long-limbed anthropomorphic marten with sleek russet-brown fur and a cream throat and chest, and a long banded bushy tail held out for balance. It wears a cropped dark sleeveless wrap-top tied at the waist, loose dark trousers and cloth wraps on the ankles, barefoot. It holds a two-piece chain flail whose two handles are hexagonal metal blocks."
+    },
+    "bogdanoff": {
+      "new_name": "DEALER",
+      "prompt": "An original invented character: a very tall, very thin, immaculate croupier in a long black double-breasted coat with a stiff high collar and white gloves. Its head is a smooth featureless porcelain-white oval with one thin horizontal red glowing slot across it and no other features. It holds a fan of tall narrow rectangular cards in one gloved hand, red on one face and green on the other."
+    },
+    "gigachad": {
+      "new_name": "MARBLE",
+      "prompt": "An original invented statue character: a broad, heavy-set classical marble statue come to life, carved from veined white marble with visible chisel facets. It is fully clothed in carved stone: a sculpted knee-length marble tunic with deep folded drapery over the torso and thighs, a wide carved belt, and a marble cloak folded over one shoulder. One forearm and one shin are still rough-hewn, unfinished stone. A blank sculpted face with drilled hollow pupils and no irises, and a plain carved hairstyle. Set into the chest of the tunic is a cracked-open panel revealing a lattice of glowing gold repair seams inside the stone. Carved stone sandals.",
+      "note": "REWRITTEN. A statue in a loincloth gets the 3D job rejected as nsfw (same as `omen` in jobs3.json). Clothe it in carved stone - it is a better character anyway."
+    }
+  },
+  "no_art_needed": {
+    "tyrant": "art already original - title and SUPERNOVA -> BLACK SWAN only",
+    "omen": "art already original - title and SHADOW ORB -> DARK POOL only",
+    "spark": "art already original - title only",
+    "wisp": "art already original - title only",
+    "techno": "DECIDED 9/21: rename only, model kept. The 3D face is generic; the name ('Technoking' is his own job title) and the kit were the tell. -> BOOSTER / Burn Rate",
+    "hoodie": "DECIDED 9/21: rename only, model kept. Same shape of problem - 'Cage Coder' plus a hoodie, not the face. -> MARGIN / Forced Close"
+  }
+}

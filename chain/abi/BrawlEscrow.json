@@ -1,0 +1,831 @@
+[
+ {
+  "type": "constructor",
+  "inputs": [
+   {
+    "name": "owner_",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "operator_",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "treasury_",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "cutBps_",
+    "type": "uint16",
+    "internalType": "uint16"
+   }
+  ],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "MAX_CUT_BPS",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "MAX_PLAYERS",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "MAX_WINDOW",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint64",
+    "internalType": "uint64"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "MIN_WINDOW",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint64",
+    "internalType": "uint64"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "REPORT_TIMEOUT",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint64",
+    "internalType": "uint64"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "acceptOwnership",
+  "inputs": [],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "cancel",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "claim",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "claimable",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "who",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "cutBalance",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint256",
+    "internalType": "uint256"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "cutBps",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint16",
+    "internalType": "uint16"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "deposit",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "payable"
+ },
+ {
+  "type": "function",
+  "name": "depositState",
+  "inputs": [
+   {
+    "name": "",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "uint8",
+    "internalType": "uint8"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "getMatch",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "tuple",
+    "internalType": "struct BrawlEscrow.Match",
+    "components": [
+     {
+      "name": "stake",
+      "type": "uint128",
+      "internalType": "uint128"
+     },
+     {
+      "name": "depositDeadline",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "fundedAt",
+      "type": "uint64",
+      "internalType": "uint64"
+     },
+     {
+      "name": "status",
+      "type": "uint8",
+      "internalType": "enum BrawlEscrow.Status"
+     },
+     {
+      "name": "playerCount",
+      "type": "uint8",
+      "internalType": "uint8"
+     },
+     {
+      "name": "depositCount",
+      "type": "uint8",
+      "internalType": "uint8"
+     },
+     {
+      "name": "paid",
+      "type": "bool",
+      "internalType": "bool"
+     },
+     {
+      "name": "cutBps",
+      "type": "uint16",
+      "internalType": "uint16"
+     },
+     {
+      "name": "winner",
+      "type": "address",
+      "internalType": "address"
+     },
+     {
+      "name": "replayHash",
+      "type": "bytes32",
+      "internalType": "bytes32"
+     }
+    ]
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "open",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "players",
+    "type": "address[]",
+    "internalType": "address[]"
+   },
+   {
+    "name": "stake",
+    "type": "uint128",
+    "internalType": "uint128"
+   },
+   {
+    "name": "window",
+    "type": "uint64",
+    "internalType": "uint64"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "operator",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "owner",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "pendingOwner",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "playersOf",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address[]",
+    "internalType": "address[]"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "refund",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "report",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   },
+   {
+    "name": "winner",
+    "type": "address",
+    "internalType": "address"
+   },
+   {
+    "name": "replayHash",
+    "type": "bytes32",
+    "internalType": "bytes32"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setCut",
+  "inputs": [
+   {
+    "name": "bps",
+    "type": "uint16",
+    "internalType": "uint16"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setOperator",
+  "inputs": [
+   {
+    "name": "a",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "setTreasury",
+  "inputs": [
+   {
+    "name": "a",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "transferOwnership",
+  "inputs": [
+   {
+    "name": "a",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "function",
+  "name": "treasury",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "",
+    "type": "address",
+    "internalType": "address"
+   }
+  ],
+  "stateMutability": "view"
+ },
+ {
+  "type": "function",
+  "name": "withdrawCut",
+  "inputs": [],
+  "outputs": [],
+  "stateMutability": "nonpayable"
+ },
+ {
+  "type": "event",
+  "name": "Cancelled",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "bytes32",
+    "indexed": true,
+    "internalType": "bytes32"
+   },
+   {
+    "name": "by",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Claimed",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "bytes32",
+    "indexed": true,
+    "internalType": "bytes32"
+   },
+   {
+    "name": "winner",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "amount",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "cut",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "CutSet",
+  "inputs": [
+   {
+    "name": "cutBps",
+    "type": "uint16",
+    "indexed": false,
+    "internalType": "uint16"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Deposited",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "bytes32",
+    "indexed": true,
+    "internalType": "bytes32"
+   },
+   {
+    "name": "player",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "amount",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Funded",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "bytes32",
+    "indexed": true,
+    "internalType": "bytes32"
+   },
+   {
+    "name": "pot",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Opened",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "bytes32",
+    "indexed": true,
+    "internalType": "bytes32"
+   },
+   {
+    "name": "players",
+    "type": "address[]",
+    "indexed": false,
+    "internalType": "address[]"
+   },
+   {
+    "name": "stake",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "depositDeadline",
+    "type": "uint64",
+    "indexed": false,
+    "internalType": "uint64"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "OperatorSet",
+  "inputs": [
+   {
+    "name": "operator",
+    "type": "address",
+    "indexed": false,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "OwnershipTransferStarted",
+  "inputs": [
+   {
+    "name": "from",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "to",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "OwnershipTransferred",
+  "inputs": [
+   {
+    "name": "from",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "to",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Refunded",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "bytes32",
+    "indexed": true,
+    "internalType": "bytes32"
+   },
+   {
+    "name": "player",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "amount",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "Settled",
+  "inputs": [
+   {
+    "name": "id",
+    "type": "bytes32",
+    "indexed": true,
+    "internalType": "bytes32"
+   },
+   {
+    "name": "winner",
+    "type": "address",
+    "indexed": true,
+    "internalType": "address"
+   },
+   {
+    "name": "pot",
+    "type": "uint256",
+    "indexed": false,
+    "internalType": "uint256"
+   },
+   {
+    "name": "replayHash",
+    "type": "bytes32",
+    "indexed": false,
+    "internalType": "bytes32"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "event",
+  "name": "TreasurySet",
+  "inputs": [
+   {
+    "name": "treasury",
+    "type": "address",
+    "indexed": false,
+    "internalType": "address"
+   }
+  ],
+  "anonymous": false
+ },
+ {
+  "type": "error",
+  "name": "AlreadyPaid",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BadPlayers",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BadStake",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BadStatus",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "BadWindow",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "CutTooHigh",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "DepositClosed",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotAPlayer",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotInvited",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotOperator",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotOwner",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotPendingOwner",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NotWinner",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "NothingToRefund",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "Reentrancy",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "TooEarly",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "TransferFailed",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "WrongAmount",
+  "inputs": []
+ },
+ {
+  "type": "error",
+  "name": "ZeroAddress",
+  "inputs": []
+ }
+]

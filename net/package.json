@@ -1,0 +1,20 @@
+{
+  "name": "brawlstreet-net",
+  "private": true,
+  "type": "commonjs",
+  "description": "Brawlstreet online: lobby, rooms, lockstep input relay, server-side replay, practice wagers, escrow operator",
+  "main": "server.js",
+  "scripts": {
+    "engine": "node tools/build-engine.js",
+    "start": "node server.js",
+    "test": "node test/sim_clients.js"
+  },
+  "engines": { "node": ">=20" },
+  "comment": "Exact versions, not ranges: this process handles money, and a caret lets a future npm install pull code nobody reviewed. Bump deliberately, then re-run the test suite.",
+  "dependencies": {
+    "ws": "8.21.3"
+  },
+  "optionalDependencies": {
+    "viem": "2.56.8"
+  }
+}

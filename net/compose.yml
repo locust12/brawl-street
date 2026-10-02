@@ -1,0 +1,50 @@
+# Brawlstreet online on the lw box (/opt/brawlstreet). Caddy (container "caddy", same "sinbook"
+# network) serves https://brawlstreet.167-233-230-149.sslip.io and proxies it to this container.
+# Real-money mode stays OFF unless REAL_MONEY=1 and the chain settings are put in .env (see README.md).
+services:
+  brawlstreet:
+    build: .
+    image: brawlstreet:latest
+    container_name: brawlstreet
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PUBLIC_URL: https://brawlstreet.167-233-230-149.sslip.io
+      # Which box this is. The page measures the round trip to every region in REGIONS and plays on the
+      # closest one, so when a second box goes up (e.g. Singapore) set REGIONS to the same JSON list on
+      # BOTH boxes and nothing else changes:
+      #   REGIONS: '[{"id":"eu","label":"Germany","ws":"wss://brawlstreet.167-233-230-149.sslip.io/ws","http":"https://brawlstreet.167-233-230-149.sslip.io"},
+      #              {"id":"sg","label":"Singapore","ws":"wss://<sg-host>/ws","http":"https://<sg-host>"}]'
+      # With REGIONS unset the server advertises only itself (from PUBLIC_URL).
+      REGION: eu
+      REGION_LABEL: Germany
+    volumes:
+      - ./engine:/app/engine:ro
+      - ./public:/app/public:ro
+      - brawlstreet-data:/data
+    networks: [sinbook]
+    # No ports: are published on purpose. The only way in is Caddy on the sinbook network, which is
+    # what makes the X-Forwarded-For handling trustworthy. Do not add a ports: mapping.
+    #
+    # Containment: this box runs other projects, so a runaway or exploited game server must not be
+    # able to take the host with it.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: 1500m
+    memswap_limit: 1500m
+    pids_limit: 512
+    ulimits:
+      nofile: { soft: 4096, hard: 8192 }
+    logging:
+      driver: json-file
+      options: { max-size: "2m", max-file: "2" }
+volumes:
+  brawlstreet-data:
+networks:
+  sinbook:
+    external: true

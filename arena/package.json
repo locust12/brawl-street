@@ -1,0 +1,9 @@
+{
+  "name": "rektbrawl-arena",
+  "private": true,
+  "type": "commonjs",
+  "description": "Operator bot and replay tools for the Rekt Brawl bet arena",
+  "dependencies": {
+    "viem": "^2.56.8"
+  }
+}

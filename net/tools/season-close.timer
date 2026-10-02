@@ -1,0 +1,24 @@
+[Unit]
+Description=Daily check for an ended ranked season that has not been paid out
+Documentation=file:///srv/brawlstreet/docs/ECONOMY.md
+
+[Timer]
+# DAILY, not monthly. The job only acts on a month that has ENDED and has not been paid, and it is
+# idempotent, so running it every day costs nothing — and a host that was down on the 1st still
+# pays the season out on the 2nd. A monthly timer that misses its window loses a whole season's
+# prizes silently, and the first anyone hears about it is a player asking where their plate is.
+OnCalendar=*-*-* 00:10:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
+
+# install:
+#   sudo cp net/tools/season-close.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now season-close.timer
+#   systemctl list-timers season-close.timer
+# dry run first, always:
+#   docker exec brawlstreet node tools/season-close.js --auto --dry
+# who is on the board and who is not eligible yet:
+#   docker exec brawlstreet node tools/season-close.js --board

@@ -1,0 +1,25 @@
+[Unit]
+# Monthly season close for Rekt Fighter's ranked ladder. Pays the prizes, issues the peak-based
+# badges, archives the final standings under $DATA_DIR/seasons/<YYYY-MM>.json.
+# Design: docs/ECONOMY.md §7. Anti-farm gate: net/lib/economy.js `seasonEligible`.
+Description=Rekt Fighter — close and pay out any ended, unpaid ranked season
+Documentation=file:///srv/brawlstreet/docs/ECONOMY.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# --auto closes EVERY ended month that has not been paid, so a run that is missed on the 1st still
+# pays out on the 2nd. Closing is idempotent, which is what makes a daily timer the right shape.
+ExecStart=/usr/bin/docker exec brawlstreet node tools/season-close.js --auto
+# thresholds — see docs/ECONOMY.md §7. Tune without a redeploy; the values used are recorded in
+# every season's archive file, so a past payout is always explainable.
+# Environment=SEASON_MIN_GAMES=10
+# Environment=SEASON_MIN_OPPONENTS=5
+# Environment=SEASON_MAX_PAIR_SHARE=0.5
+# Environment=SEASON_MAX_BOT_SCORE=50
+StandardOutput=append:/var/log/brawl-season.log
+StandardError=append:/var/log/brawl-season.log
+
+[Install]
+WantedBy=multi-user.target

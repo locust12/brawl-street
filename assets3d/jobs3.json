@@ -1,0 +1,61 @@
+{
+ "images": {
+  "giga": "34cba781-6325-44d3-b799-318b5de2a6c5",
+  "ronin": "084a70a8-ff1c-4126-833f-e80d871bd51f",
+  "tyrant": "16ed40fb-b4ce-4e1e-bd62-29a477d6fa6b",
+  "gwei": "30028d0b-6328-446d-a31c-2ae5641198f2",
+  "shroom": "b9e3176b-d40c-4bc3-969c-dc1fd527b23e",
+  "kaiju": "95e03ca1-2f0f-4500-99ee-4a89b5b9f92c",
+  "mochi": "8138045c-176a-4117-843e-193330d211e4",
+  "omen": "d41deb30-e143-4124-8522-ce85dc8feae8",
+  "wisp": "3bfd2fc1-8816-421e-8f16-94929997cb41",
+  "spark": "34b35cc0-421a-4ec8-bd15-00f7000a6edf",
+  "turbo": "1785a910-e895-49db-997d-8b871ecd6e0b",
+  "chop": "b7b32a85-569d-4303-ae89-2a63f272cbe9",
+  "ginga": "949ed41c-7255-400c-b18b-474892ceb086",
+  "sifu": "72f92f25-47c5-43b5-922b-ac66a4f89a36",
+  "fro": "d3d08838-bed2-4c76-9cdb-6ad341dcf966",
+  "bling": "bc0abfbb-0826-4757-a89b-ba25ca049c69",
+  "techno": "95444b7f-c1ed-4c47-b017-ef7fb4837be7",
+  "hoodie": "44645dde-465c-4d4c-a5eb-c74b06fe8d5b",
+  "slam": "11b9a860-d992-436b-81c2-0eb893b4820c",
+  "mystic": "bb0fe9f4-84fd-4a2f-ba2e-fb63b49df163",
+  "ape": "5e24b385-e09a-4a89-bd6b-321922e228f2",
+  "ember": "174f791f-98e3-4822-b688-baee4fc65c45"
+ },
+ "chars": {
+  "giga": "145244d1-de8a-4f86-b8d5-c0be4f3091fd",
+  "ronin": "cce62ca0-c0bc-4cef-8197-6c56c5537ee1",
+  "tyrant": "40b11244-b868-4284-9ec9-07f08f0c65b9",
+  "shroom": "2be89859-6448-4220-b9f7-c416ea365063",
+  "mochi": "95e2e5d4-0a70-40d0-bf73-59a5cc6db3d7",
+  "omen": "2b7825d3-4257-4005-8f59-b3300627174d",
+  "wisp": "68fe08e2-8888-43cc-8d2d-81143dd27121",
+  "spark": "14f9a893-7974-4d34-9673-78735502d539",
+  "turbo": "0bc7e519-e29e-4910-a60f-a43309859e4e",
+  "chop": "901da0a2-8dc9-430c-9c15-33749eb99c83",
+  "ginga": "b00b3368-6b8b-4f33-af0f-29b0ae2e00cb",
+  "sifu": "5f1e7398-2519-4585-821f-04cae3097de7",
+  "fro": "8252b7a9-1bf5-4423-b72c-93bb040bf7da",
+  "bling": "26c51947-d611-48b1-8b1f-33e1e250d2cc",
+  "techno": "c233a969-ce99-491d-9792-6313cdc6b2c7",
+  "hoodie": "646d595f-9d18-407c-839b-e4afc02f1ea4",
+  "slam": "6990d13d-40ab-4efd-93f3-4412438c411b",
+  "ape": "650aaf20-2cf4-467f-8dae-fe647dbd340f",
+  "gwei": "d26a4503-68b1-4fa6-ada5-f01c7014dbb5",
+  "mystic": "a09fe40c-1134-4f6e-877f-59254f76ed00",
+  "kaiju": "790bc4e4-8568-4c31-943c-d9c8f68b74f6",
+  "ember": "014267e5-0de4-4ce6-8be6-5aa7b5ab76b5"
+ },
+ "rejected_images": {
+  "gwei": "2e429904-d673-4659-aef4-f661c163fa85 (moderation)",
+  "kaiju": "f9106806 + be70769f + 95e4300c (moderation: spiked shell/crown combo); used 95e03ca1 (kaiju back-plate version)",
+  "mystic": "2edcb48b-ecfc-4b02-aadf-bb38eec0b1d9 (too close to a real fighter's tattoo)",
+  "omen": "70b501a7 image ok but its 3D job 256eb9b3 was moderation-flagged (unclothed body); redrawn in a robe",
+  "mochi": "80f34dde ball-body version: 3D job 6957e249 came back unrigged (no skin)"
+ },
+ "failed_3d": {
+  "mochi": "6957e249-7d25-41e8-ae06-f8f5263289f2 (no rig)",
+  "omen": "256eb9b3-1776-467e-9fb1-da4327d824ea (moderation)"
+ }
+}

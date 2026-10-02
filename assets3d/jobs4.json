@@ -1,0 +1,43 @@
+{
+ "images": {
+  "bogdanoff": "99a29b3a-85a0-46e9-917e-bb8485444b55",
+  "fartcoin": "6e6d3523-1116-4ba8-b343-fa61994f089d",
+  "bull": "844b2ff6-ad8e-44e8-b7d7-7e430a637868",
+  "bear": "a6a3a275-3a8b-45e6-8458-958ebba57fbb",
+  "whale": "c18ba7f5-d3f1-4fac-bb2a-6eabe94cae2f",
+  "sin": "daa59007-eb6e-477a-ad89-8bd6efc91e57",
+  "gigachad": "95e21d55-1f35-4c9b-80a6-b3027df60427",
+  "popcat": "ead4ed92-61a8-4338-9529-0467ccb530fd",
+  "brett": "b9e9c050-f460-4949-8074-95a95b6efdf0",
+  "moodeng": "b95bb9ac-8aa9-4b07-9f9d-1f85ef3a0d2a",
+  "dev": "678d957a-f975-4159-a76f-aa622b8ed19f",
+  "mog": "fe31e1d4-4500-4ef5-a65b-789ed507cc49",
+  "spx": "52be3e8f-3f03-4026-bcf1-5175adc2b224",
+  "sniper": "6745baec-8058-4f65-a519-23cff04c6d73",
+  "diamond": "79440879-8ee0-45ef-9abb-d8f1f7520778",
+  "hood": "3eb19a9f-4e0f-40f6-85e8-fc12de19960a",
+  "blackbox": "0ea11327-8221-4eeb-be5b-09a615ec2521"
+ },
+ "chars": {
+  "bogdanoff": "9a20dc7f-31a8-4d06-8fda-f97e5177649f",
+  "fartcoin": "2e9b3a3a-7e1f-4fc1-9fb3-72f749fbe8cd",
+  "bull": "147a2d9c-5bd5-4239-88b2-e7bfd4ffd60f",
+  "bear": "e71be714-db6f-4b77-b1b7-a5881f2b3383",
+  "whale": "148d529a-661a-4acf-aaec-33064c364240",
+  "sin": "d1885026-c7e3-49b5-8e26-d08c78b11133",
+  "gigachad": "d47dc3ff-b8c3-40c3-96b5-dd7fbbffd6ee",
+  "popcat": "8290b7d4-2bb4-4fa8-b9ad-25277dbfa850",
+  "brett": "90f74a86-6872-4171-a792-7169d4e6634d",
+  "moodeng": "ac3c6d8a-a068-4cbf-a52c-62f13af51a9c"
+ },
+ "waiting_for_credits": [
+  "dev",
+  "mog",
+  "spx",
+  "hood",
+  "diamond",
+  "blackbox",
+  "sniper"
+ ],
+ "note": "session 61118e0c; image = gpt_image_2_5 2:3 (1 cr); 3D = image_to_3d rigged pbr 20k (35 cr). Balance floor 350 held for the lead session (stages/audio)."
+}
