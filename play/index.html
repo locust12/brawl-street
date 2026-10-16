@@ -35,10 +35,10 @@
 <meta name="apple-mobile-web-app-title" content="Brawl Street">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png">
-<script type="importmap">{"imports":{"three":"./lib/three/three.module.min.js","three/addons/":"./lib/three/addons/"}}</script>
-
-
-<link rel="stylesheet" href="fonts/fonts0.css">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.min.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"}}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,700;1,700;1,800;1,900&family=JetBrains+Mono:wght@500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap">
 <style>
 [hidden]{display:none!important}   /* the artifact host adds this; the page also runs standalone on brawlstreet.lol/play */
 /* ===== Brawl Street design system (matches the brawl street site) ===== */
@@ -533,7 +533,7 @@ table.res th:first-child,table.res td:first-child{text-align:left}
 
 <script>
 const ARENA_FORM = {"pct":[50.6,48.1,30.1,55.1,46.2,51.3,57.1,52.6,49.4,63.5,35.3,57.7,55.8,47.4],"h2h":[[0,7,9,7,4,2,4,4,6,6,8,6,8,8],[5,0,10,3,7,5,5,5,4,5,7,8,4,7],[3,2,0,4,3,5,1,6,5,2,7,4,3,2],[5,9,8,0,7,7,5,9,6,3,10,5,8,4],[8,5,9,5,0,8,5,5,5,3,7,4,4,4],[10,7,7,5,4,0,6,6,6,4,7,4,7,7],[8,7,11,7,7,6,0,4,6,6,10,4,8,5],[8,7,6,3,7,6,8,0,6,4,6,7,6,8],[6,8,7,6,7,6,6,6,0,2,10,5,2,6],[6,7,10,9,9,8,6,8,10,0,7,6,6,7],[4,5,5,2,5,5,2,6,2,5,0,2,5,7],[6,4,8,7,8,8,8,5,7,6,10,0,5,8],[4,8,9,4,8,5,4,6,10,6,7,7,0,9],[4,5,10,8,8,5,7,4,6,5,5,4,3,0]],"fights":1092};
-window.TB_BUILD = '0929-1841';
+window.TB_BUILD = '1016-1722';
 /*<<SRC:10_core.js>>*/
 // ===== core: math, input, sound =====
 // Asset base name for a fighter id. Everything that loads per-fighter art (assets/<id>.jpg,
@@ -7807,11 +7807,14 @@ const AI2 = {
 
     // EASY HESITATES. Weaker decisions are only half of what makes a CPU beatable -- the other half is
     // that it answers on EVERY frame, so a new player never gets an opening to walk into. At low levels
-    // it now spends part of each second doing nothing at all. Offset per fighter so two CPUs in a
-    // free-for-all do not freeze in lockstep, and placed AFTER the recovery guards above so a hesitating
-    // CPU never forgets to come back to the stage.
-    // Level 5 and up are untouched, so Medium-and-up play and the seeded arena are unchanged.
-    if (Game.sigs && !Game.noSkill && f.level < 5) {
+    // it spends part of each second doing nothing at all.
+    //
+    // 10/16: the metronome below is SUPERSEDED by HUMAN.lapse (53_human.js), which owns attention for
+    // every level and spends the same budget stochastically — 20 frames off and 40 on, to the frame,
+    // forever, read as the game hitching and could be learned in seconds. It is kept only as the
+    // fallback for a build with 53_human fenced out; HUMAN.lapse pre-empts AI.think, so when that file
+    // is present this branch never runs (it is already lapsing or already decided to play).
+    if (typeof HUMAN === 'undefined' && Game.sigs && !Game.noSkill && f.level < 5) {
       const idle = Math.round((5 - f.level) * 5);           // level 1: 20 frames in every 60
       if ((Game.frame + (f.idx || 0) * 17) % 60 < idle) return {};
     }
@@ -8175,6 +8178,379 @@ Fighter.prototype.takeHit = (function (base) {
 })(Fighter.prototype.takeHit);
 
 /*<<END:52_stale.js>>*/
+/*<<SRC:53_human.js>>*/
+// ===== HUMAN: the CPU gets human eyes, a human trigger finger and human attention =====
+//
+// Duane, 10/16: "i dont like how with easy mode the computer just waits for where the character will
+// land and attacks it makes it too difficult. make computer fighter more natural. its too concise
+// like an unbeatable robot."
+//
+// He is describing one specific mechanism, and he is right about it. `AI2.canHit` (51_ai2) decides
+// whether to swing by LEADING the opponent: it takes their exact x, y, vx, vy, applies gravity, and
+// works out where their body will be on the precise frame the hitbox goes active. It was written to
+// stop the CPU whiffing 66% of its swings, and it worked -- but a mover that only ever swings when
+// the maths says it connects is not a fighter, it is a solver. On a jump-in it stands still, computes
+// your landing spot, and fires the frame before you touch the ground. Every time. There is no read to
+// win, no spacing to beat, nothing to learn: you cannot approach it at all.
+//
+// The old Easy knob (`SK` in 51_ai2) only scaled the PROBABILITY of each decision. A weaker roll on a
+// perfect read is still a perfect read -- it just arrives slightly less often, which reads as a robot
+// having an off day, not as a person. What makes an opponent feel human is not worse odds, it is
+// worse INFORMATION and worse HANDS:
+//
+//   1. EYES      it acts on where you were a fifth of a second ago, not where you are
+//   2. AIM       it guesses your landing spot instead of solving it, and guesses wrong
+//   3. HANDS     it hesitates on the trigger, and sometimes swings at nothing at all
+//   4. ATTENTION it drifts in and out of the fight instead of answering on all 60 frames
+//   5. FAIRNESS  it will not hit you while you are landing, because you cannot answer that
+//
+// Every one of them scales with level, so Brutal still plays close to the solver (4 frames of lag,
+// near-exact aim, no lapses, no landing amnesty) and Easy plays like somebody holding a controller
+// for the first time.
+//
+// MEASURED 1, the complaint itself (dev harness: the player walks in, jumps, and does NOTHING else;
+// how many of those landings are met with a hit):
+//
+//                 landings attacked
+//   Easy    was        25 %          now   5 %     (what is left is a move already in flight)
+//   Medium  was        37 %          now   9 %
+//   Hard    was        42 %          now  18 %
+//   Brutal  was        32 %          now  30 %     (on purpose: Brutal is the solver)
+//
+// MEASURED 2, 30 matches per level, a naive masher (walks in, swings in range, scrambles back when
+// thrown off -- no blocking, no DI, no spacing) against each of the four difficulty buttons:
+//
+//                 masher wins   stocks left   CPU accuracy   caught landing   self-destructs
+//   Easy    was        53 %      0.53 / 0.53       48 %        1.73 / match        0.00
+//           now        87 %      1.40 / 0.13       27 %        0.17 / match        0.00
+//   Medium  was         0 %      0.00 / 1.47       49 %        1.43 / match        0.00
+//           now        50 %      0.67 / 0.63       30 %        0.20 / match        0.00
+//   Hard    was         0 %      0.00 / 1.80       51 %        1.93 / match        0.00
+//           now         7 %      0.07 / 1.17       36 %        0.87 / match        0.00
+//   Brutal  was         0 %      0.00 / 1.73       45 %        1.43 / match        0.00
+//           now         0 %      0.00 / 1.47       42 %        1.93 / match        0.00
+//
+// Easy went from a coin flip against a player who does not even block to a CPU that loses most of
+// the time, Brutal did not move, and the four buttons finally describe four different opponents.
+// The CPU swings MORE than it used to (37 a match at Easy against 33) and lands far fewer: it is
+// busier and worse, which is what a person looks like. No new self-destructs at any level.
+//
+// No existing behaviour is deleted: this wraps AI.target, AI2.canHit and AI.think, so all five brains
+// (50_ai, 51_ai2's five situations, 21_roster2's specials, 25_feel, 57_items3) inherit the same human
+// limits for free. Whatever any of them decides, it decides from a stale, fuzzy picture.
+//
+// DETERMINISM: gated on `Game.combos`, which Game.start only sets for unseeded local matches, exactly
+// like 51_ai2. The seeded bet arena (ARENA.version 1) and online lockstep never run a line of this,
+// so old fights still replay bit-identically. No banned transcendentals: + - * / and Math.sqrt only.
+const HUMAN = {
+  off: false,
+  on() { return !!Game.combos && !Game.noHuman && !this.off; },
+
+  // 0 at Easy (level 1) .. 1 at Brutal (level 9) -- the levels 8c_difficulty's four buttons map to.
+  skill(f) { return clamp(((f.level || 5) - 1) / 8, 0, 1); },
+
+  // ---- 1. EYES: perception lag -------------------------------------------------
+  // A ring of recent snapshots per fighter, so a CPU can be handed the opponent as they were N frames
+  // ago. Measured median delay in play: Easy 29 frames (0.48 s), Medium 19, Hard 9, Brutal 4 -- the
+  // bottom of that ladder is a distracted beginner, the top is faster than any player, so Brutal is
+  // still frightening. This is the single change that kills the landing-punish: by the time an Easy
+  // CPU can see you falling, you have already landed and acted.
+  LEN: 64,
+  LAG: 30, LAG_SPAN: 26,       // lag = LAG - LAG_SPAN * skill
+  record(f) {
+    if (f.hAt === Game.frame) return;                 // once a frame, whoever looks first
+    f.hAt = Game.frame;
+    if (f.hWasAir && !f.air) f.hLandAt = Game.frame;  // the frame they touched down (see `landing`)
+    f.hWasAir = f.air;
+    const h = f.hHist || (f.hHist = []);
+    h[Game.frame % this.LEN] = {
+      fr: Game.frame, x: f.x, y: f.y, vx: f.vx, vy: f.vy, state: f.state, air: f.air,
+      crouch: f.crouch, dmg: f.dmg, face: f.face, st: f.st, hitlag: f.hitlag,
+      mv: f.move, mvT: f.move ? f.move.t : 0,
+    };
+  },
+
+  // The remembered move needs the real move's identity (25_feel keys "is this still the same opening?"
+  // off the move object itself) but a stale `t`, so each real move gets one wrapper, made once.
+  MV: typeof WeakMap === 'function' ? new WeakMap() : null,
+  ghostMove(mv, t) {
+    if (!mv) return null;
+    if (!this.MV) return mv;
+    let w = this.MV.get(mv);
+    if (!w) { w = Object.create(mv); this.MV.set(mv, w); }
+    w.t = t;
+    return w;
+  },
+
+  offstage(t) {
+    const M = Game.stage && Game.stage.main;
+    return !!M && (t.x < M.x0 || t.x > M.x1 || t.y > M.top + 4);
+  },
+
+  // How far back this CPU is looking. Jittered per fighter so two CPUs in a free-for-all are not the
+  // same delay line, and so one CPU is not a fixed one either.
+  //
+  // CLAMPED for the slow, loud facts. Someone being launched off the stage, lying in hitstun or
+  // respawning is information a person takes in instantly -- it is a body flying across the screen.
+  // What a person cannot do is call the frame you land. Leaving the full lag on those states made the
+  // CPU edge-guard a position its opponent had left, walk off after a stale read and self-destruct
+  // (the exact failure 51_ai2's edge-guard comments were written to fix), and jab at a corpse.
+  lag(f, tgt) {
+    let n = Math.round(this.LAG - this.LAG_SPAN * this.skill(f)) + Math.round(this.noise(f, 2) * 3);
+    if (tgt.state === 'hitstun' || tgt.state === 'grabbed' || tgt.state === 'dead' ||
+        tgt.state === 'respawn' || tgt.state === 'ledge' || this.offstage(tgt)) n = Math.min(n, 4);
+    return clamp(n, 0, this.LEN - 2);
+  },
+
+  ghost(f, tgt) {
+    const a = f.ai;
+    if (a.hGAt === Game.frame && a.hGOf === tgt) return a.hG;       // one picture per frame
+    const lag = this.lag(f, tgt);
+    let g = tgt, s = null;
+    if (lag > 0 && tgt.hHist) {
+      const want = Game.frame - lag;
+      s = tgt.hHist[(want + this.LEN) % this.LEN];
+      // A hole in the ring (nothing looked at them for a while) used to fall straight back to the
+      // LIVE fighter, which handed the CPU perfect, zero-delay vision for a moment -- and it happened
+      // every time a lapse ended, which at Easy is constantly. Walk back to the newest memory that is
+      // at least this old instead; stale eyes are the whole point, so a gap must never sharpen them.
+      if (!s || s.fr !== want) {
+        s = null;
+        for (const e of tgt.hHist) if (e && e.fr <= want && (!s || e.fr > s.fr)) s = e;
+      }
+    }
+    if (s) {
+      g = Object.create(tgt);                       // everything else (w, h, c, m, stocks) reads live
+      g.x = s.x; g.y = s.y; g.vx = s.vx; g.vy = s.vy;
+      g.state = s.state; g.air = s.air; g.crouch = s.crouch;
+      g.dmg = s.dmg; g.face = s.face; g.st = s.st; g.hitlag = s.hitlag;
+      g.move = this.ghostMove(s.mv, s.mvT);
+    }
+    a.hG = g; a.hGOf = tgt; a.hGAt = Game.frame;
+    return g;
+  },
+
+  // ---- 2. AIM: a guess, not a solution -----------------------------------------
+  // What AI2.canHit is handed instead of the opponent. Two things are wrong with it on purpose:
+  //
+  //   LEAD   the fall is only partly accounted for (0.30 of it at Easy, all of it at Brutal), and over
+  //          one nominal startup rather than per hitbox -- so the CPU aims at where you were, not where
+  //          you will be. This is the landing-wait, removed at the source.
+  //   NOISE  a held mis-estimate of where you actually are, re-guessed every NOISE_HOLD frames and
+  //          much larger while you are airborne, because a body in the air is the hardest thing in a
+  //          fighting game to place. Held, not re-rolled per call, so the CPU picks its move from ONE
+  //          belief about the world each frame -- a wrong read, not a tremor.
+  LEAD: 0.22, LEAD_SPAN: 0.78, LEAD_T: 8,
+  NOISE_HOLD: 9, NOISE_AIR: 54, NOISE_GND: 22, NOISE_AIRY: 46, NOISE_GNDY: 14,
+  noise(f, k) {
+    const a = f.ai, n = a.hN || (a.hN = [0, 0, 0]);
+    if ((a.hNAt || -999) + this.NOISE_HOLD <= Game.frame) {
+      a.hNAt = Game.frame;
+      n[0] = Rng.next() * 2 - 1; n[1] = Rng.next() * 2 - 1; n[2] = Rng.next() * 2 - 1;
+    }
+    return n[k];
+  },
+  belief(f, tgt) {
+    const a = f.ai;
+    if (a.hBAt === Game.frame && a.hBOf === tgt) return a.hB;
+    const s = this.skill(f), m = 1 - s, lead = this.LEAD + this.LEAD_SPAN * s;
+    const T = this.LEAD_T, g = (tgt.c && tgt.c.grav) || 0.6;
+    const b = Object.create(tgt);
+    // canHit's own lead is driven by vx/vy/air, so zero them and hand it the guess instead
+    b.air = false; b.vy = 0;
+    b.vx = tgt.vx * lead;                                          // horizontal lead survives, scaled
+    b.x = tgt.x + this.noise(f, 0) * m * (tgt.air ? this.NOISE_AIR : this.NOISE_GND);
+    b.y = tgt.y + (tgt.air ? lead * (tgt.vy * T + 0.5 * g * T * T) : 0) +
+          this.noise(f, 1) * m * (tgt.air ? this.NOISE_AIRY : this.NOISE_GNDY);
+    a.hB = b; a.hBOf = tgt; a.hBAt = Game.frame;
+    return b;
+  },
+
+  // ---- 4. ATTENTION: in and out of the fight -----------------------------------
+  // 51_ai2 already knew this mattered ("the other half is that it answers on EVERY frame, so a new
+  // player never gets an opening to walk into") and bought it with `(Game.frame + idx * 17) % 60 <
+  // idle`: a metronome. 20 frames off, 40 frames on, forever, to the frame. It reads as the game
+  // hitching, not as a person losing the thread -- and a player can learn its beat in a few seconds.
+  //
+  // This is the same budget spent stochastically, and a lapsing CPU keeps MOVING: it shifts its feet,
+  // walks the wrong way, holds a nervous shield. A fighter frozen mid-stage is a bug; a fighter
+  // ambling while it works out what to do is a person.
+  LAPSE_P: 0.018, LAPSE_MIN: 12, LAPSE_BASE: 26, LAPSE_SPAN: 42, LAPSE_GAP: 24,
+  safe(f, st) {
+    const M = st && st.main;
+    return f.state === 'ground' && !f.air && !f.item && !f.finalReady && !(f.hitlag > 0) &&
+      !!M && f.x > M.x0 + 24 && f.x < M.x1 - 24 && f.y <= M.top + 4;
+  },
+  lapse(f, st) {
+    const a = f.ai, s = this.skill(f);
+    if (s >= 1) return null;                                        // Brutal never looks away
+    if ((a.hLap || 0) > 0) {
+      if (!this.safe(f, st)) { a.hLap = 0; return null; }            // snap out of it to recover
+      a.hLap--;
+      if (!a.hLap) a.hLapEnd = Game.frame;
+      const o = {}; for (const k of ACTIONS) o[k] = false;
+      if (a.hLapK) o[a.hLapK] = true;
+      if (a.hLapS) o.shield = true;
+      return o;
+    }
+    if (!this.safe(f, st) || Game.frame - (a.hLapEnd || -999) < this.LAPSE_GAP) return null;
+    const m = 1 - s, q = m * Math.sqrt(m);                          // falls away faster than the level rises
+    if (Rng.next() >= this.LAPSE_P * q) return null;
+    a.hLap = this.LAPSE_MIN + irand(0, Math.round(this.LAPSE_BASE + this.LAPSE_SPAN * m));
+    const r = Rng.next();
+    a.hLapK = r < 0.34 ? null : r < 0.67 ? 'left' : 'right';        // a third of lapses stand and think
+    a.hLapS = Rng.next() < 0.12;
+    return this.lapse(f, st);
+  },
+
+  // ---- 5. LET THEM LAND --------------------------------------------------------
+  // Duane, 10/16, after the first pass: "fix it so it doesnt wait for my player to land and attack
+  // so i cant even fucking land without getting attacked ... makes it unfair."
+  //
+  // He is right, and the first pass was the wrong shape of fix for this one. Fuzzing the CPU's aim
+  // made the landing punish RARER (39% of its hits caught him falling or landing, down to 29%), and
+  // rarer is not the point: the point is that touching down is the one moment a player cannot defend
+  // themselves. Landing lag locks you out of blocking, dodging and attacking for a fixed number of
+  // frames. A CPU that swings into that window is not beating you, it is hitting a man who is tied
+  // up -- and because the old brain only ever swung when the maths said it would connect, it hit
+  // that window every single time. There is no probability that makes that fair. It has to be a rule.
+  //
+  // So: no CPU may START an attack against someone who is in the last frames of their fall, in their
+  // landing lag, or just out of it. A smash already charging is HELD rather than released into them.
+  // And it does not stand on the spot they are coming down on, which is what made it feel like it was
+  // waiting there for him.
+  //
+  // The window closes as the level rises (Easy 20 frames before touchdown + 36 after, Medium 13 + 23,
+  // Hard 5 + 8, Brutal none at all), so Brutal still punishes a landing the way a strong player does
+  // and the four buttons stay four different opponents. It never applies to an opponent who is off
+  // the stage: covering a recovery is edge-guarding, which is a real part of the game, not this.
+  GRACE: 16, PRELAND: 20,
+  // the surface they are actually going to land on: the highest platform under their feet
+  surfaceBelow(t) {
+    const S = Game.stage; if (!S) return null;
+    let y = null;
+    const look = p => { if (p && t.x >= p.x0 && t.x <= p.x1 && p.y >= t.y && (y === null || p.y < y)) y = p.y; };
+    look(S.mainSurf);
+    if (S.plats) for (const p of S.plats) look(p);
+    return y;
+  },
+  framesToLand(t) {
+    const y = this.surfaceBelow(t);
+    if (y === null) return -1;
+    const d = y - t.y;
+    if (d < 0) return -1;
+    const g = (t.c && t.c.grav) || 0.6, v = t.vy;
+    return (Math.sqrt(v * v + 2 * g * d) - v) / g;
+  },
+  landing(f, tgt) {
+    const m = 1 - this.skill(f), q = m * Math.sqrt(m);
+    const grace = Math.round(this.GRACE * q), pre = Math.round(this.PRELAND * q);
+    if (grace <= 0 && pre <= 0) return false;                       // Brutal keeps the punish
+    if (this.offstage(tgt)) return false;                           // a recovery is edge-guarding, not this
+    if (tgt.state === 'land') return true;                          // the landing lag itself: locked out, cannot answer
+    if (tgt.hLandAt !== undefined && Game.frame - tgt.hLandAt < grace) return true;
+    if (tgt.air && tgt.vy > 0 && pre > 0) {
+      const n = this.framesToLand(tgt);
+      if (n >= 0 && n < pre) return true;
+    }
+    return false;
+  },
+  // the real opponent, not the remembered one: this guarantee is one the player has to be able to
+  // feel, so it is not allowed to depend on what the CPU happens to have noticed
+  live(f) {
+    AI.target(f);                                                   // fills the per-frame cache
+    return f.ai.hGAt === Game.frame ? f.ai.hGOf : null;
+  },
+
+  // ---- 3. HANDS: the trigger finger --------------------------------------------
+  // Applied to whatever any brain decided, so a hesitation or a wild swing can land on a punish, an
+  // edge-guard or a combo follow-up alike.
+  //
+  //   DROP   a fresh attack press is sometimes not pulled. Only a FRESH press: a held smash charge
+  //          (51_ai2's `hold`) keeps charging, so this reads as a late trigger, not a stutter.
+  //   WHIFF  and sometimes it swings with nothing in front of it. This is the one that sells it --
+  //          every brain in this game was built to never miss, and a fighter that never misses cannot
+  //          be read. Grounded only, never near a ledge, never at someone who is off the stage.
+  //   DRIFT  and it never stands perfectly still at perfect spacing waiting for you to walk in.
+  DROP: 0.34, WHIFF: 0.085, WHIFF_RANGE: 1.7, DRIFT: 0.25,
+  hands(f, st, o) {
+    if (!o) return o;
+    const s = this.skill(f), m = 1 - s;
+    if (s >= 1) return o;
+    const t0 = this.live(f);
+    if (t0 && this.landing(f, t0)) {
+      if (!f.prev.attack) o.attack = false;                         // nothing may START here
+      if (!f.prev.special) o.special = false;
+      if (!f.prev.grab) o.grab = false;
+      if (!f.prev.grapple) o.grapple = false;
+      o.smash = !!f.prev.smash;                                     // keep a charge charging, never release it into them
+      const M = st && st.main, to = t0.x > f.x ? 'right' : 'left';
+      if (o[to] && Math.abs(t0.x - f.x) < 150) {                    // and do not camp the spot they are coming down on
+        o[to] = false;
+        if (!f.air && M && f.x > M.x0 + 80 && f.x < M.x1 - 80 && s < 0.7) o[to === 'right' ? 'left' : 'right'] = true;
+      }
+      return o;
+    }
+    const fresh = (o.attack && !f.prev.attack) || (o.smash && !f.prev.smash) ||
+                  (o.special && !f.prev.special) || (o.grab && !f.prev.grab) ||
+                  (o.grapple && !f.prev.grapple);
+    if (fresh && !f.air && Rng.next() < this.DROP * m) {
+      o.attack = o.smash = o.special = o.grab = o.grapple = false;
+      return o;
+    }
+    if (o.attack || o.smash || o.special || o.grab || o.grapple || o.jump || o.shield) return o;
+    if (f.state !== 'ground' || f.air || f.item) return o;
+    const M = st && st.main;
+    if (!M || f.x < M.x0 + 70 || f.x > M.x1 - 70) return o;         // not while standing on a lip
+    const t = AI.target(f);
+    if (!t || this.offstage(t) || t.state === 'dead' || t.state === 'respawn') return o;
+    const range = f.w * 0.5 + 44 * (f.c.reach || 1) + t.w * 0.35;
+    const adx = Math.abs(t.x - f.x);
+    if (adx < range * this.WHIFF_RANGE && Rng.next() < this.WHIFF * m) {
+      if (!f.prev.attack) o.attack = true;
+      return o;
+    }
+    // and never standing perfectly still at perfect spacing, waiting for you to walk in
+    if (adx > 50 && !o.left && !o.right && Rng.next() < this.DRIFT * m) o[t.x > f.x ? 'right' : 'left'] = true;
+    return o;
+  },
+};
+
+(function () {
+  // every brain asks AI.target for the opponent, so ghosting it here is all four limits at once
+  AI.target = (function (base) {
+    return function (f) {
+      const t = base.call(this, f);
+      if (!t || !f || !f.cpu || !f.ai || !HUMAN.on()) return t;
+      HUMAN.record(t);
+      return HUMAN.ghost(f, t);
+    };
+  })(AI.target);
+
+  // the reach test, asked about a guess instead of about the truth
+  if (typeof AI2 !== 'undefined' && AI2 && typeof AI2.canHit === 'function') {
+    AI2.canHit = (function (base) {
+      return function (f, tgt, def, face) {
+        if (!f || !f.cpu || !f.ai || !tgt || !HUMAN.on()) return base.call(this, f, tgt, def, face);
+        return base.call(this, f, HUMAN.belief(f, tgt), def, face);
+      };
+    })(AI2.canHit);
+  }
+
+  AI.think = (function (base) {
+    return function (f, st) {
+      if (!f.cpu || !f.ai || !HUMAN.on()) return base.call(this, f, st);
+      HUMAN.live(f);                 // keep watching them even while lapsing, or the memory gets holes
+      const l = HUMAN.lapse(f, st);
+      if (l) return l;
+      return HUMAN.hands(f, st, base.call(this, f, st));
+    };
+  })(AI.think);
+})();
+
+if (typeof window !== 'undefined') window.HUMAN = HUMAN;
+
+/*<<END:53_human.js>>*/
 /*<<SRC:55_items.js>>*/
 // ===== items: Smash-style pickups, throwables, explosions, Final Smash =====
 const ITEM_DEFS = {
@@ -13951,6 +14327,345 @@ const R = {
 })();
 
 /*<<END:72_stage_intro.js>>*/
+/*<<SRC:74_wallet.js>>*/
+// ===== WALLET ATTACHMENT: the player's own wallets, EVM and Solana, in one place =====
+//
+// One object, `Wallet`, with two families behind it. Everything else in the game asks this and
+// never touches `window.ethereum` itself, because that global is a fight between every extension
+// installed and whoever loaded last wins. EIP-6963 is the fix for that and it is used here: wallets
+// announce themselves, the player picks by name, and the picked one is the one that gets used.
+//
+// WHAT THIS DOES NOT DO: it never holds a key, never stores a seed, and never asks for one. It
+// connects, it asks for a signature, and it asks the wallet to send a payment the player can read
+// in their own wallet popup before they approve it. The amount and the destination always come from
+// a server invoice, so there is nothing in here that can quietly change where money goes.
+//
+// Solana needs a transaction built and signed, which needs real code, so @solana/web3.js is loaded
+// from a CDN the FIRST TIME a Solana payment is actually started and never before. Nobody who pays
+// in ETH downloads it.
+(() => {
+  const SOL_WEB3 = 'https://cdn.jsdelivr.net/npm/@solana/web3.js@1.95.3/lib/index.iife.min.js';
+  const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+  const ATA_PROGRAM = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
+  const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+  // --------------------------------------------------------------------------------- small tools
+  const hex = n => '0x' + BigInt(n).toString(16);
+  const pad32 = s => String(s).replace(/^0x/, '').toLowerCase().padStart(64, '0');
+  const short = (a, n = 4) => (!a ? '' : a.length <= 2 * n + 3 ? a : a.slice(0, n + 2) + '…' + a.slice(-n));
+  function b58encode(bytes) {
+    let n = 0n;
+    for (const b of bytes) n = n * 256n + BigInt(b);
+    let out = '';
+    while (n > 0n) { out = B58[Number(n % 58n)] + out; n /= 58n; }
+    for (const b of bytes) { if (b !== 0) break; out = '1' + out; }
+    return out || '1';
+  }
+  const listeners = new Set();
+  const emit = () => { for (const fn of listeners) { try { fn(Wallet.state()); } catch (e) { /* a listener must never break a payment */ } } };
+
+  let cdn = null;
+  function loadSolWeb3() {
+    if (window.solanaWeb3) return Promise.resolve(window.solanaWeb3);
+    if (cdn) return cdn;
+    cdn = new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = SOL_WEB3; s.async = true;
+      s.onload = () => window.solanaWeb3 ? res(window.solanaWeb3) : rej(new Error('Solana library loaded but did not register.'));
+      s.onerror = () => { cdn = null; rej(new Error('Could not load the Solana library. Check the connection and try again.')); };
+      document.head.appendChild(s);
+    });
+    return cdn;
+  }
+
+  // =============================================================================== EVM
+  // EIP-6963 discovery. Wallets announce on an event, and asking for the announcement is how a
+  // wallet that loaded before this file still gets found. Everything is kept, keyed by its rdns.
+  const evmFound = new Map();
+  function noteProvider(detail) {
+    if (!detail || !detail.info || !detail.provider) return;
+    const info = detail.info;
+    const key = info.rdns || info.uuid || info.name;
+    if (!key) return;
+    const had = evmFound.has(key);
+    evmFound.set(key, { id: key, name: info.name || key, icon: info.icon || null, provider: detail.provider });
+    if (!had) emit();
+  }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('eip6963:announceProvider', e => noteProvider(e.detail));
+    try { window.dispatchEvent(new Event('eip6963:requestProvider')); } catch (e) { /* older browser */ }
+    // Ask again shortly: an extension that injects late misses the first request.
+    setTimeout(() => { try { window.dispatchEvent(new Event('eip6963:requestProvider')); } catch (e) {} }, 1200);
+  }
+
+  // 76b_wallets.js (another session's) is the EVM front end when it is in the build: it owns the
+  // wallet picker, the phone deep links, the network add for chain 4663 and the readable errors,
+  // and it stands in for window.ethereum so every old call site keeps working. There is no reason
+  // for a second picker, so when it is there this file asks IT and does nothing itself.
+  // The check is lazy because that file is concatenated AFTER this one.
+  function wal() { try { return typeof WAL !== 'undefined' && WAL ? WAL : null; } catch (e) { return null; } }
+
+  const Evm = {
+    picked: null, addr: null, chainId: null, busy: false,
+
+    // Everything that announced itself, plus the plain injected provider if it never did. A wallet
+    // that only does the old global still has to work.
+    list() {
+      const W = wal();
+      if (W) {
+        const found = (W.list() || []).map(d => ({ id: (d.info && (d.info.rdns || d.info.name)) || 'wallet', name: (d.info && d.info.name) || 'Wallet', icon: (d.info && d.info.icon) || null }));
+        return found.length ? found : [{ id: 'wal', name: W.name || 'Wallet', icon: null }];
+      }
+      const out = [...evmFound.values()].map(w => ({ id: w.id, name: w.name, icon: w.icon }));
+      const eth = window.ethereum;
+      if (eth && !out.length) {
+        const name = eth.isMetaMask ? 'MetaMask' : eth.isRabby ? 'Rabby' : eth.isCoinbaseWallet ? 'Coinbase Wallet' : 'Browser wallet';
+        out.push({ id: 'injected', name, icon: null });
+      }
+      return out;
+    },
+    providerFor(id) {
+      const W = wal();
+      if (W) return { request: o => W.request(o) };   // the proxy, so its picker and deep links run
+      if (id && evmFound.has(id)) return evmFound.get(id).provider;
+      if (evmFound.size === 1) return [...evmFound.values()][0].provider;
+      if (window.ethereum) return window.ethereum;
+      return null;
+    },
+    get provider() { const W = wal(); if (W) return { request: o => W.request(o) }; return this.picked ? this.providerFor(this.picked) : null; },
+
+    async connect(id) {
+      const W = wal();
+      if (W) {
+        // Its own picker, its own errors. It already remembers the last wallet used.
+        const a = await W.connect();
+        const addr = Array.isArray(a) ? a[0] : (a && a.address) || a || W.addr;
+        if (!addr) throw new Error('That wallet did not hand over an address.');
+        this.picked = 'wal'; this.addr = String(addr).toLowerCase();
+        try { this.chainId = Number(BigInt(await W.request({ method: 'eth_chainId' }))); } catch (e) { this.chainId = null; }
+        if (!this.__walHooked && W.onChange) { this.__walHooked = true; W.onChange(() => { Evm.addr = W.addr ? String(W.addr).toLowerCase() : null; emit(); }); }
+        emit();
+        return { address: this.addr, chainId: this.chainId };
+      }
+      const p = this.providerFor(id);
+      if (!p) throw new Error('No EVM wallet found in this browser. Install MetaMask, Rabby or Coinbase Wallet, then reload.');
+      const accts = await p.request({ method: 'eth_requestAccounts' });
+      const a = (accts || [])[0];
+      if (!a) throw new Error('That wallet did not hand over an address.');
+      this.picked = id && evmFound.has(id) ? id : (evmFound.size ? [...evmFound.keys()][0] : 'injected');
+      this.addr = a.toLowerCase();
+      this.chainId = Number(BigInt(await p.request({ method: 'eth_chainId' })));
+      // Follow the wallet rather than trusting what it said once: people switch account and chain
+      // mid-session and a stale address is a payment sent from somewhere nobody expected.
+      if (!p.__bsHooked) {
+        p.__bsHooked = true;
+        p.on && p.on('accountsChanged', list => { Evm.addr = (list || [])[0] ? String(list[0]).toLowerCase() : null; emit(); });
+        p.on && p.on('chainChanged', c => { Evm.chainId = Number(BigInt(c)); emit(); });
+      }
+      emit();
+      return { address: this.addr, chainId: this.chainId };
+    },
+    disconnect() { this.picked = null; this.addr = null; this.chainId = null; emit(); },
+
+    async sign(text) {
+      if (!this.addr) await this.connect();
+      return this.provider.request({ method: 'personal_sign', params: ['0x' + Array.from(new TextEncoder().encode(text)).map(b => b.toString(16).padStart(2, '0')).join(''), this.addr] });
+    },
+
+    // Put the wallet on the invoice's chain, adding the network if the wallet has never seen it.
+    // Robinhood Chain is the one most wallets will not know, which is exactly why this is here.
+    async switchTo(chainId, chainName, rpc, explorer) {
+      const W = wal();
+      if (W && W.ensureChain) {
+        await W.ensureChain({ chainId, chainName, rpc, rpcUrls: rpc ? [rpc] : [], explorer });
+        this.chainId = Number(chainId); emit(); return;
+      }
+      const want = '0x' + Number(chainId).toString(16);
+      const p = this.provider;
+      if (Number(BigInt(await p.request({ method: 'eth_chainId' }))) === Number(chainId)) return;
+      try {
+        await p.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: want }] });
+      } catch (e) {
+        if (e && e.code !== 4902) throw e;
+        await p.request({ method: 'wallet_addEthereumChain', params: [{
+          chainId: want, chainName: chainName || ('Chain ' + chainId),
+          nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+          rpcUrls: rpc ? [rpc] : [], blockExplorerUrls: explorer ? [explorer] : [],
+        }] });
+        await p.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: want }] });
+      }
+      this.chainId = Number(chainId);
+      emit();
+    },
+
+    // `inv` is a server invoice. The amount and the destination are its numbers, never this file's.
+    async pay(inv) {
+      if (!this.addr) await this.connect();
+      await this.switchTo(inv.chainId, inv.chainName, inv.rpc, inv.explorer);
+      const value = BigInt(inv.send);
+      const tx = inv.kind === 'native'
+        ? { from: this.addr, to: inv.payTo, value: hex(value) }
+        // transfer(address,uint256)
+        : { from: this.addr, to: inv.token, data: '0xa9059cbb' + pad32(inv.payTo) + pad32(value.toString(16)) };
+      return this.provider.request({ method: 'eth_sendTransaction', params: [tx] });
+    },
+  };
+
+  // =============================================================================== SOLANA
+  // Injected discovery. Phantom, Solflare and Backpack all expose themselves slightly differently,
+  // so each is looked for by name rather than trusting one global.
+  function solCandidates() {
+    const out = [];
+    const add = (id, name, provider) => { if (provider && !out.some(o => o.provider === provider)) out.push({ id, name, provider }); };
+    const w = window;
+    add('phantom', 'Phantom', w.phantom && w.phantom.solana);
+    add('solflare', 'Solflare', w.solflare);
+    add('backpack', 'Backpack', w.backpack && w.backpack.solana ? w.backpack.solana : (w.xnft && w.xnft.solana));
+    // The bare global, last, and only if it is not one of the above wearing a different hat.
+    if (w.solana) add(w.solana.isPhantom ? 'phantom' : 'solana', w.solana.isPhantom ? 'Phantom' : 'Solana wallet', w.solana);
+    return out;
+  }
+
+  const Sol = {
+    picked: null, addr: null,
+
+    list() { return solCandidates().map(c => ({ id: c.id, name: c.name, icon: null })); },
+    providerFor(id) {
+      const all = solCandidates();
+      return (id && all.find(c => c.id === id) || all[0] || {}).provider || null;
+    },
+    get provider() { return this.providerFor(this.picked); },
+
+    async connect(id) {
+      const p = this.providerFor(id);
+      if (!p) throw new Error('No Solana wallet found in this browser. Install Phantom, Solflare or Backpack, then reload.');
+      const res = await p.connect();
+      const key = (res && res.publicKey) || p.publicKey;
+      if (!key) throw new Error('That wallet did not hand over an address.');
+      this.picked = id || (solCandidates().find(c => c.provider === p) || {}).id || 'solana';
+      this.addr = key.toString();
+      if (!p.__bsHooked) {
+        p.__bsHooked = true;
+        p.on && p.on('accountChanged', k => { Sol.addr = k ? k.toString() : null; emit(); });
+        p.on && p.on('disconnect', () => { Sol.addr = null; emit(); });
+      }
+      emit();
+      return { address: this.addr };
+    },
+    disconnect() { try { this.provider && this.provider.disconnect && this.provider.disconnect(); } catch (e) {} this.picked = null; this.addr = null; emit(); },
+
+    async sign(text) {
+      if (!this.addr) await this.connect();
+      const p = this.provider;
+      if (!p.signMessage) throw new Error('That wallet cannot sign a message. Attach it by paying with it once instead.');
+      const res = await p.signMessage(new TextEncoder().encode(text), 'utf8');
+      const sig = (res && res.signature) || res;
+      return b58encode(sig instanceof Uint8Array ? sig : new Uint8Array(sig));
+    },
+
+    // Build the transfer, hand it to the wallet, let the player read it and approve it.
+    async pay(inv) {
+      if (!this.addr) await this.connect();
+      const web3 = await loadSolWeb3();
+      const { PublicKey, Transaction, SystemProgram, TransactionInstruction, Connection } = web3;
+      const from = new PublicKey(this.addr);
+      const to = new PublicKey(inv.payTo);
+      const amount = BigInt(inv.send);
+      const tx = new Transaction();
+
+      if (inv.kind === 'native') {
+        tx.add(SystemProgram.transfer({ fromPubkey: from, toPubkey: to, lamports: amount }));
+      } else {
+        const mint = new PublicKey(inv.token);
+        const tokenProgram = new PublicKey(TOKEN_PROGRAM);
+        const ataProgram = new PublicKey(ATA_PROGRAM);
+        const ata = owner => PublicKey.findProgramAddressSync(
+          [owner.toBytes(), tokenProgram.toBytes(), mint.toBytes()], ataProgram)[0];
+        const src = ata(from);
+        const dst = ata(to);
+        // Create the destination token account if it is not there yet, idempotently, so the first
+        // person ever to pay in this token does not simply fail. Instruction 1 on the ATA program
+        // is a no-op when the account already exists.
+        tx.add(new TransactionInstruction({
+          programId: ataProgram,
+          keys: [
+            { pubkey: from, isSigner: true, isWritable: true },
+            { pubkey: dst, isSigner: false, isWritable: true },
+            { pubkey: to, isSigner: false, isWritable: false },
+            { pubkey: mint, isSigner: false, isWritable: false },
+            { pubkey: new PublicKey('11111111111111111111111111111111'), isSigner: false, isWritable: false },
+            { pubkey: tokenProgram, isSigner: false, isWritable: false },
+          ],
+          data: new Uint8Array([1]),
+        }));
+        // TransferChecked (instruction 12): it carries the mint and the decimals, so the token
+        // program itself refuses a transfer of the wrong thing. Transfer (3) cannot do that.
+        const data = new Uint8Array(10);
+        data[0] = 12;
+        let a = amount;
+        for (let i = 1; i <= 8; i++) { data[i] = Number(a & 0xffn); a >>= 8n; }
+        data[9] = inv.decimals;
+        tx.add(new TransactionInstruction({
+          programId: tokenProgram,
+          keys: [
+            { pubkey: src, isSigner: false, isWritable: true },
+            { pubkey: mint, isSigner: false, isWritable: false },
+            { pubkey: dst, isSigner: false, isWritable: true },
+            { pubkey: from, isSigner: true, isWritable: false },
+          ],
+          data,
+        }));
+      }
+
+      // A memo carrying the invoice id, so a payment can still be found later if the tab dies
+      // before the hash is handed back. Costs nothing and it is the only free audit trail Solana
+      // offers.
+      if (inv.id) {
+        tx.add(new TransactionInstruction({
+          programId: new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'),
+          keys: [], data: new TextEncoder().encode(inv.id),
+        }));
+      }
+
+      tx.feePayer = from;
+      const conn = new Connection(inv.rpc || 'https://api.mainnet-beta.solana.com', 'confirmed');
+      tx.recentBlockhash = (await conn.getLatestBlockhash('confirmed')).blockhash;
+
+      const p = this.provider;
+      if (p.signAndSendTransaction) {
+        const res = await p.signAndSendTransaction(tx);
+        return (res && (res.signature || res)) || null;
+      }
+      const signed = await p.signTransaction(tx);
+      return conn.sendRawTransaction(signed.serialize(), { skipPreflight: false });
+    },
+  };
+
+  // =============================================================================== the facade
+  const Wallet = {
+    evm: Evm, sol: Sol, short, b58encode,
+    on(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    off(fn) { listeners.delete(fn); },
+    state() {
+      return {
+        evm: { wallets: Evm.list(), address: Evm.addr, chainId: Evm.chainId, picked: Evm.picked },
+        sol: { wallets: Sol.list(), address: Sol.addr, picked: Sol.picked },
+      };
+    },
+    family(f) { return f === 'sol' ? Sol : Evm; },
+    addressFor(f) { return f === 'sol' ? Sol.addr : Evm.addr; },
+    // Is a wallet of this family even installed? The checkout uses this to say "install Phantom"
+    // rather than opening a picker with nothing in it.
+    available(f) { return (f === 'sol' ? Sol.list() : Evm.list()).length > 0; },
+    async connect(f, id) { return f === 'sol' ? Sol.connect(id) : Evm.connect(id); },
+    async sign(f, text) { return f === 'sol' ? Sol.sign(text) : Evm.sign(text); },
+    async pay(inv) { return inv.family === 'sol' ? Sol.pay(inv) : Evm.pay(inv); },
+  };
+
+  window.Wallet = Wallet;
+})();
+
+/*<<END:74_wallet.js>>*/
 /*<<SRC:75_arena.js>>*/
 // ===== bet arena: bots fight, people bet on who wins =====
 // Parimutuel per currency: each currency's pool splits between the two sides, winners share the
@@ -14414,6 +15129,406 @@ else if (/^(127\.0\.0\.1|localhost)$/.test(location.hostname) && /local/.test(lo
   ChainHouse.ready = fetch('arena/test/local_deploy.json').then(r => r.json()).then(c => { c.chainName = 'Local test chain'; ChainHouse.cfg = c; }).catch(() => {});
 
 /*<<END:76_chain.js>>*/
+/*<<SRC:76b_wallets.js>>*/
+// ===== wallets: every wallet, one door =====
+// A browser wallet announces itself over EIP-6963, so one listener finds MetaMask, Rabby, Coinbase
+// Wallet, OKX, Trust, Phantom, Brave, Zerion, Frame, Bitget and anything else installed -- no SDK,
+// no per-wallet code, nothing to keep up to date as new wallets ship. Wallets older than 6963 only
+// know window.ethereum, and when several of those are installed they queue up in
+// window.ethereum.providers; both are folded into the same list. Phones have no extensions at all,
+// so there the only way in is the wallet's own in-app browser: we hand it this exact URL by deep
+// link, and offer the link itself for any wallet we do not name.
+//
+// Every page that wanted a wallet used to read window.ethereum directly, which meant: whichever
+// extension won the race for that property was the only wallet anyone could use, a person with two
+// wallets installed got the wrong one, a phone got "No wallet found", and a declined request died in
+// a toast nobody reads. So this file also PUTS ITSELF IN window.ethereum's place: every existing
+// `window.ethereum.request(...)` call site -- the arena's connect and bet, online play's sign-in,
+// deposits, refunds and claims -- keeps working untouched and now opens the picker, switches the
+// network and reports refusals in words. Nothing else in src/ needs to change, which is the point:
+// the wallet layer can be fixed without touching fight code.
+const WAL = (() => {
+  // Robinhood Chain, used only when a caller does not spell the network out.
+  const CHAIN = { id: 4663, name: 'Robinhood Chain', rpc: 'https://rpc.mainnet.chain.robinhood.com', explorer: 'https://robinhoodchain.blockscout.com' };
+  const LAST = 'bs.wallet.last';
+  const W = { p: null, info: null, addr: null };
+  const found = new Map();   // key -> { info, provider }
+  const subs = [];
+  let sheet = null, pending = null, note = '', native = null;
+
+  const phone = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (matchMedia('(max-width:820px)').matches && 'ontouchstart' in window);
+  const key = d => d.info.rdns || d.info.uuid || d.info.name;
+  const rq = (p, method, params) => p.request(params ? { method, params } : { method });
+
+  // what a wallet that predates EIP-6963 calls itself
+  function legacyName(p) {
+    return p.isRabby ? 'Rabby' : p.isMetaMask ? 'MetaMask' : p.isCoinbaseWallet || p.isCoinbaseBrowser ? 'Coinbase Wallet'
+      : p.isTrust || p.isTrustWallet ? 'Trust Wallet' : p.isOkxWallet || p.isOKExWallet ? 'OKX Wallet'
+      : p.isPhantom ? 'Phantom' : p.isBraveWallet ? 'Brave Wallet' : p.isZerion ? 'Zerion'
+      : p.isFrame ? 'Frame' : p.isTokenPocket ? 'TokenPocket' : p.isBitKeep || p.isBitget ? 'Bitget Wallet'
+      : p.isRainbow ? 'Rainbow' : p.isExodus ? 'Exodus' : 'Browser wallet';
+  }
+  function legacy() {
+    const e = native; if (!e || e.isWAL) return [];
+    const list = Array.isArray(e.providers) && e.providers.length ? e.providers : [e];
+    return list.filter(p => p && !p.isWAL && typeof p.request === 'function')
+      .map(p => ({ info: { rdns: 'injected:' + legacyName(p), name: legacyName(p) }, provider: p }));
+  }
+  function list() {
+    const m = new Map(found);
+    // only fall back to the injected property when nothing announced itself over 6963, or the
+    // same wallet shows up twice in the picker
+    if (!m.size) for (const d of legacy()) m.set(key(d), d);
+    return [...m.values()];
+  }
+
+  // phone deep links: open this page inside the wallet app's own browser
+  const url = () => location.href;
+  const bare = () => location.href.replace(/^https?:\/\//, '');
+  const APPS = [
+    { name: 'MetaMask', link: () => 'https://metamask.app.link/dapp/' + bare() },
+    { name: 'Coinbase Wallet', link: () => 'https://go.cb-w.com/dapp?cb_url=' + encodeURIComponent(url()) },
+    { name: 'Trust Wallet', link: () => 'https://link.trustwallet.com/open_url?coin_id=60&url=' + encodeURIComponent(url()) },
+    { name: 'Phantom', link: () => 'https://phantom.app/ul/browse/' + encodeURIComponent(url()) + '?ref=' + encodeURIComponent(location.origin) },
+    { name: 'OKX Wallet', link: () => 'okx://wallet/dapp/url?dappUrl=' + encodeURIComponent(url()) },
+    { name: 'Bitget Wallet', link: () => 'https://bkcode.vip?action=dapp&url=' + encodeURIComponent(url()) },
+  ];
+
+  const emit = () => subs.forEach(f => { try { f(W.addr); } catch (e) { } });
+
+  function adopt(d, a) {
+    W.p = d.provider; W.info = d.info; W.addr = a;
+    try { localStorage.setItem(LAST, key(d)); } catch (e) { }
+    if (!d.provider.__walBound && typeof d.provider.on === 'function') {
+      d.provider.__walBound = 1;
+      d.provider.on('accountsChanged', as => {
+        W.addr = as && as[0] ? as[0] : null;
+        if (!W.addr) { try { localStorage.removeItem(LAST); } catch (e) { } }
+        emit();
+      });
+      d.provider.on('chainChanged', () => emit());
+      d.provider.on('disconnect', () => { W.addr = null; emit(); });
+    }
+    emit();
+  }
+
+  // the message a person can act on, instead of a provider error code
+  function say(e, who) {
+    const c = e && e.code, m = (e && (e.message || (e.data && e.data.message))) || String(e || '');
+    if (c === 4001 || /reject|denied|cancel/i.test(m)) return 'You turned the request down in ' + who + '.';
+    if (c === -32002 || /already pending|already processing/i.test(m)) return 'Open ' + who + ' and finish the request already waiting there.';
+    if (c === 4100) return who + ' has not unlocked this account yet. Unlock it and try again.';
+    if (c === 4902) return who + ' does not have this network yet. Approve adding it.';
+    return String(m).replace(/^Error:\s*/, '') || 'That wallet refused the request.';
+  }
+
+  async function ensureChain(c) {
+    if (!c || !c.chainId || !W.p) return;
+    const want = '0x' + Number(c.chainId).toString(16), who = (W.info && W.info.name) || 'your wallet';
+    let have = null;
+    try { have = await rq(W.p, 'eth_chainId'); } catch (e) { }
+    if (have === want) return;
+    const add = [{
+      chainId: want, chainName: c.chainName || CHAIN.name,
+      nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+      rpcUrls: [c.rpc || CHAIN.rpc].filter(Boolean),
+      blockExplorerUrls: [c.explorer || CHAIN.explorer].filter(Boolean),
+    }];
+    try {
+      await rq(W.p, 'wallet_switchEthereumChain', [{ chainId: want }]);
+    } catch (e) {
+      const unknown = e && (e.code === 4902 || e.code === -32603 || /unrecognized|unsupported|not been added|add this network/i.test(e.message || ''));
+      if (!unknown) throw new Error(say(e, who));
+      try {
+        await rq(W.p, 'wallet_addEthereumChain', add);
+        await rq(W.p, 'wallet_switchEthereumChain', [{ chainId: want }]).catch(() => { });
+      } catch (e2) { throw new Error(say(e2, who)); }
+    }
+  }
+
+  // ---------------- the picker ----------------
+  function css() {
+    if (document.getElementById('walCss')) return;
+    const s = document.createElement('style'); s.id = 'walCss';
+    s.textContent = `
+.wal-wrap{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:18px;
+  background:rgba(3,3,6,.82);backdrop-filter:blur(6px);font-family:'Space Grotesk',system-ui,sans-serif;color:#e8e9ee}
+.wal-box{width:100%;max-width:420px;max-height:88vh;overflow:auto;background:#0b0b10;border:1px solid #23232c;border-radius:16px;
+  box-shadow:0 30px 90px rgba(0,0,0,.7);padding:20px 20px 16px}
+.wal-top{display:flex;align-items:baseline;gap:10px;margin:0 0 4px}
+.wal-h{font-family:'Barlow Condensed',Impact,sans-serif;font-style:italic;font-weight:900;font-size:30px;letter-spacing:.5px;margin:0;flex:1}
+.wal-x{background:none;border:0;color:#8b8d99;font-size:22px;line-height:1;cursor:pointer;padding:2px 6px}
+.wal-x:hover{color:#fff}
+.wal-sub{color:#9a9cab;font-size:13px;margin:0 0 14px}
+.wal-list{display:flex;flex-direction:column;gap:8px}
+.wal-w{display:flex;align-items:center;gap:12px;width:100%;text-align:left;cursor:pointer;color:#e8e9ee;text-decoration:none;
+  background:#13131a;border:1px solid #23232c;border-radius:12px;padding:12px 14px;font:600 15px 'Space Grotesk',system-ui,sans-serif}
+.wal-w:hover{border-color:#ff2a4a;background:#17171f}
+.wal-w img{width:28px;height:28px;border-radius:7px;flex:none}
+.wal-mono{width:28px;height:28px;border-radius:7px;flex:none;display:grid;place-items:center;background:#1d1d26;color:#27e1ff;
+  font:800 13px 'JetBrains Mono',monospace}
+.wal-w b{margin-left:auto;font-weight:500;font-size:12px;color:#6f7280}
+.wal-sec{margin:16px 0 8px;font:700 11px 'JetBrains Mono',monospace;letter-spacing:1.4px;color:#6f7280;text-transform:uppercase}
+.wal-err{margin:12px 0 0;padding:10px 12px;border-radius:10px;background:rgba(255,42,74,.12);border:1px solid rgba(255,42,74,.4);
+  color:#ff8a9c;font-size:13px;display:none}
+.wal-foot{margin-top:14px;display:flex;gap:8px;align-items:center}
+.wal-link{flex:1;font:500 12px 'JetBrains Mono',monospace;color:#6f7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wal-copy{background:#1d1d26;border:1px solid #2b2b36;color:#27e1ff;border-radius:9px;padding:8px 12px;cursor:pointer;
+  font:700 12px 'Space Grotesk',system-ui,sans-serif}
+.wal-copy:hover{border-color:#27e1ff}
+.wal-busy{opacity:.55;pointer-events:none}
+.wal-chip{position:fixed;top:12px;right:12px;z-index:2147482000;display:flex;align-items:center;gap:8px;cursor:pointer;
+  background:rgba(19,19,26,.92);border:1px solid #2b2b36;color:#e8e9ee;border-radius:999px;padding:9px 15px;
+  font:700 13px 'Space Grotesk',system-ui,sans-serif;letter-spacing:.2px;backdrop-filter:blur(4px)}
+.wal-chip:hover{border-color:#ff2a4a;background:rgba(23,23,31,.96)}
+.wal-chip.on{color:#27e1ff;border-color:#214a55}
+.wal-dot{width:7px;height:7px;border-radius:50%;background:#27e1ff;flex:none}
+@media (max-width:820px){.wal-chip{top:8px;right:8px;padding:8px 12px;font-size:12px}}`;
+    document.head.appendChild(s);
+  }
+
+  function close() {
+    if (!sheet) return;
+    sheet.remove(); sheet = null; note = '';
+    removeEventListener('keydown', keys, true);
+    if (pending) { const p = pending; pending = null; p.reject(new Error('No wallet chosen.')); }
+  }
+  function keys(e) {
+    if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); close(); return; }
+    e.stopPropagation();   // the fight reads the keyboard off window; it must not read it through the sheet
+  }
+
+  function row(name, icon, tag) {
+    const el = document.createElement(tag === 'Open app' ? 'a' : 'button');
+    el.className = 'wal-w';
+    if (el.tagName === 'BUTTON') el.type = 'button'; else el.rel = 'noopener';
+    el.innerHTML = (icon ? '<img alt="">' : `<span class="wal-mono">${(name || '?').slice(0, 1)}</span>`) + '<span class="wal-nm"></span><b></b>';
+    if (icon) el.querySelector('img').src = icon;
+    el.querySelector('.wal-nm').textContent = name || 'Browser wallet';
+    el.querySelector('b').textContent = tag;
+    return el;
+  }
+
+  function fill() {
+    if (!sheet) return;
+    const box = sheet.querySelector('.wal-list'), ext = list();
+    box.innerHTML = '';
+    if (W.addr) {
+      const h = document.createElement('div'); h.className = 'wal-sec'; h.textContent = 'Connected';
+      box.appendChild(h);
+      const cur = row(short(W.addr) + ' in ' + ((W.info && W.info.name) || 'your wallet'), W.info && W.info.icon, 'Disconnect');
+      cur.onclick = () => { disconnect(); fill(); };
+      box.appendChild(cur);
+      const sw = document.createElement('div'); sw.className = 'wal-sec'; sw.textContent = 'Switch to';
+      box.appendChild(sw);
+    }
+    for (const d of ext) {
+      const el = row(d.info.name, d.info.icon, 'Installed');
+      el.onclick = () => take(d).catch(() => { });
+      box.appendChild(el);
+    }
+    if (!ext.length) {
+      const p = document.createElement('p'); p.className = 'wal-sub';
+      p.textContent = phone() ? 'Pick your wallet app and this page opens inside it.'
+        : 'No wallet extension answered in this browser. Open the page in your wallet app instead, or install one.';
+      box.appendChild(p);
+    }
+    if (!ext.length || phone()) {
+      const h = document.createElement('div'); h.className = 'wal-sec'; h.textContent = 'Wallet apps';
+      box.appendChild(h);
+      for (const a of APPS) {
+        const el = row(a.name, null, 'Open app');
+        el.href = a.link();
+        box.appendChild(el);
+      }
+    }
+    const err = sheet.querySelector('.wal-err');
+    err.textContent = note; err.style.display = note ? 'block' : 'none';
+  }
+
+  function open() {
+    css();
+    if (sheet) { fill(); return; }
+    sheet = document.createElement('div');
+    sheet.className = 'wal-wrap';
+    sheet.innerHTML = `<div class="wal-box" role="dialog" aria-modal="true" aria-label="Connect a wallet">
+      <div class="wal-top"><h2 class="wal-h">Connect a wallet</h2><button class="wal-x" type="button" aria-label="Close">&times;</button></div>
+      <p class="wal-sub">Any wallet works. Nothing is signed until you approve it.</p>
+      <div class="wal-list"></div>
+      <div class="wal-err"></div>
+      <div class="wal-foot"><span class="wal-link"></span><button class="wal-copy" type="button">Copy link</button></div>
+    </div>`;
+    sheet.querySelector('.wal-x').onclick = close;
+    sheet.onclick = e => { if (e.target === sheet) close(); };
+    sheet.querySelector('.wal-link').textContent = location.host + location.pathname;
+    const cp = sheet.querySelector('.wal-copy');
+    cp.onclick = () => {
+      const done = () => { cp.textContent = 'Copied'; setTimeout(() => cp.textContent = 'Copy link', 1600); };
+      if (navigator.clipboard) navigator.clipboard.writeText(url()).then(done, () => { }); else done();
+    };
+    addEventListener('keydown', keys, true);
+    document.body.appendChild(sheet);
+    announce();            // one more poke: a wallet that loaded late still gets listed
+    fill();
+  }
+
+  async function take(d) {
+    const who = (d.info && d.info.name) || 'that wallet';
+    const box = sheet && sheet.querySelector('.wal-list');
+    if (box) box.classList.add('wal-busy');
+    try {
+      const as = await rq(d.provider, 'eth_requestAccounts');
+      if (!as || !as.length) throw new Error(who + ' returned no account. Unlock it and try again.');
+      adopt(d, as[0]);
+      const p = pending; pending = null;
+      close();
+      if (p) p.resolve(W.addr);
+      return W.addr;
+    } catch (e) {
+      note = say(e, who);
+      if (box) box.classList.remove('wal-busy');
+      fill();
+      throw new Error(note);
+    }
+  }
+
+  function sheetPromise() {
+    if (pending) { open(); return pending.promise; }
+    let resolve, reject;
+    const promise = new Promise((a, b) => { resolve = a; reject = b; });
+    pending = { resolve, reject, promise };
+    open();
+    return promise;
+  }
+
+  // Settles when a wallet is connected, or when the person closes the picker. With exactly one
+  // wallet in the browser there is nothing to pick, so the click goes straight to that wallet and
+  // its own popup comes up; a menu in front of it would be a second click for no decision. The
+  // picker is for the real cases: several wallets installed, or none, or one that just refused.
+  function choose() {
+    if (W.addr && W.p) return Promise.resolve(W.addr);
+    if (pending) { open(); return pending.promise; }
+    const ext = list();
+    if (ext.length === 1) return take(ext[0]).catch(() => sheetPromise());
+    return sheetPromise();
+  }
+
+  async function connect(chain) {
+    const a = await choose();
+    if (chain) await ensureChain(chain);
+    return a;
+  }
+
+  // ---------------- standing in for window.ethereum ----------------
+  // Methods that move money or identity must have a wallet first, so they open the picker. Reads
+  // must never pop a dialog on their own.
+  const NEEDS = /^(eth_requestAccounts|eth_sendTransaction|eth_signTransaction|personal_sign|eth_sign|eth_signTypedData|eth_signTypedData_v[34]|wallet_)/;
+  const PROXY = {
+    isWAL: true,
+    get selectedAddress() { return W.addr; },
+    get chainId() { return null; },
+    async request(o) {
+      const m = o && o.method, params = o && o.params;
+      if (m === 'eth_accounts') return W.addr ? [W.addr] : [];
+      if (m === 'eth_requestAccounts') { await choose(); return [W.addr]; }
+      if (NEEDS.test(m || '')) await choose();
+      if (!W.p) throw new Error('Connect a wallet first.');
+      try { return await rq(W.p, m, params); }
+      catch (e) { throw new Error(say(e, (W.info && W.info.name) || 'your wallet')); }
+    },
+    on(ev, fn) {
+      if (ev === 'accountsChanged') subs.push(a => fn(a ? [a] : []));
+      else if (W.p && typeof W.p.on === 'function') W.p.on(ev, fn);
+      return PROXY;
+    },
+    removeListener() { return PROXY; },
+    // a few wallets are probed by flag before use
+    get isMetaMask() { return !!(W.p && W.p.isMetaMask); },
+    enable() { return PROXY.request({ method: 'eth_requestAccounts' }); },
+  };
+
+  // ---------------- the button ----------------
+  // Nothing in the page offered a way in. The arena's own Connect wallet only renders once a
+  // contract is live (ARENA_LIVE), and online play hides its one behind a real-stakes room, so on
+  // the build people actually open there is no way to connect at all. The layer brings its own
+  // button: on the menus, out of the way, gone the moment a fight starts.
+  const short = a => a.slice(0, 6) + '…' + a.slice(-4);
+  function paintChip() {
+    const b = document.getElementById('walChip'); if (!b) return;
+    b.textContent = '';
+    if (W.addr) {
+      const d = document.createElement('i'); d.className = 'wal-dot'; b.appendChild(d);
+      b.appendChild(document.createTextNode(short(W.addr)));
+    } else b.appendChild(document.createTextNode('Connect wallet'));
+    b.classList.toggle('on', !!W.addr);
+    b.title = W.addr ? 'Connected with ' + ((W.info && W.info.name) || 'your wallet') : 'Connect any wallet';
+  }
+  // the same test the controls card uses (87_controls.js): a match is running and no menu is up
+  const inMatch = () => { try { return Game.state === 'match' && !Game.demo && document.querySelectorAll('.screen:not([hidden])').length === 0; } catch (e) { return false; } };
+  function mount() {
+    css();
+    if (document.getElementById('walChip')) return;
+    const b = document.createElement('button');
+    b.id = 'walChip'; b.type = 'button'; b.className = 'wal-chip';
+    b.onclick = () => { if (W.addr) open(); else connect(null).catch(() => { }); };
+    document.body.appendChild(b);
+    subs.push(paintChip);
+    paintChip();
+    setInterval(() => { b.style.display = inMatch() ? 'none' : 'flex'; }, 500);
+  }
+
+  function install() {
+    const cur = window.ethereum;
+    if (cur && cur.isWAL) return;
+    if (cur) native = cur;
+    try {
+      Object.defineProperty(window, 'ethereum', { value: PROXY, writable: true, configurable: true });
+    } catch (e) {
+      try { window.ethereum = PROXY; } catch (e2) { }   // locked down by the extension: leave it alone
+    }
+  }
+
+  // ---------------- discovery ----------------
+  addEventListener('eip6963:announceProvider', e => {
+    const d = e.detail;
+    if (!d || !d.info || !d.provider || d.provider.isWAL) return;
+    found.set(key(d), d);
+    if (sheet) fill();
+  });
+  const announce = () => dispatchEvent(new Event('eip6963:requestProvider'));
+
+  // come back to the wallet the person used last, without prompting them
+  async function restore() {
+    let id = null; try { id = localStorage.getItem(LAST); } catch (e) { }
+    if (!id) return;
+    for (let i = 0; i < 20 && !found.size; i++) await new Promise(r => setTimeout(r, 100));
+    const d = list().find(x => key(x) === id);
+    if (!d) return;
+    try { const as = await rq(d.provider, 'eth_accounts'); if (as && as[0]) adopt(d, as[0]); } catch (e) { }
+  }
+
+  install();
+  announce();
+  setTimeout(announce, 200);
+  setTimeout(announce, 1200);
+  addEventListener('ethereum#initialized', install);   // a wallet that injects late
+  addEventListener('load', () => { install(); announce(); restore(); mount(); });
+  if (document.readyState === 'complete') { restore(); mount(); }
+  else if (document.body) mount();
+  else addEventListener('DOMContentLoaded', mount);
+
+  return {
+    connect, request: o => PROXY.request(o), req: (m, p) => PROXY.request(p ? { method: m, params: p } : { method: m }),
+    ensureChain, open, close, list, onChange: f => subs.push(f),
+    disconnect() { W.p = null; W.info = null; W.addr = null; try { localStorage.removeItem(LAST); } catch (e) { } emit(); },
+    get addr() { return W.addr; },
+    get p() { return W.p; },
+    get name() { return (W.info && W.info.name) || null; },
+    chain: CHAIN,
+  };
+})();
+
+/*<<END:76b_wallets.js>>*/
 /*<<SRC:77_net.js>>*/
 // ===== online play: lobby, rooms, lockstep matches, practice + real stakes (server: net/) =====
 // "Play online" on the title calls Net.open(). #online opens the lobby, #room:CODE joins a room.
@@ -14639,6 +15754,8 @@ const Net = (() => {
   #netLeave{position:fixed;right:max(12px,env(safe-area-inset-right));top:calc(max(10px,env(safe-area-inset-top)) + 112px);z-index:7}
   .nr-p .lk{font:700 10px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--gold)}
   .nr-p .xh,.ns-x{font:500 11px var(--mono);letter-spacing:.04em;color:var(--cyan)}
+  .nr-p .xh.xv,.ns-x.xv{color:var(--lime);font-weight:700}
+  .nr-p .xh.xv span,.ns-x.xv span{color:var(--lime)}
   .nb-rk{display:inline-block;font:700 10px var(--mono);letter-spacing:.08em;padding:1px 6px;margin-left:6px;color:#050507;background:var(--gold);vertical-align:middle}
   .ns-elo{font:700 13px var(--mono);letter-spacing:.06em;margin-top:6px} .ns-elo .up{color:var(--lime)} .ns-elo .dn{color:var(--red)}
   /* unlocked-this-match badges. Only ever shown to the player who earned them: the server
@@ -14690,8 +15807,7 @@ const Net = (() => {
     home.innerHTML = `<div class="wrap nb-wrap">
       <div class="nb-top">
         <div><div class="eyebrow">Brawl Street online</div><h2 class="h2">Play online</h2></div>
-        <div class="nb-status"><span class="chip nb-conn" id="nbConn"><i></i><span>Offline</span></span><button class="btn small" id="nbRegion">Region</button><span class="chip" id="nbPing">— ms</span>
-          <span class="chip nb-bal" id="nbBal">— ETH</span><button class="btn small" id="nbRefill" hidden>Refill 1 ETH</button><button class="btn small" id="nbBack">Back</button></div>
+        <div class="nb-status"><span class="chip nb-conn" id="nbConn"><i></i><span>Offline</span></span><button class="btn small" id="nbBack">Back</button></div>
       </div>
       <div class="panel nb-row">
         <label class="nb-field"><span class="nb-lbl">Name</span><input class="nb-in" id="nbName" maxlength="16" autocomplete="nickname" spellcheck="false"></label>
@@ -14699,9 +15815,6 @@ const Net = (() => {
         <span class="note" id="nbStakeNote" style="text-align:left">Practice ETH. Winner takes the pot.</span>
         <div class="nb-field"><span class="nb-lbl">Maps</span><div class="nb-pills" id="nbMapMode"></div><button class="btn small" id="nbMapsBtn">Choose maps</button></div>
       </div>
-      <div class="panel" id="nbRegionPanel" hidden><div class="nb-row" style="justify-content:space-between"><span class="nb-lbl">Server region</span>
-        <button class="btn small" id="nbRegionTest">Measure again</button></div><div class="nb-pills" id="nbRegions"></div>
-        <p class="note" style="text-align:left" id="nbRegionNote">Online fights wait for the slower connection, so both players want a server close to them.</p></div>
       <div class="panel" id="nbMapsPanel" hidden><div class="nb-row" style="justify-content:space-between"><span class="nb-lbl" id="nbMapsLbl">Quick match maps</span>
         <span class="nb-pills"><button class="nb-pill" id="nbMapsAll">Select all</button><button class="nb-pill" id="nbMapsNone">Clear</button></span></div>
         <div class="nb-maps" id="nbMaps"></div>
@@ -14724,7 +15837,7 @@ const Net = (() => {
     room.innerHTML = `<div class="wrap nb-wrap">
       <div class="nb-top">
         <div><div class="eyebrow" id="nrKick">Room</div><h2 class="h2" id="nrTitle">Pick your fighter</h2></div>
-        <div class="nb-status"><span class="chip nb-code" id="nrCode">—</span><button class="btn small" id="nrCopy">Copy invite link</button><span class="chip" id="nrPing">— ms</span><button class="btn small" id="nrLeave">Leave</button></div>
+        <div class="nb-status"><span class="chip nb-code" id="nrCode">—</span><button class="btn small" id="nrCopy">Copy invite link</button><button class="btn small" id="nrLeave">Leave</button></div>
       </div>
       <div class="nr-wrapp"><div class="nr-players" id="nrPlayers"></div></div>
       <div class="nr-body">
@@ -14774,7 +15887,7 @@ const Net = (() => {
   // ------------------------------------------------------------------ state
   const N = {
     ws: null, conn: 'idle', me: null, room: null, lock: null, M: null, stats: null, rtt: 0, jit: 0, offset: null,
-    stake: store.get('netStake', 0.05), mode: 2, pool: store.get('netPool', []), mapsOpen: false, regionUrl: store.get('netRegionUrl', null), regionOpen: false, pendingJoin: null, digest: null, retry: 0, everOpen: false, failT: 0, pingT: 0,
+    stake: store.get('netStake', 0.05), mode: 2, pool: store.get('netPool', []), mapsOpen: false, regionUrl: store.get('netRegionUrl', null), pendingJoin: null, digest: null, retry: 0, everOpen: false, failT: 0, pingT: 0,
     view: null, lastRoom: null, realStake: null, wallet: null,
   };
 
@@ -14805,11 +15918,18 @@ const Net = (() => {
     try { CustomLook.set(lk); lookSent = JSON.stringify(CustomLook.get() || null); toast('Your saved fighter is back: ' + (lk.name || 'custom')); } catch (e) { /* creator not loaded */ }
   }
 
+  // A socket that drops and comes back is normal and the page handles it on its own, so it never
+  // says so on screen: once we have been online the chip keeps reading Online while it reopens.
+  // Only a dead end (failed) is ever shown. Nothing here alarms the player.
   function setConn(s) {
     N.conn = s;
     const el = byId('nbConn'); if (!el) return;
-    el.className = 'chip nb-conn' + (s === 'open' ? ' on' : s === 'failed' || s === 'closed' ? ' bad' : '');
-    el.querySelector('span').textContent = { idle: 'Offline', connecting: 'Connecting', open: 'Online', closed: 'Reconnecting', failed: 'No connection' }[s] || s;
+    // The chip says ONE thing: Online, once we are. Connecting, Reconnecting, Offline and No
+    // connection are all hidden, because a socket opening or reopening is this screen's normal
+    // work and announcing it reads as a broken game. A real dead end still gets the nbFail panel.
+    el.hidden = s !== 'open';
+    el.className = 'chip nb-conn on';
+    el.querySelector('span').textContent = 'Online';
   }
 
   function connect() {
@@ -14917,7 +16037,7 @@ const Net = (() => {
         renderHome();
         maybeSwitchRegion().catch(() => {});
         // back after a drop mid-match: the server sends "resume" right away if the match is still on
-        if (N.M && !N.M.shown) { const M = N.M; setTimeout(() => { if (N.M === M && !M.result && N.lock && N.lock.stalledFor > 2500) { toast('The match ended while you were disconnected.', true); endMatchView(); N.M = null; N.lock = null; restoreDemo(); showHome(); } }, 4000); }
+        if (N.M && !N.M.shown) { const M = N.M; setTimeout(() => { if (N.M === M && !M.result && N.lock && N.lock.stalledFor > 2500) { toast('That match is over. Pick your next fight.'); endMatchView(); N.M = null; N.lock = null; restoreDemo(); showHome(); } }, 4000); }
         if (N.pendingJoin && m.build.ok) { const c = N.pendingJoin; N.pendingJoin = null; send({ k: 'join', code: c }); }
         else if (N.lastRoom && !N.M && m.build.ok && N.view === 'room') send({ k: 'join', code: N.lastRoom });
         return;
@@ -14990,8 +16110,10 @@ const Net = (() => {
   function renderHome() {
     if (!built) return;
     const me = N.me, ok = N.conn === 'open' && me && me.build.ok;
-    byId('nbBal').textContent = me ? fmt(me.bal) + ' ETH · practice' : '— ETH';
-    byId('nbRefill').hidden = !(me && me.bal < 0.01);
+    // the balance chip and its refill button are gone from the header: keep the guards so the
+    // rest of the lobby renders whether or not those nodes exist
+    const bal = byId('nbBal'); if (bal) bal.textContent = me ? fmt(me.bal) + ' ETH · practice' : '';
+    const refill = byId('nbRefill'); if (refill) refill.hidden = !(me && me.bal < 0.01);
     const s = N.stats;
     byId('nbFoot').textContent = (s ? `${s.online} online · ${s.matches} match${s.matches === 1 ? '' : 'es'} live. ` : '') +
       'Every online match is replayed on the server from the inputs to decide the winner, so results can\'t be faked.';
@@ -15001,7 +16123,6 @@ const Net = (() => {
     byId('nbStakes').querySelectorAll('button').forEach(b => b.onclick = () => { N.stake = +b.dataset.v; store.set('netStake', N.stake); sfx('coin'); renderHome(); });
     byId('nbStakeNote').textContent = N.stake ? `Practice ETH. Stake ${N.stake} each, winner takes the pot.` : 'Free play, no stake.';
     renderMaps();
-    renderRegions();
     for (const id of ['nbQuick2', 'nbQuick4', 'nbCreate', 'nbJoin']) byId(id).disabled = !ok;
     const real = me && me.real;
     byId('nbReal').hidden = !real;
@@ -15013,27 +16134,8 @@ const Net = (() => {
     }
   }
 
-  function renderRegions() {
-    const list = regionList(), ms = pings() || {}, cur = N.me && N.me.region;
-    const el = byId('nbRegion');
-    if (el) { el.textContent = cur ? cur.label : 'Region'; el.title = cur && ms[cur.id] != null ? cur.label + ': ' + ms[cur.id] + ' ms measured' : 'Pick a server region'; el.onclick = () => { N.regionOpen = !N.regionOpen; sfx(); renderHome(); }; }
-    const panel = byId('nbRegionPanel'); if (!panel) return;
-    panel.hidden = !N.regionOpen;
-    const want = store.get('netRegion', 'auto');
-    byId('nbRegions').innerHTML = [`<button class="nb-pill${want === 'auto' ? ' on' : ''}" data-v="auto">Auto (closest)</button>`]
-      .concat(list.map(r => {
-        // the region we are on already has a live number (the socket round trip); the others need the probe
-        const msr = ms[r.id] != null ? ms[r.id] : (cur && r.id === cur.id && N.rtt ? Math.round(N.rtt) : null);
-        return `<button class="nb-pill${want === r.id ? ' on' : ''}" data-v="${esc(r.id)}">${esc(r.label)}${msr != null ? ' · ' + msr + ' ms' : ' · —'}</button>`;
-      })).join('');
-    byId('nbRegions').querySelectorAll('button').forEach(b => b.onclick = () => { store.set('netRegion', b.dataset.v); sfx(); maybeSwitchRegion().catch(() => {}); renderHome(); });
-    byId('nbRegionTest').onclick = () => { probeRegions(true).then(() => { renderHome(); toast('Measured again'); }); };
-    const best = pickRegion();
-    byId('nbRegionNote').textContent = list.length < 2
-      ? 'One server region so far (' + (cur ? cur.label : '—') + '). Online fights wait for the slower connection, so a server near both players matters more than anything else.'
-      : 'Playing on ' + (best ? best.label : '—') + '. Both players should be on the region that is closest to the pair.';
-  }
-
+  // No region picker: the lobby never shows one. The page measures the servers and plays on the
+  // closest one on its own (probeRegions/pickRegion/maybeSwitchRegion), and nothing says so on screen.
   function stageList() { return (N.me && N.me.stages) || []; }
   function stageName(id) { const s = stageList().find(x => x.id === id); return s ? s.name : String(id || '').toUpperCase(); }
   function renderMaps() {
@@ -15088,7 +16190,7 @@ const Net = (() => {
         el.className = 'nr-p' + (p.id === r.you ? ' me' : '');
         el.innerHTML = `<div class="art"></div><div class="pl"><div class="pn">P${i + 1}${p.id === r.host ? '<span class="tag">HOST</span>' : ''}${p.id === r.you ? '<span class="tag">YOU</span>' : ''}</div>
           <div class="fn">${esc(p.look && p.look.base === p.char ? p.look.name : charName(p.char))}</div>${p.look && p.look.base === p.char ? `<div class="lk">${esc(p.look.title || 'Custom fighter')}</div>` : ''}
-          <div class="who">${esc(p.name)}${p.elo ? ' · ' + p.elo : ''}</div>${p.x ? `<div class="xh">@${esc(p.x)}</div>` : ''}
+          <div class="who">${esc(p.name)}${p.elo ? ' · ' + p.elo : ''}</div>${p.x ? `<div class="xh${p.xv ? ' xv' : ''}">@${esc(p.x)}${p.xv ? ' <span title="Connected X account">\u2713</span>' : ''}</div>` : ''}
           <div class="st"><span class="${p.ready ? 'ok' : ''}">${p.ready ? 'Ready' : 'Picking'}</span><span>${r.real ? (p.wallet ? 'wallet ✓' : 'no wallet') : (p.ping ? p.ping + ' ms' : '')}</span></div></div>`;
         el.querySelector('.art').appendChild(artImg(p.char));
       }
@@ -15155,8 +16257,8 @@ const Net = (() => {
     byId('nrWallet').hidden = !r.real || !lobby;
     byId('nrWallet').textContent = me && me.wallet ? 'Wallet ✓' : 'Connect wallet';
     const pingLine = r.members.filter(m => m.ping).map(m => esc(m.name) + ' ' + m.ping + ' ms').join(' · ');
-    byId('nrPing').textContent = pingLine || '— ms';
-    byId('nrPing').title = 'Round trip to the ' + (r.region ? r.region.label : 'game') + ' server';
+    const np = byId('nrPing');            // the chip is off the room header now; keep the guard
+    if (np) { np.textContent = pingLine; np.title = 'Round trip to the game server'; }
     // how the match will actually feel, before anyone readies up
     const delayNote = r.delay >= 9
       ? `<b style="color:var(--gold)">Heavy connection: ${r.delay} frames of input delay (${Math.round(r.delay * 16.7)} ms).</b> Lockstep waits for the slower path, so a server closer to both of you is the fix. `
@@ -15253,8 +16355,9 @@ const Net = (() => {
     const w = byId('netWait');
     if (now < M.startLocal) { w.hidden = false; w.innerHTML = `<b>${Math.ceil((M.startLocal - now) / 1000)}</b>Match starting`; return; }
     const miss = L.stalledFor > 250 ? L.missing().filter(i => i !== L.me) : [];
-    if (N.conn !== 'open') { w.hidden = false; w.innerHTML = '<b>Reconnecting…</b>Hold on, your connection dropped'; }
-    else if (miss.length) {
+    // no "Reconnecting" overlay: a dropped socket reopens by itself and the fight keeps running,
+    // so saying it mid-match only makes the player think the game broke
+    if (miss.length) {
       const lag = M.lag || {};
       w.hidden = false;
       w.innerHTML = `<b>Waiting…</b>${miss.map(i => esc(M.names[i] || 'P' + (i + 1)) + (lag[i] && lag[i].gone ? ' left' : '') + (lag[i] && lag[i].secs ? ' · ' + lag[i].secs + 's' : '')).join(', ')}`;
@@ -15471,7 +16574,7 @@ const Net = (() => {
   // ------------------------------------------------------------------ wiring
   function wire() {
     byId('nbBack').onclick = () => { sfx(); leaveOnline(); };
-    byId('nbRefill').onclick = () => { send({ k: 'refill' }); sfx('coin'); };
+    const rf = byId('nbRefill'); if (rf) rf.onclick = () => { send({ k: 'refill' }); sfx('coin'); };
     const nm = byId('nbName');
     nm.onchange = () => { const v = nm.value.replace(/[^\w .\-]/g, '').trim().slice(0, 16); nm.value = v; if (v) { store.set('netName', v); send({ k: 'name', name: v }); } };
     byId('nbQuick2').onclick = () => { send({ k: 'quick', size: 2, stake: N.stake, stages: N.pool }); sfx(); };
@@ -15570,6 +16673,9 @@ window.Net = Net;
   .nlb-r.me{box-shadow:inset 3px 0 0 var(--red);background:rgba(255,42,74,.1)}
   .nlb-r .rk{font:700 12px var(--mono);color:var(--muted)} .nlb-r .nm{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .nlb-r .nm i{font-style:normal;font-family:var(--mono);font-size:11px;font-weight:500;color:var(--cyan);margin-left:6px}
+  .nlb-r .nm a{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--lime);margin-left:6px;text-decoration:none}
+  .nlb-r .nm a:hover{text-decoration:underline}
+  .np-x a{color:var(--lime);text-decoration:none} .np-x a:hover{text-decoration:underline}
   .nlb-r .el{font:700 13px var(--mono);text-align:right} .nlb-r .wl{font:500 11px var(--mono);color:var(--muted);text-align:right}
   .nlb-empty{font-size:13px;color:var(--muted);padding:8px}
   #netChal{position:fixed;left:50%;top:max(18px,env(safe-area-inset-top));transform:translateX(-50%);z-index:40;width:min(420px,calc(100% - 32px));padding:16px 18px;
@@ -15617,6 +16723,7 @@ window.Net = Net;
       <div class="np-row"><span class="np-big"></span><span>rating<br><b class="np-rec2"></b></span></div>
       <div class="np-row"><span>This week <b class="np-wk"></b></span><span>Ranked <b class="np-rw"></b></span><span>All games <b class="np-g"></b></span></div>
       <div class="np-row"><span>Friend code</span><span class="np-code"></span><button class="btn small" data-a="fc">Copy</button></div>
+      <div class="np-row np-x"></div>
       <div class="np-row np-look"></div>
       <div class="np-row"><button class="btn small" data-a="rec">Get a recovery code</button><button class="btn small" data-a="use">Use a recovery code</button></div>
       <div class="np-recbox"></div>`;
@@ -15626,10 +16733,16 @@ window.Net = Net;
     pr.querySelector('.np-rw').textContent = P ? P.rw + '–' + P.rl : '—';
     pr.querySelector('.np-g').textContent = P ? P.games : '—';
     pr.querySelector('.np-code').textContent = P ? P.fc : '—';
+    // Connect X: the handle, with a check when the server has proved it, and the button either way
+    const xr = pr.querySelector('.np-x'), xh = P && P.x;
+    xr.appendChild(el('span', '', 'X account'));
+    if (xh && P.xv) { const a2 = el('a', 'np-code', '@' + xh + ' \u2713'); a2.href = 'https://x.com/' + xh; a2.target = '_blank'; a2.rel = 'noopener noreferrer nofollow'; xr.appendChild(a2); }
+    else xr.appendChild(el('b', '', xh ? '@' + xh + ' (not connected yet)' : 'not connected'));
+    if (typeof XLink !== 'undefined') { const xb = el('button', 'btn small', xh && P.xv ? 'Change' : 'Connect X'); xb.onclick = () => { sfx(); XLink.open(); }; xr.appendChild(xb); }
     const lk = P && P.look, lr = pr.querySelector('.np-look');
     lr.appendChild(el('span', '', 'Custom fighter'));
     lr.appendChild(el('b', '', lk ? `${lk.name} (${Net.charName(lk.base)})` : 'none yet'));
-    if (lk && lk.x) lr.appendChild(el('span', 'np-code', '@' + lk.x));
+    if (lk && lk.x && !(xh && P.xv)) lr.appendChild(el('span', 'np-code', '@' + lk.x));
     if (typeof CustomLook !== 'undefined' && CustomLook.open) { const b = el('button', 'btn small', lk ? 'Edit' : 'Build one'); b.onclick = () => { sfx(); CustomLook.open(); }; lr.appendChild(b); }
     const box = pr.querySelector('.np-recbox');
     if (S.code) {
@@ -15659,7 +16772,7 @@ window.Net = Net;
     const list = fr.querySelector('.nf-list');
     const item = (f, sub, acts, dotCls) => {
       const r = el('div', 'nf-i'); r.appendChild(el('span', 'dot ' + (dotCls || '')));
-      const nm = el('div', 'nm', f.name); nm.appendChild(el('small', '', (f.x ? '@' + f.x + ' · ' : '') + sub)); r.appendChild(nm);
+      const nm = el('div', 'nm', f.name); nm.appendChild(el('small', '', (f.x ? '@' + f.x + (f.xv ? ' \u2713 · ' : ' · ') : '') + sub)); r.appendChild(nm);
       const a = el('div', 'acts'); for (const [label, fn, cls] of acts) { const b = el('button', 'btn small' + (cls ? ' ' + cls : ''), label); b.onclick = () => { fn(); sfx(); }; a.appendChild(b); }
       r.appendChild(a); list.appendChild(r);
     };
@@ -15688,7 +16801,10 @@ window.Net = Net;
       const mine = B.mine && (S.tab === 'all' ? B.mine.all : B.mine.week);
       const row = el('div', 'nlb-r' + (mine === r.rank ? ' me' : ''));
       const nm = el('span', 'nm', r.name);
-      if (r.x) nm.appendChild(el('i', '', '@' + r.x));   // plain text, never a link: it is just a display name
+      // A CONNECTED handle (r.xv) was proved by a post the server read itself, so it gets a check and
+      // a link. A handle merely typed into the creator stays plain text -- nobody proved they own it.
+      if (r.x && r.xv) { const a2 = el('a', 'i xv', '@' + r.x + ' \u2713'); a2.href = 'https://x.com/' + r.x; a2.target = '_blank'; a2.rel = 'noopener noreferrer nofollow'; a2.title = 'Connected X account'; nm.appendChild(a2); }
+      else if (r.x) nm.appendChild(el('i', '', '@' + r.x));
       row.append(el('span', 'rk', '#' + r.rank), nm, el('span', 'el', String(r.elo)), el('span', 'wl', r.wins + '–' + r.losses));
       lbl.appendChild(row);
     }
@@ -15799,6 +16915,7 @@ window.Net = Net;
       case 'social': S.social = m; if (S.view === 'home') renderSocial(); return;
       case 'board': S.board = m; if (S.view === 'home') renderSocial(); return;
       case 'recovery': S.code = m.code; renderSocial(); return;
+      case 'x_linked': Net.send({ k: 'board' }); renderSocial(); return;
       case 'challenge': showChallenge(m); return;
       case 'room':
         if (S.roomCode !== m.code) { S.roomCode = m.code; S.lines = []; S.unread = 0; }
@@ -15811,6 +16928,146 @@ window.Net = Net;
 })();
 
 /*<<END:78_net_social.js>>*/
+/*<<SRC:78b_xlink.js>>*/
+// ===== Connect X: link a real X account, the way every serious app does it =====
+// Entry points: the title screen plate, the online lobby profile, the Profile screen, the fighter
+// creator and the pause menu.
+//
+// The flow is "Sign in with X" in a POPUP WINDOW -- the same pattern Privy, Dynamic and thirdweb
+// use. Pressing Connect X opens a small window on the verify origin (CONNECT), which sends the
+// player to X's own authorise screen; X sends them back; the window posts the handle here and
+// closes. No typing, no pasting, nothing to install, and the game never sees a password.
+//
+// The verify origin finishes the OAuth exchange because a browser cannot (X only talks OAuth to a
+// server). When its X app isn't switched on yet, the popup says so instead of offering a worse way.
+// A connected handle is the only one shown with a check and turned into a link.
+(() => {
+  const KEY = 'xlink';
+  const CONNECT = (typeof window !== 'undefined' && window.BS_XCONNECT) || 'https://bs-xverify.vercel.app/connect.html';
+  const st = () => { try { return store.get(KEY, null); } catch (e) { return null; } };
+  const save = v => { try { store.set(KEY, v); } catch (e) { /* storage off */ } paint(); };
+  const sfx = () => { try { Sfx.ui(); } catch (e) { /* audio locked */ } };
+  const byId = id => document.getElementById(id);
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const handle = () => { const s = st(); return s && s.h ? s.h : ''; };
+
+  const MARK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>';
+  const css = `
+  .xl-chip{display:inline-flex;align-items:center;gap:6px;font:700 12px var(--mono);letter-spacing:.06em;color:var(--lime)}
+  .tb-item .xl-h{grid-column:3;grid-row:1/span 2;font:700 12px var(--mono);color:var(--lime);font-style:normal;opacity:1;transform:none}
+  #xlTitleBtn b{display:flex;align-items:center;gap:8px}
+  #xlTitleBtn b svg{width:19px;height:19px;fill:currentColor;flex:none}
+  .xl-mini svg{width:13px;height:13px;fill:currentColor;vertical-align:-2px;margin-right:5px}
+  `;
+  let styled = false;
+  function style() { if (styled) return; styled = true; const s = document.createElement('style'); s.textContent = css; document.head.appendChild(s); }
+  function netOpen() { return !!(window.Net && Net.state && Net.state.conn === 'open'); }
+
+  // ---------------------------------------------------------------- the popup
+  let win = null, timer = null;
+  function open() {
+    style();
+    // a one-time code ties this game account to the X sign-in, so the game server can confirm it too
+    let code = '';
+    try { code = store.get('xlinkCode', ''); if (!code) { code = 'BS-' + Math.random().toString(36).slice(2, 8).toUpperCase(); store.set('xlinkCode', code); } } catch (e) {}
+    if (netOpen()) Net.send({ k: 'x_start' });   // server issues/confirms its own code when online
+
+    const w = 460, h = 620;
+    const y = Math.max(0, (screen.height - h) / 2 + (screen.availTop || 0));
+    const x = Math.max(0, (screen.width - w) / 2 + (screen.availLeft || 0));
+    const url = CONNECT + '?o=' + encodeURIComponent(location.origin) + '&code=' + encodeURIComponent(code);
+    try { win = window.open(url, 'bs_connect_x', `popup=1,width=${w},height=${h},left=${x},top=${y}`); } catch (e) { win = null; }
+    if (!win) { if (window.Net && Net.toast) Net.toast('Allow pop-ups for this site, then press Connect X again.', true); return; }
+    try { win.focus(); } catch (e) {}
+    clearInterval(timer);
+    timer = setInterval(() => { if (!win || win.closed) { clearInterval(timer); win = null; } }, 600);
+  }
+
+  // the popup posts its result back here
+  addEventListener('message', ev => {
+    try { if (new URL(CONNECT).origin !== ev.origin) return; } catch (e) { return; }
+    const m = ev.data;
+    if (!m || typeof m !== 'object') return;
+    if (m.bsx === 'linked' && m.h && /^[a-z0-9_]{1,15}$/.test(String(m.h))) {
+      save({ h: String(m.h).toLowerCase(), id: m.id || '', at: Date.now(), v: true });
+      pushToLook(m.h);
+      if (netOpen()) Net.send({ k: 'x_claim', h: String(m.h).toLowerCase(), id: m.id || '', code: m.code || '', tok: m.tok || '' });
+      try { Sfx.coin(); } catch (e) {}
+      if (window.Net && Net.toast) Net.toast('X connected: @' + String(m.h).toLowerCase());
+      try { if (win && !win.closed) win.close(); } catch (e) {}
+    }
+  });
+
+  function disconnect() {
+    try { store.set(KEY, null); } catch (e) {}
+    if (netOpen()) Net.send({ k: 'x_unlink' });
+    pushToLook('');
+    paint();
+    if (window.Net && Net.toast) Net.toast('X disconnected');
+  }
+
+  // the handle rides along on the saved fighter, which rooms, name tags and the board read
+  function pushToLook(h) {
+    try {
+      if (!window.CustomLook || !CustomLook.get) return;
+      const lk = CustomLook.get(); if (!lk) return;
+      if ((lk.x || '') === (h || '')) return;
+      lk.x = h || ''; CustomLook.set(lk);
+    } catch (e) { /* creator not loaded in this build */ }
+    const f = byId('cfX'); if (f && f.value !== (h || '')) { f.value = h || ''; f.dispatchEvent(new Event('input', { bubbles: true })); }
+  }
+
+  // ---------------------------------------------------------------- entry points
+  function titlePlate() {
+    const menu = document.querySelector('#scTitle .tb-menu'); if (!menu) return null;
+    let b = byId('xlTitleBtn');
+    if (!b) {
+      style();
+      b = document.createElement('button'); b.id = 'xlTitleBtn'; b.className = 'tb-item tb-cyan';
+      b.addEventListener('mouseenter', () => sfx());
+      b.addEventListener('click', () => { sfx(); open(); });
+      const help = byId('bHelp');
+      menu.insertBefore(b, help && help.parentElement === menu ? help : null);
+    }
+    const h = handle();
+    if (b.dataset.h === h) return b;          // 85_menu numbers the plates; don't trample it every repaint
+    b.dataset.h = h;
+    const n = (b.querySelector('i') || {}).textContent || '';
+    b.innerHTML = `<i>${esc(n)}</i><b>${MARK}${h ? 'X connected' : 'Connect X'}</b>` +
+      (h ? `<em class="xl-h">@${esc(h)}</em>` : '<em>▶</em>') +
+      `<small>${h ? 'Your handle shows on your fighter, in rooms and on the leaderboard' : 'Sign in with X, with a check next to your name'}</small>`;
+    return b;
+  }
+  function paint() {
+    titlePlate();
+    // the fighter creator's own slot
+    for (const host of document.querySelectorAll('#xlSlot')) {
+      let c = host.querySelector('.xl-mini');
+      if (!c) { c = document.createElement('button'); c.className = 'btn small xl-mini'; c.onclick = () => { sfx(); open(); }; host.appendChild(c); }
+      c.innerHTML = MARK + (handle() ? '@' + esc(handle()) : 'Connect X');
+    }
+    const show = byId('cfShowX'); if (show && handle()) show.textContent = '@' + handle();
+  }
+
+  // the title screen is rebuilt by 85_menu's own observer, so re-assert the plate when the menu changes
+  const watch = () => {
+    const menu = document.querySelector('#scTitle .tb-menu'); if (!menu) return setTimeout(watch, 300);
+    paint();
+    new MutationObserver(() => paint()).observe(menu, { childList: true });
+  };
+  if (document.readyState === 'loading') addEventListener('DOMContentLoaded', watch); else setTimeout(watch, 0);
+  setInterval(paint, 2000);
+
+  // the game server's own confirmation sets the check wherever names are shown online
+  if (window.Net && Net.on) Net.on(m => {
+    if (m.k === 'x_linked' && m.h) { save({ h: m.h, at: Date.now(), v: true }); pushToLook(m.h); }
+    else if (m.k === 'welcome') { const s = st(); if (s && s.h) pushToLook(s.h); }
+  });
+
+  window.XLink = { open, get: () => st(), handle, disconnect, paint };
+})();
+
+/*<<END:78b_xlink.js>>*/
 /*<<SRC:79_core.js>>*/
 // ===== the core set (9/22 night, Duane: "only focus on less fighters and less maps, make everything professional") =====
 // 12 fighters and 5 stages, finished properly before the rest come back. The menus show only these; nothing is
@@ -16144,7 +17401,7 @@ boot();
 // UI only: wraps R.frame, reads the canvases, never touches fight state or the seeded Rng.
 (function () {
   if (typeof R === 'undefined' || typeof document === 'undefined') return;
-  const SECS = 10, FPS = 30, MUXER = new URL('./lib/mp4-muxer.mjs', location.href).href;
+  const SECS = 10, FPS = 30, MUXER = 'https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/+esm';
   const small = typeof IS_TOUCH !== 'undefined' && IS_TOUCH;
   const W = small ? 960 : 1280, H = small ? 540 : 720;
   const C = {
@@ -19195,8 +20452,9 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
         <div class="cf-grp"><div class="cf-lbl">Name <em>up to 16 letters</em></div><input class="cf-in" id="cfName" maxlength="16" autocomplete="off" spellcheck="false"></div>
         <div class="cf-grp"><div class="cf-lbl">Title</div><input class="cf-in sm" id="cfTitle" maxlength="22" autocomplete="off" spellcheck="false">
           <div class="cf-chips" id="cfTitles">${TITLES.map(t => `<button class="cf-chip" data-t="${esc(t)}">${esc(t)}</button>`).join('')}</div></div>
-        <div class="cf-grp"><div class="cf-lbl">X / Twitter <em>optional, shown under your name</em></div>
-          <div class="cf-at"><span>@</span><input class="cf-in sm" id="cfX" maxlength="15" autocomplete="off" spellcheck="false" placeholder="yourhandle"></div></div>
+        <div class="cf-grp"><div class="cf-lbl">X / Twitter <em>connect it and your handle shows with a check</em></div>
+          <div class="cf-at"><span>@</span><input class="cf-in sm" id="cfX" maxlength="15" autocomplete="off" spellcheck="false" placeholder="yourhandle"></div>
+          <div class="row" id="xlSlot" style="margin-top:6px;gap:8px;align-items:center"></div></div>
         <div class="cf-grp"><div class="cf-lbl">Body <em id="cfBodyNote">moves and stats come from the body</em></div><div class="cf-bodies" id="cfBodies"></div></div>
         <div class="cf-grp"><div class="cf-lbl">Colour</div><div class="cf-sw" data-k="tint">${TINTS.map(([v, l, h]) => `<button class="${v === 'orig' ? 'orig' : ''}" data-v="${v}" id="cf_tint_${v}" title="${l}" aria-label="${l}" style="--c:${h || '#fff'}"></button>`).join('')}</div></div>
         <div class="cf-grp"><div class="cf-lbl">Skin / fur tone</div><div class="cf-sw" data-k="skin">${SKIN.map(([v, l, h]) => `<button class="${v === 'orig' ? 'orig' : ''}" data-v="${v}" id="cf_skin_${v}" title="${l}" aria-label="${l}" style="--c:${h || '#fff'}"></button>`).join('')}</div></div>
@@ -20865,6 +22123,8 @@ if (typeof Net !== 'undefined' && Net.on) Net.on(m => {
   .pf-big{font-family:var(--display);font-style:italic;font-weight:900;font-size:56px;line-height:.86;background:var(--chrome);-webkit-background-clip:text;background-clip:text;color:transparent}
   .pf-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:8px}
   .pf-stat{padding:9px 10px;background:rgba(5,5,7,.5);box-shadow:inset 0 0 0 1px var(--line)}
+  .pf-x{font:700 14px var(--mono);letter-spacing:.04em;color:var(--lime);text-decoration:none}
+  .pf-x:hover{text-decoration:underline} .pf-x.off{color:var(--muted);font-weight:500}
   .pf-stat b{display:block;font-family:var(--display);font-style:italic;font-weight:900;font-size:27px;line-height:1;color:var(--text)}
   .pf-stat span{font:700 10px var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--dim)}
   .pf-bad{display:flex;flex-wrap:wrap;gap:6px}
@@ -20884,7 +22144,16 @@ if (typeof Net !== 'undefined' && Net.on) Net.on(m => {
   @media (max-width:760px){.pf{grid-template-columns:1fr}#arsRail{width:158px}}
   `;
 
-  const S = { tab: store.get('storeTab', 'weapons'), open: null, rail: false, built: false };
+  // The shelves the store has. There was a fourth, "Bundles" -- a tab whose own name told a player
+  // nothing about what was behind it -- and it is gone. The bundle entries stay in the catalog
+  // (89_econ.js) so an account that already owns one still resolves its name and icon; nothing in
+  // here sells them any more.
+  const TABS = [['weapons', 'Weapons'], ['looks', 'Cosmetics'], ['arsenal', 'My arsenal']];
+  const S = { tab: 'weapons', open: null, rail: false, built: false };
+  // A device whose last open tab was 'bundles' has that string in storage. It no longer has a
+  // button, and render() would fall through to the arsenal with nothing lit up, so an unknown tab
+  // goes back to Weapons.
+  try { const t = store.get('storeTab', 'weapons'); if (TABS.some(x => x[0] === t)) S.tab = t; } catch (e) { /* storage blocked */ }
 
   function build() {
     if (S.built) return; S.built = true;
@@ -20928,7 +22197,6 @@ if (typeof Net !== 'undefined' && Net.on) Net.on(m => {
     byId('pfShare').onclick = () => { sfx(); shareCard(); };
     btn.onclick = e => { e.stopPropagation(); sfx(); toggleRail(); };
 
-    const TABS = [['weapons', 'Weapons'], ['looks', 'Cosmetics'], ['bundles', 'Bundles'], ['arsenal', 'My arsenal']];
     const tb = byId('stTabs');
     for (const [id, label] of TABS) { const b = el('button', S.tab === id ? 'on' : '', label); b.onclick = () => { S.tab = id; store.set('storeTab', id); sfx(); render(); }; b.dataset.t = id; tb.appendChild(b); }
 
@@ -21027,17 +22295,6 @@ if (typeof Net !== 'undefined' && Net.on) Net.on(m => {
         body.appendChild(w);
       }
       body.appendChild(el('p', 'st-note', 'None of this changes a hitbox, so all of it is legal in a money match. That is the point: show off all you like, and let the fight stay a fight.'));
-    } else if (S.tab === 'bundles') {
-      const w = el('div', 'shelf');
-      w.appendChild(el('h3', '', 'Bundles')); w.appendChild(el('div', 'sub', 'The same items, cheaper together'));
-      const g = el('div', 'grid');
-      for (const d of Econ.CAT.bundles) {
-        const c = card(Econ.BYID[d.id], 'bundle');
-        const list = d.grants.map(id => id === 'ALL_WEAPONS' ? 'every weapon' : (Econ.BYID[id] ? Econ.BYID[id].name : id)).join(', ');
-        c.querySelector('.bl').textContent = d.blurb + ' — ' + list + '.';
-        g.appendChild(c);
-      }
-      w.appendChild(g); body.appendChild(w);
     } else {
       body.appendChild(arsenalEditor());
     }
@@ -21147,6 +22404,19 @@ if (typeof Net !== 'undefined' && Net.on) Net.on(m => {
     if (S2.season && S2.season.rank) rows.push(['#' + S2.season.rank, 'Season rank']);
     for (const [v, k] of rows) { const d = el('div', 'pf-stat'); d.appendChild(el('b', '', v)); d.appendChild(el('span', '', k)); stats.appendChild(d); }
     left.appendChild(stats);
+    // Connect X (78b_xlink.js). A connected handle is one the server proved from the player's own
+    // post, so it is the only one that gets a check and a link out to the profile.
+    if (typeof XLink !== 'undefined') {
+      left.appendChild(el('div', 'eyebrow', 'X account'));
+      const xrow = el('div', 'row'); xrow.style.cssText = 'justify-content:flex-start;gap:8px;align-items:center;flex-wrap:wrap';
+      const lx = XLink.get(), h = (prof && prof.x) || (lx && lx.h) || '', ver = prof ? !!prof.xv : !!(lx && lx.h);
+      if (h && ver) { const a2 = el('a', 'pf-x', '@' + h + ' \u2713'); a2.href = 'https://x.com/' + h; a2.target = '_blank'; a2.rel = 'noopener noreferrer nofollow'; xrow.appendChild(a2); }
+      else xrow.appendChild(el('span', 'pf-x' + (h ? '' : ' off'), h ? '@' + h : 'Not connected'));
+      const xb = el('button', 'btn small', h && ver ? 'Change' : 'Connect X');
+      xb.onclick = () => { sfx(); XLink.open(); };
+      xrow.appendChild(xb);
+      left.appendChild(xrow);
+    }
     const xw = el('div', 'st-bar');
     xw.appendChild(el('span', 'st-lv', String(bar.level)));
     const xb = el('div', 'st-xp'); const xi = el('i'); xi.style.width = (bar.pct * 100).toFixed(1) + '%'; xb.appendChild(xi); xw.appendChild(xb);
@@ -22254,6 +23524,11 @@ if (typeof Net !== 'undefined' && Net.on) Net.on(m => {
       const card = document.getElementById('gfxCard');
       const back = setInterval(() => { if (!Game.paused || !card || !card.classList.contains('on')) { clearInterval(back); if (Game.paused && Game.state === 'match') { el.hidden = false; paint(); } } }, 200);
     }));
+    // Connect X mid-match too (78b_xlink.js): the fight stays paused behind the card
+    if (typeof XLink !== 'undefined') {
+      const h = XLink.handle();
+      items.push(item(String(items.length + 1).padStart(2, '0'), h ? 'X: @' + h : 'Connect X', () => XLink.open()));
+    }
     items.push(item(String(items.length + 1).padStart(2, '0'), 'Quit match', () => UI.quit()));
     box.append(...items);
     setTimeout(() => { try { items[0].focus(); } catch (e) {} }, 0);
@@ -22512,6 +23787,614 @@ if (typeof Net !== 'undefined' && Net.on) Net.on(m => {
 })();
 
 /*<<END:8g_training.js>>*/
+/*<<SRC:8h_pay.js>>*/
+// ===== CHECKOUT: paying for a store item, topping up a wager balance, attaching a wallet =====
+//
+// The whole money surface the player ever sees. It renders from what the server sent and nothing
+// else: the assets it offers, the amount on an invoice and the address it shows are the server's
+// numbers (net/lib/paygate.js). This file never prices anything and never decides what is owned.
+//
+// It routes around `Econ.buy` rather than replacing it. If crypto payments are off on the server,
+// the old behaviour is untouched and this file draws nothing at all.
+(() => {
+  if (typeof document === 'undefined' || typeof Econ === 'undefined') return;
+
+  const S = {
+    assets: [], topups: [], tiers: {}, minWithdraw: {}, families: [],
+    houseOffBps: 0, rakeBps: 300, houseRakeBps: 150,
+    wallets: [], balances: [], withdrawals: [],
+    inv: null, busy: false, tab: 'pay', target: null, poll: 0,
+  };
+  const on = () => S.assets.length > 0;
+
+  const el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; };
+  const byId = id => document.getElementById(id);
+  const money = c => '$' + (c / 100).toFixed(2);
+  const net = o => { try { Net.send(o); } catch (e) { /* not connected */ } };
+  const say = (m, bad) => { try { Net.toast(m, !!bad); } catch (e) { /* no toast yet */ } };
+  const sfx = k => { try { Sfx[k || 'ui'](); } catch (e) { /* audio locked */ } };
+  const famName = f => (f === 'sol' ? 'Solana' : 'EVM');
+
+  // --------------------------------------------------------------------------------------- style
+  const css = `
+  /* This number has to sit in one specific gap, so it is written down rather than guessed at.
+     76b_wallets.js puts a fixed "Connect wallet" chip at top:12px right:12px on z-index 2147482000
+     and its own picker on 2147483000. At any lower z-index that chip floats over this modal and
+     lands exactly on top of the close button (.x is also top right). So: ABOVE the chip, so the
+     overlay covers it like a modal should, and BELOW the picker, because this modal is what opens
+     that picker and it has to appear in front. */
+  #payWrap{position:fixed;inset:0;z-index:2147482500;display:none;align-items:center;justify-content:center;padding:20px;
+    background:rgba(3,3,5,.82);backdrop-filter:blur(7px)}
+  #payWrap.on{display:flex}
+  #payBox{position:relative;width:min(760px,100%);max-height:min(86vh,900px);overflow:auto;padding:22px;
+    background:linear-gradient(170deg,rgba(18,18,24,.97),rgba(8,8,11,.98));box-shadow:inset 0 0 0 1px var(--line2),0 30px 90px rgba(0,0,0,.7);
+    clip-path:polygon(0 14px,14px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%)}
+  #payBox h2{margin:0 0 2px;font-family:var(--display);font-style:italic;font-weight:900;font-size:36px;line-height:.9;
+    text-transform:uppercase;background:var(--chrome);-webkit-background-clip:text;background-clip:text;color:transparent}
+  #payBox .kick{font:700 11px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--cyan);margin-bottom:12px}
+  #payBox .x{position:absolute;right:14px;top:12px;width:34px;height:34px;border:0;background:rgba(255,255,255,.06);color:var(--muted);
+    font-size:19px;cursor:pointer;line-height:1}
+  #payBox .x:hover{background:var(--red);color:#fff}
+  .pyTabs{display:flex;gap:2px;margin:0 0 14px;flex-wrap:wrap}
+  .pyTabs button{min-height:36px;padding:0 15px;font:700 12px var(--ui);color:var(--muted);background:rgba(255,255,255,.04);
+    border:0;box-shadow:inset 0 0 0 1px var(--line);cursor:pointer}
+  .pyTabs button.on{color:#fff;background:var(--red);box-shadow:none}
+  .pyNote{font-size:13px;color:var(--muted);line-height:1.55;max-width:74ch;margin:0 0 12px}
+  .pyNote b{color:var(--gold)}
+  .pyRow{display:grid;grid-template-columns:repeat(auto-fill,minmax(222px,1fr));gap:8px}
+  .pyA{display:flex;flex-direction:column;gap:3px;padding:11px 13px;text-align:left;cursor:pointer;border:0;
+    background:var(--glass);box-shadow:inset 0 0 0 1px var(--line);transition:transform .14s,box-shadow .2s}
+  .pyA:hover:not(:disabled){transform:translateY(-2px);box-shadow:inset 0 0 0 1px var(--cyan)}
+  .pyA:disabled{cursor:not-allowed;opacity:.45}
+  .pyA .sym{font-family:var(--display);font-style:italic;font-weight:900;font-size:21px;line-height:1;text-transform:uppercase;color:var(--text)}
+  .pyA .ch{font:600 10.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+  .pyA .amt{font:800 14px var(--mono);color:var(--gold);margin-top:3px}
+  .pyA .bad{font-size:11.5px;color:var(--dim);line-height:1.4;margin-top:3px}
+  .pyA.house{box-shadow:inset 0 0 0 1px rgba(255,200,61,.5)}
+  .pyA .off{align-self:flex-start;font:800 9.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;
+    padding:2px 6px;background:var(--gold);color:#140d00;margin-top:4px}
+  .pyBtn{min-height:44px;padding:0 20px;font:800 13px var(--ui);letter-spacing:.04em;text-transform:uppercase;
+    color:#fff;background:var(--red);border:0;cursor:pointer}
+  .pyBtn:hover:not(:disabled){filter:brightness(1.15)}
+  .pyBtn:disabled{opacity:.5;cursor:wait}
+  .pyBtn.ghost{background:rgba(255,255,255,.05);color:var(--muted);box-shadow:inset 0 0 0 1px var(--line)}
+  .pyFld{width:100%;min-height:42px;padding:0 12px;font:600 13px var(--mono);color:var(--text);
+    background:rgba(0,0,0,.45);border:0;box-shadow:inset 0 0 0 1px var(--line)}
+  .pyFld:focus{outline:0;box-shadow:inset 0 0 0 1px var(--cyan)}
+  .pyAmt{display:flex;flex-direction:column;gap:6px;padding:14px;background:rgba(0,0,0,.4);box-shadow:inset 0 0 0 1px var(--line);margin:0 0 12px}
+  .pyAmt .big{font:800 25px var(--mono);color:var(--gold);line-height:1.1;word-break:break-all}
+  .pyAmt .to{font:600 11.5px var(--mono);color:var(--muted);word-break:break-all;line-height:1.5}
+  .pyAmt .to b{color:var(--cyan);font-weight:700}
+  .pyList{display:flex;flex-direction:column;gap:6px;margin:0 0 12px}
+  .pyIt{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;background:var(--glass);box-shadow:inset 0 0 0 1px var(--line)}
+  .pyIt .g{flex:1;min-width:140px}
+  .pyIt .t{font:700 12.5px var(--mono);color:var(--text);word-break:break-all}
+  .pyIt .s{font-size:11.5px;color:var(--dim);margin-top:2px}
+  .pyIt .tag{font:800 9.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;padding:3px 7px;background:rgba(255,255,255,.08);color:var(--muted)}
+  .pyIt .tag.ok{background:rgba(61,255,138,.18);color:var(--lime)}
+  .pyIt .tag.wait{background:rgba(39,225,255,.16);color:var(--cyan)}
+  .pyIt button{min-height:32px;padding:0 11px;font:700 11px var(--ui);text-transform:uppercase;border:0;cursor:pointer;
+    background:rgba(255,255,255,.06);color:var(--muted);box-shadow:inset 0 0 0 1px var(--line)}
+  .pyIt button:hover{color:#fff;background:var(--red);box-shadow:none}
+  .pyFoot{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}
+  .pySpin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.25);border-top-color:var(--cyan);
+    border-radius:50%;animation:pySp .8s linear infinite;vertical-align:-2px;margin-right:7px}
+  @keyframes pySp{to{transform:rotate(360deg)}}
+  /* The way in. Stacked directly UNDER 76b_wallets.js's connect chip rather than beside it: the
+     chip's width changes when it swaps "Connect wallet" for an address, so anything placed to its
+     left would start overlapping the moment somebody connects. Vertically stacked cannot collide
+     whatever the chip does. Same z-index band as that chip, one below it. */
+  #payChip{position:fixed;top:58px;right:12px;z-index:2147481900;display:none;align-items:center;gap:7px;cursor:pointer;
+    min-height:34px;padding:0 13px;border:0;font:800 12px var(--ui);letter-spacing:.03em;text-transform:uppercase;
+    color:var(--text);background:rgba(12,12,16,.92);box-shadow:inset 0 0 0 1px var(--line2);backdrop-filter:blur(6px)}
+  #payChip:hover{color:#fff;background:var(--red);box-shadow:none}
+  #payChip i{font-style:normal;font:800 11px var(--mono);color:var(--gold)}
+  @media (max-width:520px){#payBox{padding:16px}#payBox h2{font-size:28px}.pyRow{grid-template-columns:1fr}
+    #payChip{top:52px;right:8px;font-size:11px;padding:0 10px}}
+  `;
+
+  let built = false;
+  function build() {
+    if (built) return;
+    built = true;
+    const st = el('style'); st.textContent = css; document.head.appendChild(st);
+    const wrap = el('div'); wrap.id = 'payWrap';
+    const box = el('div'); box.id = 'payBox';
+    const x = el('button', 'x', '✕'); x.onclick = () => close();
+    box.appendChild(x);
+    const body = el('div'); body.id = 'payBody';
+    box.appendChild(body);
+    wrap.appendChild(box);
+    wrap.addEventListener('click', e => { if (e.target === wrap) close(); });
+    document.body.appendChild(wrap);
+    mountChip();
+  }
+
+  // 76b_wallets.js learned this the hard way and it applies here too: a screen nobody can open may
+  // as well not exist. The store's buy button reaches the checkout, but the balance and the wager
+  // screens had no way in at all until this. It only appears when the server actually offers
+  // payments, and it is gone the moment a fight starts (the same test 87_controls.js uses).
+  function mountChip() {
+    if (byId('payChip')) return;
+    const b = el('button'); b.id = 'payChip'; b.type = 'button';
+    b.onclick = () => { sfx(); open(S.balances.length ? 'bank' : 'wager'); };
+    document.body.appendChild(b);
+    paintChip();
+    const inMatch = () => { try { return Game.state === 'match' && !Game.demo && document.querySelectorAll('.screen:not([hidden])').length === 0; } catch (e) { return false; } };
+    setInterval(() => { b.style.display = (on() && !inMatch() && !isOpen()) ? 'flex' : 'none'; }, 500);
+  }
+  function paintChip() {
+    const b = byId('payChip'); if (!b) return;
+    b.textContent = '';
+    // Show the balance once there is one: it is the thing a player wants to glance at.
+    const first = S.balances[0];
+    if (first) {
+      b.appendChild(document.createTextNode('Wager'));
+      const i = el('i', '', first.amount + ' ' + first.symbol);
+      b.appendChild(i);
+    } else b.appendChild(document.createTextNode('Wager a fight'));
+    b.title = 'Balance, wagers and payments';
+  }
+
+  function open(tab, target) {
+    build();
+    S.tab = tab || 'pay'; S.target = target || null; S.inv = null;
+    byId('payWrap').classList.add('on');
+    net({ k: 'payassets' }); net({ k: 'wallets' }); net({ k: 'bank' });
+    if (S.target) net({ k: 'payquote', purpose: S.target.purpose, item: S.target.item, cents: S.target.cents });
+    render();
+  }
+  function close() {
+    if (!built) return;
+    byId('payWrap').classList.remove('on');
+    S.inv = null; S.target = null;
+    if (S.poll) { clearTimeout(S.poll); S.poll = 0; }
+  }
+  const isOpen = () => built && byId('payWrap').classList.contains('on');
+
+  // ------------------------------------------------------------------------------------ rendering
+  function render() {
+    if (!isOpen()) return;
+    const b = byId('payBody');
+    b.textContent = '';
+    if (S.inv) return renderInvoice(b);
+    b.appendChild(el('div', 'kick', S.tab === 'wallet' ? 'Your wallets' : S.tab === 'bank' ? 'Wager balance' : 'Checkout'));
+    b.appendChild(el('h2', '', S.tab === 'wallet' ? 'Wallets' : S.tab === 'bank' ? 'Balance' : (S.target && S.target.label) || 'Pay'));
+
+    const tabs = el('div', 'pyTabs');
+    const mk = (id, name) => { const t = el('button', S.tab === id ? 'on' : '', name); t.onclick = () => { sfx(); S.tab = id; S.inv = null; render(); }; return t; };
+    if (S.target) tabs.appendChild(mk('pay', 'Pay'));
+    tabs.appendChild(mk('bank', 'Balance'));
+    tabs.appendChild(mk('wager', 'Wager a fight'));
+    tabs.appendChild(mk('wallet', 'Wallets'));
+    tabs.appendChild(mk('history', 'Payments'));
+    b.appendChild(tabs);
+
+    if (!on()) {
+      b.appendChild(el('p', 'pyNote', 'Crypto payments are not switched on for this server yet. Weapons still unlock by level, and the whole $15 shelf is free by level 10.'));
+      return;
+    }
+    if (S.tab === 'wallet') return renderWallets(b);
+    if (S.tab === 'bank') return renderBank(b);
+    if (S.tab === 'wager') return renderWager(b);
+    if (S.tab === 'history') return renderHistory(b);
+    renderPicker(b);
+  }
+
+  // ---- pick an asset -------------------------------------------------------------------------
+  function renderPicker(b) {
+    const t = S.target;
+    if (!t) { b.appendChild(el('p', 'pyNote', 'Nothing is selected. Pick a weapon in the store, or top up a wager balance from the Balance tab.')); return; }
+    b.appendChild(el('p', 'pyNote', 'Pay from your own wallet, straight through. Pick what you want to pay in and the exact amount is shown before anything is signed.'));
+    const grid = el('div', 'pyRow');
+    for (const q of (t.quotes || [])) {
+      const btn = el('button', 'pyA' + (q.house ? ' house' : ''));
+      btn.appendChild(el('div', 'sym', q.symbol));
+      btn.appendChild(el('div', 'ch', q.chain));
+      if (q.err) {
+        btn.appendChild(el('div', 'bad', q.err));
+        btn.disabled = true;
+      } else {
+        btn.appendChild(el('div', 'amt', q.send + ' ' + q.symbol));
+        if (q.offBps) btn.appendChild(el('div', 'off', (q.offBps / 100) + '% off'));
+        btn.onclick = () => startInvoice(q.asset);
+      }
+      grid.appendChild(btn);
+    }
+    b.appendChild(grid);
+    if (S.houseOffBps) b.appendChild(el('p', 'pyNote', 'Paying in WOLVERINU takes ' + (S.houseOffBps / 100) + '% off the price, and it halves the cut on a wager.'));
+  }
+
+  function startInvoice(assetId) {
+    if (S.busy) return;
+    S.busy = true; sfx();
+    const t = S.target;
+    net({ k: 'payopen', purpose: t.purpose, item: t.item, cents: t.cents, asset: assetId });
+    setTimeout(() => { S.busy = false; }, 1200);
+  }
+
+  // ---- an open invoice -----------------------------------------------------------------------
+  function renderInvoice(b) {
+    const inv = S.inv;
+    b.appendChild(el('div', 'kick', inv.chainName + ' · ' + inv.symbol));
+    b.appendChild(el('h2', '', inv.status === 'paid' ? 'Paid' : 'Send it'));
+
+    if (inv.status === 'paid') {
+      b.appendChild(el('p', 'pyNote', inv.purpose === 'deposit'
+        ? 'Landed. Your wager balance is up to date.'
+        : 'Landed. It is on your account, so it follows you to any device you sign in on.'));
+      const f = el('div', 'pyFoot');
+      const done = el('button', 'pyBtn', 'Done'); done.onclick = () => close();
+      f.appendChild(done);
+      b.appendChild(f);
+      return;
+    }
+
+    const amt = el('div', 'pyAmt');
+    amt.appendChild(el('div', 'big', inv.sendStr + ' ' + inv.symbol));
+    const to = el('div', 'to');
+    to.appendChild(document.createTextNode('to '));
+    const bo = el('b', '', inv.payTo); to.appendChild(bo);
+    to.appendChild(el('div', '', 'on ' + inv.chainName));
+    amt.appendChild(to);
+    if (inv.taxBps) amt.appendChild(el('div', 'to', 'This token takes a cut on every transfer, so the amount above already has the headroom added. ' + inv.needStr + ' has to land.'));
+    b.appendChild(amt);
+
+    if (inv.status === 'checking') {
+      const p = el('p', 'pyNote');
+      p.appendChild(el('span', 'pySpin'));
+      p.appendChild(document.createTextNode(inv.err || 'Reading it off the chain. This finishes on its own, even if you close the page.'));
+      b.appendChild(p);
+    } else if (inv.err) {
+      b.appendChild(el('p', 'pyNote', inv.err));
+    } else {
+      b.appendChild(el('p', 'pyNote', 'Your wallet will show the amount and the address before you approve anything. Nothing here can change either one.'));
+    }
+
+    const f = el('div', 'pyFoot');
+    if (inv.status !== 'checking') {
+      const fam = inv.family;
+      const have = typeof Wallet !== 'undefined' && Wallet.available(fam);
+      const pay = el('button', 'pyBtn', have ? 'Pay with wallet' : 'No ' + famName(fam) + ' wallet found');
+      pay.disabled = !have || S.busy;
+      pay.onclick = () => payNow(inv);
+      f.appendChild(pay);
+    }
+    const man = el('button', 'pyBtn ghost', 'I sent it already');
+    man.onclick = () => manual(inv);
+    f.appendChild(man);
+    const back = el('button', 'pyBtn ghost', 'Back');
+    back.onclick = () => { net({ k: 'paycancel', id: inv.id }); S.inv = null; render(); };
+    f.appendChild(back);
+    b.appendChild(f);
+  }
+
+  async function payNow(inv) {
+    if (S.busy) return;
+    S.busy = true; render();
+    try {
+      const tx = await Wallet.pay(inv);
+      if (!tx) throw new Error('The wallet did not return a transaction.');
+      net({ k: 'paysubmit', id: inv.id, tx: String(tx) });
+      S.inv = Object.assign({}, inv, { status: 'checking', err: null });
+    } catch (e) {
+      const m = String((e && e.message) || e);
+      // A refusal in the wallet is a normal thing a person does, not a failure to shout about.
+      S.inv = Object.assign({}, inv, { err: /reject|denied|cancel|User rejected/i.test(m) ? 'Cancelled in your wallet. Nothing was sent.' : m });
+    }
+    S.busy = false;
+    render();
+  }
+
+  function manual(inv) {
+    const tx = prompt('Paste the transaction ' + (inv.family === 'sol' ? 'signature' : 'hash') + '. It is checked on chain before anything unlocks.');
+    if (!tx) return;
+    net({ k: 'payrecover', id: inv.id, tx: String(tx).trim() });
+    S.inv = Object.assign({}, inv, { status: 'checking', err: null });
+    render();
+  }
+
+  // ---- wallets -------------------------------------------------------------------------------
+  function renderWallets(b) {
+    b.appendChild(el('p', 'pyNote', 'Attach a wallet and it is remembered on your account. The primary one of each kind is where a withdrawal is paid, so that is the one worth getting right. Attaching asks for a signature: it moves no money and approves nothing.'));
+    if (!S.wallets.length) b.appendChild(el('p', 'pyNote', 'Nothing attached yet. Any wallet you pay with is attached on its own, so you may never need this screen.'));
+
+    const list = el('div', 'pyList');
+    for (const w of S.wallets) {
+      const it = el('div', 'pyIt');
+      const g = el('div', 'g');
+      g.appendChild(el('div', 't', w.address));
+      g.appendChild(el('div', 's', famName(w.family) + (w.how === 'paid' ? ', attached by paying with it' : ', signed')));
+      it.appendChild(g);
+      if (w.primary) it.appendChild(el('span', 'tag ok', 'Payout'));
+      else { const p = el('button', '', 'Make payout'); p.onclick = () => { sfx(); net({ k: 'wal_primary', family: w.family, address: w.address }); }; it.appendChild(p); }
+      const d = el('button', '', 'Detach'); d.onclick = () => { sfx(); net({ k: 'wal_detach', family: w.family, address: w.address }); };
+      it.appendChild(d);
+      list.appendChild(it);
+    }
+    b.appendChild(list);
+
+    const f = el('div', 'pyFoot');
+    for (const fam of (S.families.length ? S.families : ['evm'])) {
+      const btn = el('button', 'pyBtn' + (fam === 'sol' ? ' ghost' : ''), 'Attach ' + famName(fam));
+      btn.disabled = typeof Wallet === 'undefined' || !Wallet.available(fam);
+      if (btn.disabled) btn.textContent = 'Install a ' + famName(fam) + ' wallet';
+      btn.onclick = () => attach(fam);
+      f.appendChild(btn);
+    }
+    b.appendChild(f);
+  }
+
+  let pendingAttach = null;
+  function attach(fam) {
+    if (S.busy) return;
+    pendingAttach = { fam };
+    net({ k: 'wal_nonce' });
+  }
+  async function doAttach(nonceMsg) {
+    const p = pendingAttach; pendingAttach = null;
+    if (!p) return;
+    S.busy = true;
+    try {
+      await Wallet.connect(p.fam);
+      const sig = await Wallet.sign(p.fam, nonceMsg.message);
+      net({ k: 'wal_attach', family: p.fam, address: Wallet.addressFor(p.fam), signature: sig });
+    } catch (e) {
+      const m = String((e && e.message) || e);
+      say(/reject|denied|cancel/i.test(m) ? 'Cancelled in your wallet.' : m, true);
+    }
+    S.busy = false;
+    render();
+  }
+
+  // ---- balance and withdrawals ---------------------------------------------------------------
+  function renderBank(b) {
+    // The cut is spelled out here rather than buried. A player finding out about a rake after they
+    // won is the one thing that loses them for good.
+    const note = el('p', 'pyNote');
+    note.innerHTML = 'A balance is what you wager with. Top it up in whatever you hold, fight as often as you like, and take out the same asset you wagered. The cut is <b>'
+      + (S.rakeBps / 100) + '% of the pot</b> at the end of a match, and <b>' + (S.houseRakeBps / 100)
+      + '% when the wager is in WOLVERINU</b>. Nothing is taken on a top-up or a withdrawal.';
+    b.appendChild(note);
+
+    if (!S.balances.length) b.appendChild(el('p', 'pyNote', 'Nothing on the books yet. Pick a top-up below.'));
+    else {
+      const list = el('div', 'pyList');
+      for (const bal of S.balances) {
+        const it = el('div', 'pyIt');
+        const g = el('div', 'g');
+        g.appendChild(el('div', 't', bal.amount + ' ' + bal.symbol));
+        g.appendChild(el('div', 's', bal.chain));
+        it.appendChild(g);
+        const min = S.minWithdraw[bal.asset];
+        const w = el('button', '', 'Withdraw');
+        w.onclick = () => askWithdraw(bal, min);
+        it.appendChild(w);
+        list.appendChild(it);
+      }
+      b.appendChild(list);
+    }
+
+    b.appendChild(el('div', 'kick', 'Top up'));
+    const grid = el('div', 'pyRow');
+    for (const cents of S.topups) {
+      const btn = el('button', 'pyA');
+      btn.appendChild(el('div', 'sym', money(cents)));
+      btn.appendChild(el('div', 'ch', 'Any asset'));
+      btn.onclick = () => { sfx(); S.target = { purpose: 'deposit', cents, label: 'Top up ' + money(cents) }; S.tab = 'pay'; net({ k: 'payquote', purpose: 'deposit', cents }); render(); };
+      grid.appendChild(btn);
+    }
+    b.appendChild(grid);
+
+    if (S.withdrawals.length) {
+      b.appendChild(el('div', 'kick', 'Withdrawals'));
+      const list = el('div', 'pyList');
+      for (const w of S.withdrawals) {
+        const it = el('div', 'pyIt');
+        const g = el('div', 'g');
+        g.appendChild(el('div', 't', w.amount + ' ' + w.symbol));
+        g.appendChild(el('div', 's', 'to ' + w.to));
+        it.appendChild(g);
+        it.appendChild(el('span', 'tag ' + (w.status === 'sent' ? 'ok' : w.status === 'pending' ? 'wait' : ''), w.status));
+        list.appendChild(it);
+      }
+      b.appendChild(list);
+      b.appendChild(el('p', 'pyNote', 'Withdrawals are sent by hand, so they are not instant. Yours goes to the payout wallet on your Wallets tab.'));
+    }
+  }
+
+  function askWithdraw(bal, min) {
+    const w = S.wallets.find(x => x.primary && x.family === (S.assets.find(a => a.id === bal.asset) || {}).family);
+    if (!w) { say('Attach a wallet first. That is where it gets paid.', true); S.tab = 'wallet'; render(); return; }
+    const want = prompt('How much ' + bal.symbol + ' to withdraw to ' + w.address + '?'
+      + (min ? '\n\nSmallest withdrawal: ' + min.amount + ' ' + bal.symbol : '') + '\n\nYou have ' + bal.amount + '.', min ? min.amount : '');
+    if (!want) return;
+    const units = toUnits(want, bal.decimals);
+    if (!units) { say('That is not an amount.', true); return; }
+    net({ k: 'withdraw', asset: bal.asset, units });
+  }
+  // decimal string -> smallest units, as a string. Refuses anything that is not a plain number so
+  // a typo never becomes a withdrawal for the wrong amount.
+  function toUnits(s, dec) {
+    const t = String(s).trim();
+    if (!/^\d+(\.\d+)?$/.test(t)) return null;
+    const [i, f = ''] = t.split('.');
+    if (f.length > dec) return null;
+    return (BigInt(i) * 10n ** BigInt(dec) + BigInt(f.padEnd(dec, '0') || '0')).toString();
+  }
+
+  // ---- wager a fight -------------------------------------------------------------------------
+  // Opening a wagered room, in the asset the player actually holds. It sends the same `create` the
+  // lobby sends, with an asset and one of the tiers the server published, so the room that comes
+  // back is an ordinary room screen with a wager on it. Nothing here decides a stake size: the
+  // tiers come from the server (net/lib/bank.js) and a tier that is not on its list is refused.
+  function renderWager(b) {
+    b.appendChild(el('p', 'pyNote', 'A wagered match is 1v1, both sides put up the same stake in the same asset, and the winner takes the pot less the cut. Nothing anybody bought can enter a wagered fight: loadouts are off on both sides, which is the whole reason the wager is worth anything.'));
+    const mine = S.balances.filter(x => BigInt(x.units) > 0n);
+    if (!mine.length) {
+      b.appendChild(el('p', 'pyNote', 'Top up a balance first and the stakes you can cover will show up here.'));
+      const f = el('div', 'pyFoot');
+      const go = el('button', 'pyBtn', 'Top up'); go.onclick = () => { sfx(); S.tab = 'bank'; render(); };
+      f.appendChild(go); b.appendChild(f);
+      return;
+    }
+    for (const bal of mine) {
+      const tiers = (S.tiers[bal.asset] || []).filter(t => BigInt(t.units) <= BigInt(bal.units));
+      b.appendChild(el('div', 'kick', bal.symbol + ' on ' + bal.chain + ' · you hold ' + bal.amount));
+      if (!tiers.length) { b.appendChild(el('p', 'pyNote', 'Not quite enough for the smallest stake in ' + bal.symbol + ' yet.')); continue; }
+      const grid = el('div', 'pyRow');
+      const house = (S.assets.find(a => a.id === bal.asset) || {}).house;
+      const bps = house ? S.houseRakeBps : S.rakeBps;
+      for (const t of tiers) {
+        const btn = el('button', 'pyA' + (house ? ' house' : ''));
+        btn.appendChild(el('div', 'sym', t.amount));
+        btn.appendChild(el('div', 'ch', bal.symbol + ' a side'));
+        // What the winner actually takes, worked out here so nobody has to do it in their head.
+        const pot = BigInt(t.units) * 2n;
+        const win = pot - pot * BigInt(bps) / 10000n;
+        btn.appendChild(el('div', 'amt', 'winner takes ' + fmtUnits(win, bal.decimals) + ' ' + bal.symbol));
+        btn.appendChild(el('div', 'bad', (bps / 100) + '% cut on the pot'));
+        btn.onclick = () => openWagerRoom(bal.asset, t.units, t.amount + ' ' + bal.symbol);
+        grid.appendChild(btn);
+      }
+      b.appendChild(grid);
+    }
+  }
+  function fmtUnits(units, dec) {
+    const s = BigInt(units).toString().padStart(dec + 1, '0');
+    const i = s.slice(0, s.length - dec), f = s.slice(s.length - dec).replace(/0+$/, '');
+    return f ? i + '.' + f.slice(0, dec <= 6 ? 2 : 5) : i;
+  }
+  function openWagerRoom(asset, units, label) {
+    sfx();
+    net({ k: 'create', size: 2, stage: 'random', stocks: 3, items: false, asset, stakeUnits: String(units) });
+    say('Wager room opening at ' + label + ' a side. Share the code and both of you ready up.');
+    close();
+  }
+
+  // ---- payment history -----------------------------------------------------------------------
+  function renderHistory(b) {
+    b.appendChild(el('p', 'pyNote', 'Every payment this account has started. A payment that never confirmed can be picked back up here with its transaction hash.'));
+    const list = el('div', 'pyList');
+    for (const inv of (S.history || [])) {
+      const it = el('div', 'pyIt');
+      const g = el('div', 'g');
+      g.appendChild(el('div', 't', inv.sendStr + ' ' + inv.symbol + ' · ' + (inv.label || inv.item || inv.purpose)));
+      g.appendChild(el('div', 's', inv.chainName + (inv.tx ? ' · ' + inv.tx.slice(0, 14) + '…' : '')));
+      it.appendChild(g);
+      it.appendChild(el('span', 'tag ' + (inv.status === 'paid' ? 'ok' : inv.status === 'checking' ? 'wait' : ''), inv.status));
+      if (inv.status !== 'paid' && inv.status !== 'cancelled') {
+        const r = el('button', '', 'Pick up');
+        r.onclick = () => { S.inv = inv; render(); };
+        it.appendChild(r);
+      }
+      list.appendChild(it);
+    }
+    if (!(S.history || []).length) list.appendChild(el('p', 'pyNote', 'Nothing yet.'));
+    b.appendChild(list);
+  }
+
+  // --------------------------------------------------------------------------- server messages
+  function onNet(m) {
+    switch (m.k) {
+      case 'payassets':
+        S.assets = m.assets || []; S.topups = m.topups || []; S.tiers = m.tiers || {};
+        S.minWithdraw = m.minWithdraw || {}; S.families = m.families || [];
+        S.houseOffBps = m.houseOffBps || 0; S.rakeBps = m.rakeBps || 300; S.houseRakeBps = m.houseRakeBps || 150;
+        // The server has just said payments are on, so build the DOM now rather than waiting for
+        // somebody to open something. This is what mounts the way in.
+        if (on()) { build(); paintChip(); }
+        render(); return;
+      case 'wallets': S.wallets = m.wallets || []; render(); return;
+      case 'walres':
+        if (m.err) say(m.err, true); else { S.wallets = m.wallets || S.wallets; say('Wallet attached.'); }
+        render(); return;
+      case 'wal_nonce': doAttach(m); return;
+      case 'bank':
+        S.balances = m.balances || []; S.withdrawals = m.withdrawals || [];
+        if (m.rakeBps) { S.rakeBps = m.rakeBps; S.houseRakeBps = m.houseRakeBps; }
+        if (m.paid) say('Top-up landed.');
+        paintChip(); render(); return;
+      case 'bankres':
+        if (m.err) say(m.err, true);
+        else { S.balances = m.balances || S.balances; S.withdrawals = m.withdrawals || S.withdrawals; say(m.msg || 'Done.'); }
+        render(); return;
+      case 'payquote':
+        if (m.err) { say(m.err, true); return; }
+        if (S.target && (S.target.item === m.item || S.target.purpose === m.purpose)) {
+          S.target = Object.assign({}, S.target, { quotes: m.quotes, cents: m.cents, label: S.target.label || m.label });
+          render();
+        }
+        return;
+      case 'payopen':
+        if (m.err) { say(m.err, true); S.busy = false; return; }
+        S.inv = m.invoice; S.busy = false; render(); return;
+      case 'paystatus': {
+        if (m.err) { if (S.inv) S.inv = Object.assign({}, S.inv, { err: m.err, status: m.invoice ? m.invoice.status : S.inv.status }); say(m.err, true); render(); return; }
+        if (m.invoice && (!S.inv || S.inv.id === m.invoice.id)) S.inv = m.invoice;
+        if (m.pending && m.invoice) {
+          if (S.inv) S.inv = Object.assign({}, S.inv, { status: 'checking', err: m.msg || null });
+          // Ask again until it lands. The server also finishes this on its own, so this is only
+          // here to keep the screen honest about what is happening.
+          if (S.poll) clearTimeout(S.poll);
+          S.poll = setTimeout(() => { if (isOpen() && S.inv) net({ k: 'paystatus', id: S.inv.id }); }, 6000);
+        }
+        if (m.ok) { if (S.poll) { clearTimeout(S.poll); S.poll = 0; } sfx(); }
+        render(); return;
+      }
+      case 'invoices': S.history = m.invoices || []; render(); return;
+      case 'payres':
+        if (m.err) say(m.err, true); else S.history = m.invoices || S.history;
+        render(); return;
+      case 'econ':
+        if (m.bought) say('Unlocked.');
+        return;
+      default: return;
+    }
+  }
+
+  // ------------------------------------------------------------------------------------- wiring
+  // The store's buy button. With payments on it opens the checkout; with payments off the old
+  // behaviour is left exactly as it was.
+  const origBuy = Econ.buy.bind(Econ);
+  Econ.buy = function (id, cb) {
+    if (!on()) return origBuy(id, cb);
+    const d = (Econ.BYID || {})[id];
+    const cents = d && d.price != null ? d.price : null;
+    if (cents == null) return origBuy(id, cb);
+    open('pay', { purpose: 'item', item: id, cents, label: d.name });
+    net({ k: 'payquote', purpose: 'item', item: id });
+    if (cb) cb({ ok: true, quiet: true, msg: '' });
+  };
+
+  // Ask once as soon as online play is up, so the store knows whether to offer any of this.
+  function hello() { net({ k: 'payassets' }); }
+  if (typeof Net !== 'undefined' && Net.on) {
+    Net.on(m => {
+      if (m.k === 'welcome') { hello(); return; }
+      onNet(m);
+    });
+  }
+
+  document.addEventListener('keydown', e => {
+    if (!isOpen()) return;
+    if (e.code === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+  }, true);
+
+  // What the rest of the game calls. 77_net.js's room screen uses `tiers` to offer crypto stakes,
+  // and the store uses `open`.
+  window.PayUI = {
+    open, close, isOpen, available: on,
+    tiersFor: assetId => S.tiers[assetId] || [],
+    assets: () => S.assets.slice(),
+    balances: () => S.balances.slice(),
+    balance: assetId => (S.balances.find(b => b.asset === assetId) || {}).units || '0',
+    wallets: () => S.wallets.slice(),
+    refresh: () => { net({ k: 'payassets' }); net({ k: 'bank' }); net({ k: 'wallets' }); net({ k: 'invoices' }); },
+  };
+})();
+
+/*<<END:8h_pay.js>>*/
 </script>
 <script type="module">
 // ===== 3D renderer: setup, loading, arenas =====
@@ -34767,13 +36650,95 @@ function tbgWrapCamera() {
     // every frame and everything else the clip does -- breathing, weight shift, arms -- is kept.
     const clips = V3.clipsFor(id, hips ? hips.position.clone() : null) || {};
     const mixer = new THREE.AnimationMixer(mk.root);
-    const actions = {};
-    for (const [n, c] of Object.entries(clips)) { const a = mixer.clipAction(c); a.enabled = true; actions[n] = a; }
+    const actions = {}, pool = [];
+    for (const [n, c] of Object.entries(clips)) {
+      const stance = !BAN[n] && cycles(c);
+      if (stance) pool.push(n);
+      // only a stance clip is looped forever, so only a stance clip gets its seam stitched
+      const a = mixer.clipAction(stance ? stitched(c) : c);
+      a.enabled = true; actions[n] = a;
+    }
     // the shared clips stand bladed; turn each side to face the middle of the screen
     inner.rotation.y = (side === 0 ? 1 : -1) * 0.34;
     root.position.y = -1.05;
-    return { id, root, inner, mixer, actions, cur: null, born: 0, flour: 0, hips, chest, lUp, rUp,
+    return { id, root, inner, mixer, actions, pool, cur: null, born: 0, hips, chest, lUp, rUp,
              br: breathFor(id) };
+  }
+
+  // ── a clip may only be a stance if it actually CYCLES ──────────────────────
+  // 10/16, Duane: "PEPE FLOKI AND TYRANT DO THIS SPASTIC FLICKING BACKWARDS move when im in
+  // character select ... it looks like a glitch". It was not the renderer. `stanceFor` picked a
+  // stance out of a NAMED list, ['idle','guard','block2','block'], and two of those four do not
+  // return to their own first pose, so looping them snapped. Measured off play/assets/anims.json,
+  // first keyframe against last:
+  //
+  //   clip     dur    worst joint seam   hips travel over the seam
+  //   idle     4.03s   6 deg             0.15u of 3.46u     cycles
+  //   block    3.50s   3 deg             0.07u of 7.74u     cycles
+  //   guard    2.43s  48 deg  (RightArm) 23.07u of 24.47u   STEPS BACK, TELEPORTS HOME
+  //   block2   0.40s  23 deg  (LeftArm)                     a 13-frame flinch, snapping 2.5x/sec
+  //
+  // `guard` IS the backwards flick -- it is a step back away from the camera that jumps home every
+  // 2.4 seconds -- and `block2` is the twitch. Neither was ever an idle: they are a step-back and a
+  // flinch, authored to play once out of a stance and blend away. Of the 42 fighters the named pool
+  // put 14 on block2 (PEPE, FLOKI and TYRANT among them) and 11 on guard, which is the "other
+  // characters do the same" half of the report.
+  //
+  // So the pool is MEASURED now and never named. A clip has to come back to its own first pose and
+  // be long enough to read as breathing, or it cannot be a stance -- and a clip added to anims.json
+  // later gets the same test, so this cannot come back by someone extending a list.
+  const BAN = { hang: 1, taunt: 1 };   // hang is a ledge pose; taunt is performing, and he asked for a fighter waiting for the bell
+  const CYC = new WeakMap(), STITCH = new WeakMap();
+  const COS8 = 0.99756;                // cos(4 deg): 8 degrees of total swing across the seam
+  function cycles(clip) {
+    let ok = CYC.get(clip);
+    if (ok !== undefined) return ok;
+    ok = clip.duration >= 1.6;         // a 0.4s loop is a twitch however clean its seam is
+    const pos = [];
+    let maxR = 0;
+    for (const tr of clip.tracks) {
+      const n = tr.getValueSize(), v = tr.values, k = v.length - n;
+      if (k < n) continue;
+      if (n === 4) {                   // quaternion: the seam is the angle between the two poses
+        let dot = 0;
+        for (let i = 0; i < 4; i++) dot += v[i] * v[k + i];
+        if (dot < 0 ? -dot < COS8 : dot < COS8) ok = false;
+      } else if (n === 3) {            // position: catches a clip that travels and then teleports home
+        let d = 0, r = 0;
+        for (let i = 0; i < 3; i++) { const e = v[k + i] - v[i]; d += e * e; }
+        for (let j = 0; j <= k; j += 3) { let q = 0; for (let i = 0; i < 3; i++) { const e = v[j + i] - v[i]; q += e * e; } if (q > r) r = q; }
+        if (r > maxR) maxR = r;
+        pos.push([d, r]);
+      }
+    }
+    // squared throughout, so no sqrt: 0.09 is 30% of the track's own travel, 0.0625 is 25% of the
+    // clip's biggest travel (ignore bones that barely move, where a ratio means nothing)
+    for (const [d, r] of pos) if (r > maxR * 0.0625 && d > r * 0.09) { ok = false; break; }
+    CYC.set(clip, ok);
+    return ok;
+  }
+
+  // A stance that passed the test still carries a few degrees across the seam -- idle pops the right
+  // leg 6 degrees every 4 seconds, which is small on a 160px fighter mid-match and a visible hitch on
+  // a head-to-toe portrait. So the tail of the cycle is eased back onto its own first pose: at the
+  // last keyframe the pose IS the first pose, and the wrap is continuous. Clones the clip -- V3 caches
+  // one clip set per model and the match renderer plays the same objects.
+  function stitched(clip) {
+    let out = STITCH.get(clip);
+    if (out) return out;
+    out = clip.clone();
+    const tail = Math.min(0.3, clip.duration * 0.12), t0 = clip.duration - tail;
+    for (const tr of out.tracks) {
+      const n = tr.getValueSize(), t = tr.times, v = tr.values;
+      for (let j = 1; j < t.length; j++) {
+        if (t[j] <= t0) continue;
+        const u = (t[j] - t0) / tail, w = u * u * (3 - 2 * u), o = j * n;   // smoothstep: no kick at either end
+        if (n === 4) THREE.Quaternion.slerpFlat(v, o, v, o, v, 0, w);
+        else for (let i = 0; i < n; i++) v[o + i] += (v[i] - v[o + i]) * w;
+      }
+    }
+    STITCH.set(clip, out);
+    return out;
   }
 
   // ── per-fighter select idle ────────────────────────────────────────────────
@@ -34789,19 +36754,32 @@ function tbgWrapCamera() {
   function charOf(id) {
     return (typeof CHAR_BY_ID !== 'undefined' && CHAR_BY_ID[id]) || null;
   }
-  // a relaxed guard, never a move. Whichever real stance the rig actually carries.
-  function stanceFor(o, id) {
-    const pool = ['idle', 'guard', 'block2', 'block'].filter(n => o.actions[n]);
-    if (!pool.length) return 'idle';
-    const c = charOf(id), wt = c ? c.weight : 100;
-    if (wt >= 118 && pool.indexOf('guard') >= 0) return 'guard';    // heavies plant and cover
-    if (wt <= 88 && pool.indexOf('idle') >= 0) return 'idle';       // light ones stay loose
-    return pool[Math.floor(hash(id) * pool.length) % pool.length];
+  const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+  // a relaxed guard, never a move -- and TWO cycles at once, never one.
+  //
+  // The named pool was four clips wide and two of them were snapping; measured, it is two clips
+  // wide (idle, block) and both are real stances. Variety cannot come from picking one of two, so
+  // it comes from the mix instead: every fighter runs both cycles at its own ratio, its own speed
+  // and its own phase. A heavy fighter sits mostly in `block` -- planted, hands up -- a light one
+  // mostly in `idle`, and because the two cycles are 4.03s and 3.50s long the blend never repeats
+  // the same way twice. Both halves cycle, so nothing in the sum can snap.
+  function standFor(o, id) {
+    const pool = o.pool.length ? o.pool : (o.actions.idle ? ['idle'] : []);
+    if (!pool.length) return [];
+    const c = charOf(id), wt = c ? c.weight : 100, r = hash(id);
+    const base = pool.indexOf('idle') >= 0 ? 'idle' : pool[0];
+    const rest = pool.filter(n => n !== base);
+    const alt = rest.length ? rest[Math.floor(r * 4096) % rest.length] : null;
+    // heavier fighters plant and cover, lighter ones stay loose, and no two land on the same ratio
+    const w = alt ? clamp(0.18 + (wt - 92) * 0.011 + (r - 0.5) * 0.12, 0.10, 0.70) : 0;
+    const ts = clamp(1 - (wt - 100) * 0.0022 + (r - 0.5) * 0.07, 0.86, 1.12);
+    const mix = [{ n: base, w: 1 - w, ts, at: r * 4.0 }];
+    if (alt) mix.push({ n: alt, w, ts: ts * 0.94, at: (1 - r) * 3.5 });
+    return mix;
   }
   // breathing: heavier fighters ride slower and deeper, quicker ones sit tighter and faster
   function breathFor(id) {
     const c = charOf(id), wt = c ? c.weight : 100, walk = c ? c.walk : 6.2, r = hash(id);
-    const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
     return {
       rate:  clamp(2.15 + (walk - 6.2) * 0.16 - (wt - 100) * 0.0045 + r * 0.45, 1.45, 3.15),
       rise:  clamp(0.030 + (wt - 100) * 0.00018 + (1 - r) * 0.013, 0.020, 0.050),
@@ -34812,14 +36790,21 @@ function tbgWrapCamera() {
     };
   }
 
-  function play(o, name, fade) {
-    if (!o.actions[name]) name = 'idle';
-    if (!o.actions[name] || o.cur === name) return;
-    const next = o.actions[name], prev = o.cur && o.actions[o.cur];
-    next.reset(); next.setEffectiveWeight(1); next.play();
-    if (prev && fade > 0) prev.crossFadeTo(next, fade, false);
-    else if (prev) { prev.setEffectiveWeight(0); prev.stop(); }
-    o.cur = name;
+  // every action off, then the mix on. LoopRepeat explicitly: a stance runs until the panel changes,
+  // and `reset()` returns weight to 1 and time to 0, so both are set after it, not before.
+  function stand(o, mix) {
+    for (const n in o.actions) { const a = o.actions[n]; a.stop(); a.setEffectiveWeight(0); }
+    for (const m of mix) {
+      const a = o.actions[m.n]; if (!a) continue;
+      a.reset();
+      a.setLoop(THREE.LoopRepeat, Infinity);
+      a.clampWhenFinished = false;
+      a.timeScale = m.ts;
+      a.setEffectiveWeight(m.w);
+      a.time = m.at % (a.getClip().duration || 1);     // its own phase, so neighbours never breathe in step
+      a.play();
+    }
+    o.cur = mix.map(m => m.n).join('+');
   }
 
   // the panel canvas the offscreen frame is blitted into
@@ -34848,8 +36833,6 @@ function tbgWrapCamera() {
       const o = S.sides[i]; if (!o) continue;
       const cv = canvasFor(i); if (!cv) continue;
       o.born += dt;
-      // a greeting on highlight, then settle into idle -- the beat every fighting game's select has
-      if (o.flour && o.born > o.flour) { o.flour = 0; play(o, 'idle', 0.28); }
       o.mixer.update(dt);
       // and a slow sway, so even a dead-still idle clip is never a frozen image
       // FACE THE PLAYER, measured rather than guessed.
@@ -34928,8 +36911,7 @@ function tbgWrapCamera() {
           S.sides[i] = o; S.rig.add(o.root);
           // straight into that fighter's own stance. No greeting swing -- he wants them standing
           // there like a fighter waiting for the bell, not performing.
-          play(o, stanceFor(o, id), 0);
-          o.flour = 0;
+          stand(o, standFor(o, id));
           kick();
         };
         if (V3.makeModel && V3.makeModel(id)) make();
@@ -34938,6 +36920,28 @@ function tbgWrapCamera() {
       kick();
     },
     stop() { document.body.classList.remove('show3d'); if (S.raf) { cancelAnimationFrame(S.raf); S.raf = 0; } },
+    // dev: what each panel is ACTUALLY running, read off the live actions. `seam` is the worst joint
+    // angle (degrees) between the clip's first and last keyframe, so a stitched stance reads ~0 and
+    // anything that would flick reads tens of degrees. dev/probe_stance.js uses it.
+    probe() {
+      return S.sides.map(o => o && ({
+        id: o.id, cur: o.cur, pool: o.pool,
+        mix: Object.keys(o.actions).filter(n => o.actions[n].getEffectiveWeight() > 0).map(n => {
+          const a = o.actions[n], c = a.getClip();
+          let worst = 0;
+          for (const tr of c.tracks) {
+            const k = tr.getValueSize(), v = tr.values, e = v.length - k;
+            if (k !== 4 || e < k) continue;
+            let dot = 0;
+            for (let i = 0; i < 4; i++) dot += v[i] * v[e + i];
+            const ang = 2 * Math.acos(Math.min(1, Math.abs(dot))) * 180 / Math.PI;
+            if (ang > worst) worst = ang;
+          }
+          return { clip: n, w: +a.getEffectiveWeight().toFixed(3), ts: +a.timeScale.toFixed(3),
+                   dur: +c.duration.toFixed(2), seam: +worst.toFixed(1) };
+        }),
+      }));
+    },
   };
 })();
 

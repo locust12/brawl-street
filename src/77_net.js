@@ -222,6 +222,8 @@ const Net = (() => {
   #netLeave{position:fixed;right:max(12px,env(safe-area-inset-right));top:calc(max(10px,env(safe-area-inset-top)) + 112px);z-index:7}
   .nr-p .lk{font:700 10px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--gold)}
   .nr-p .xh,.ns-x{font:500 11px var(--mono);letter-spacing:.04em;color:var(--cyan)}
+  .nr-p .xh.xv,.ns-x.xv{color:var(--lime);font-weight:700}
+  .nr-p .xh.xv span,.ns-x.xv span{color:var(--lime)}
   .nb-rk{display:inline-block;font:700 10px var(--mono);letter-spacing:.08em;padding:1px 6px;margin-left:6px;color:#050507;background:var(--gold);vertical-align:middle}
   .ns-elo{font:700 13px var(--mono);letter-spacing:.06em;margin-top:6px} .ns-elo .up{color:var(--lime)} .ns-elo .dn{color:var(--red)}
   /* unlocked-this-match badges. Only ever shown to the player who earned them: the server
@@ -353,7 +355,7 @@ const Net = (() => {
   // ------------------------------------------------------------------ state
   const N = {
     ws: null, conn: 'idle', me: null, room: null, lock: null, M: null, stats: null, rtt: 0, jit: 0, offset: null,
-    stake: store.get('netStake', 0.05), mode: 2, pool: store.get('netPool', []), mapsOpen: false, regionUrl: store.get('netRegionUrl', null), regionOpen: false, pendingJoin: null, digest: null, retry: 0, everOpen: false, failT: 0, pingT: 0,
+    stake: store.get('netStake', 0.05), mode: 2, pool: store.get('netPool', []), mapsOpen: false, regionUrl: store.get('netRegionUrl', null), pendingJoin: null, digest: null, retry: 0, everOpen: false, failT: 0, pingT: 0,
     view: null, lastRoom: null, realStake: null, wallet: null,
   };
 
@@ -589,7 +591,6 @@ const Net = (() => {
     byId('nbStakes').querySelectorAll('button').forEach(b => b.onclick = () => { N.stake = +b.dataset.v; store.set('netStake', N.stake); sfx('coin'); renderHome(); });
     byId('nbStakeNote').textContent = N.stake ? `Practice ETH. Stake ${N.stake} each, winner takes the pot.` : 'Free play, no stake.';
     renderMaps();
-    renderRegions();
     for (const id of ['nbQuick2', 'nbQuick4', 'nbCreate', 'nbJoin']) byId(id).disabled = !ok;
     const real = me && me.real;
     byId('nbReal').hidden = !real;
@@ -601,27 +602,8 @@ const Net = (() => {
     }
   }
 
-  function renderRegions() {
-    const list = regionList(), ms = pings() || {}, cur = N.me && N.me.region;
-    const el = byId('nbRegion');
-    if (el) { el.textContent = cur ? cur.label : 'Region'; el.title = cur && ms[cur.id] != null ? cur.label + ': ' + ms[cur.id] + ' ms measured' : 'Pick a server region'; el.onclick = () => { N.regionOpen = !N.regionOpen; sfx(); renderHome(); }; }
-    const panel = byId('nbRegionPanel'); if (!panel) return;
-    panel.hidden = !N.regionOpen;
-    const want = store.get('netRegion', 'auto');
-    byId('nbRegions').innerHTML = [`<button class="nb-pill${want === 'auto' ? ' on' : ''}" data-v="auto">Auto (closest)</button>`]
-      .concat(list.map(r => {
-        // the region we are on already has a live number (the socket round trip); the others need the probe
-        const msr = ms[r.id] != null ? ms[r.id] : (cur && r.id === cur.id && N.rtt ? Math.round(N.rtt) : null);
-        return `<button class="nb-pill${want === r.id ? ' on' : ''}" data-v="${esc(r.id)}">${esc(r.label)}${msr != null ? ' · ' + msr + ' ms' : ' · —'}</button>`;
-      })).join('');
-    byId('nbRegions').querySelectorAll('button').forEach(b => b.onclick = () => { store.set('netRegion', b.dataset.v); sfx(); maybeSwitchRegion().catch(() => {}); renderHome(); });
-    byId('nbRegionTest').onclick = () => { probeRegions(true).then(() => { renderHome(); toast('Measured again'); }); };
-    const best = pickRegion();
-    byId('nbRegionNote').textContent = list.length < 2
-      ? 'One server region so far (' + (cur ? cur.label : '—') + '). Online fights wait for the slower connection, so a server near both players matters more than anything else.'
-      : 'Playing on ' + (best ? best.label : '—') + '. Both players should be on the region that is closest to the pair.';
-  }
-
+  // No region picker: the lobby never shows one. The page measures the servers and plays on the
+  // closest one on its own (probeRegions/pickRegion/maybeSwitchRegion), and nothing says so on screen.
   function stageList() { return (N.me && N.me.stages) || []; }
   function stageName(id) { const s = stageList().find(x => x.id === id); return s ? s.name : String(id || '').toUpperCase(); }
   function renderMaps() {
@@ -676,7 +658,7 @@ const Net = (() => {
         el.className = 'nr-p' + (p.id === r.you ? ' me' : '');
         el.innerHTML = `<div class="art"></div><div class="pl"><div class="pn">P${i + 1}${p.id === r.host ? '<span class="tag">HOST</span>' : ''}${p.id === r.you ? '<span class="tag">YOU</span>' : ''}</div>
           <div class="fn">${esc(p.look && p.look.base === p.char ? p.look.name : charName(p.char))}</div>${p.look && p.look.base === p.char ? `<div class="lk">${esc(p.look.title || 'Custom fighter')}</div>` : ''}
-          <div class="who">${esc(p.name)}${p.elo ? ' · ' + p.elo : ''}</div>${p.x ? `<div class="xh">@${esc(p.x)}</div>` : ''}
+          <div class="who">${esc(p.name)}${p.elo ? ' · ' + p.elo : ''}</div>${p.x ? `<div class="xh${p.xv ? ' xv' : ''}">@${esc(p.x)}${p.xv ? ' <span title="Connected X account">\u2713</span>' : ''}</div>` : ''}
           <div class="st"><span class="${p.ready ? 'ok' : ''}">${p.ready ? 'Ready' : 'Picking'}</span><span>${r.real ? (p.wallet ? 'wallet ✓' : 'no wallet') : (p.ping ? p.ping + ' ms' : '')}</span></div></div>`;
         el.querySelector('.art').appendChild(artImg(p.char));
       }
