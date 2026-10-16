@@ -16,10 +16,35 @@ if [ "${SKIP_BUILD:-0}" != 1 ]; then (cd "$ROOT" && python3 build.py); fi
 # --strict: refuse to ship an engine that doesn't match the index.html being uploaded
 "$NODE" "$NET/tools/build-engine.js" --strict
 
+# Two machines ship this game, so the build about to go up can be OLDER than the one already live.
+# Compare the screens each one carries: a local build that is missing whole screens the live page has
+# is a machine that has not pulled, and shipping it deletes features. FORCE=1 to override.
+python3 - "$ROOT/index.html" "$URL" <<'PY' || { [ "${FORCE:-0}" = 1 ] && echo 'FORCE=1: shipping anyway' || exit 1; }
+import re, sys, urllib.request
+mine = open(sys.argv[1], encoding='utf8', errors='ignore').read()
+try:
+    live = urllib.request.urlopen(sys.argv[2], timeout=30).read().decode('utf8', 'ignore')
+except Exception as e:
+    print('could not read the live page (%s): skipping the regression check' % e); sys.exit(0)
+ids = lambda s: set(re.findall(r'id="([A-Za-z][\w-]{2,})"', s))
+lost = sorted(ids(live) - ids(mine))
+if len(lost) > 4:
+    print('REFUSING: this build is missing %d screens the live one has, e.g. %s' % (len(lost), ', '.join(lost[:8])))
+    print('Pull from the machine that built the live page first, or re-run with FORCE=1.')
+    sys.exit(1)
+PY
+
 ssh "$HOST" "mkdir -p $DEST/engine $DEST/public/assets"
 rsync -az "$NET/engine/" "$HOST:$DEST/engine/"
 ssh "$HOST" "cd $DEST/engine && ls -t sim-v*.js 2>/dev/null | tail -n +13 | xargs -r rm -f"
-rsync -az --delete "$ROOT/assets/" "$HOST:$DEST/public/assets/"
+# assets/ is art and models and is NOT in git, so a fresh clone has an empty one. Syncing that with
+# --delete would wipe every asset off the server, so only push them from a machine that has them,
+# and never delete what is already up there.
+if [ -n "$(ls -A "$ROOT/assets" 2>/dev/null)" ]; then
+  rsync -az "$ROOT/assets/" "$HOST:$DEST/public/assets/"
+else
+  echo "assets/ is empty on this machine: leaving the server's assets untouched (code-only deploy)"
+fi
 rsync -az "$ROOT/index.html" "$HOST:$DEST/public/index.html"
 
 if [ "${1:-}" = "--code" ]; then
