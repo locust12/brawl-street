@@ -144,7 +144,14 @@ const WAL = (() => {
 .wal-copy{background:#1d1d26;border:1px solid #2b2b36;color:#27e1ff;border-radius:9px;padding:8px 12px;cursor:pointer;
   font:700 12px 'Space Grotesk',system-ui,sans-serif}
 .wal-copy:hover{border-color:#27e1ff}
-.wal-busy{opacity:.55;pointer-events:none}`;
+.wal-busy{opacity:.55;pointer-events:none}
+.wal-chip{position:fixed;top:12px;right:12px;z-index:2147482000;display:flex;align-items:center;gap:8px;cursor:pointer;
+  background:rgba(19,19,26,.92);border:1px solid #2b2b36;color:#e8e9ee;border-radius:999px;padding:9px 15px;
+  font:700 13px 'Space Grotesk',system-ui,sans-serif;letter-spacing:.2px;backdrop-filter:blur(4px)}
+.wal-chip:hover{border-color:#ff2a4a;background:rgba(23,23,31,.96)}
+.wal-chip.on{color:#27e1ff;border-color:#214a55}
+.wal-dot{width:7px;height:7px;border-radius:50%;background:#27e1ff;flex:none}
+@media (max-width:820px){.wal-chip{top:8px;right:8px;padding:8px 12px;font-size:12px}}`;
     document.head.appendChild(s);
   }
 
@@ -174,6 +181,15 @@ const WAL = (() => {
     if (!sheet) return;
     const box = sheet.querySelector('.wal-list'), ext = list();
     box.innerHTML = '';
+    if (W.addr) {
+      const h = document.createElement('div'); h.className = 'wal-sec'; h.textContent = 'Connected';
+      box.appendChild(h);
+      const cur = row(short(W.addr) + ' in ' + ((W.info && W.info.name) || 'your wallet'), W.info && W.info.icon, 'Disconnect');
+      cur.onclick = () => { disconnect(); fill(); };
+      box.appendChild(cur);
+      const sw = document.createElement('div'); sw.className = 'wal-sec'; sw.textContent = 'Switch to';
+      box.appendChild(sw);
+    }
     for (const d of ext) {
       const el = row(d.info.name, d.info.icon, 'Installed');
       el.onclick = () => take(d);
@@ -287,6 +303,36 @@ const WAL = (() => {
     enable() { return PROXY.request({ method: 'eth_requestAccounts' }); },
   };
 
+  // ---------------- the button ----------------
+  // Nothing in the page offered a way in. The arena's own Connect wallet only renders once a
+  // contract is live (ARENA_LIVE), and online play hides its one behind a real-stakes room, so on
+  // the build people actually open there is no way to connect at all. The layer brings its own
+  // button: on the menus, out of the way, gone the moment a fight starts.
+  const short = a => a.slice(0, 6) + '…' + a.slice(-4);
+  function paintChip() {
+    const b = document.getElementById('walChip'); if (!b) return;
+    b.textContent = '';
+    if (W.addr) {
+      const d = document.createElement('i'); d.className = 'wal-dot'; b.appendChild(d);
+      b.appendChild(document.createTextNode(short(W.addr)));
+    } else b.appendChild(document.createTextNode('Connect wallet'));
+    b.classList.toggle('on', !!W.addr);
+    b.title = W.addr ? 'Connected with ' + ((W.info && W.info.name) || 'your wallet') : 'Connect any wallet';
+  }
+  // the same test the controls card uses (87_controls.js): a match is running and no menu is up
+  const inMatch = () => { try { return Game.state === 'match' && !Game.demo && document.querySelectorAll('.screen:not([hidden])').length === 0; } catch (e) { return false; } };
+  function mount() {
+    css();
+    if (document.getElementById('walChip')) return;
+    const b = document.createElement('button');
+    b.id = 'walChip'; b.type = 'button'; b.className = 'wal-chip';
+    b.onclick = () => { if (W.addr) open(); else connect(null).catch(() => { }); };
+    document.body.appendChild(b);
+    subs.push(paintChip);
+    paintChip();
+    setInterval(() => { b.style.display = inMatch() ? 'none' : 'flex'; }, 500);
+  }
+
   function install() {
     const cur = window.ethereum;
     if (cur && cur.isWAL) return;
@@ -322,8 +368,10 @@ const WAL = (() => {
   setTimeout(announce, 200);
   setTimeout(announce, 1200);
   addEventListener('ethereum#initialized', install);   // a wallet that injects late
-  addEventListener('load', () => { install(); announce(); restore(); });
-  if (document.readyState === 'complete') restore();
+  addEventListener('load', () => { install(); announce(); restore(); mount(); });
+  if (document.readyState === 'complete') { restore(); mount(); }
+  else if (document.body) mount();
+  else addEventListener('DOMContentLoaded', mount);
 
   return {
     connect, request: o => PROXY.request(o), req: (m, p) => PROXY.request(p ? { method: m, params: p } : { method: m }),
