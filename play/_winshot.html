@@ -1,0 +1,47 @@
+<!doctype html>
+<!-- dev only: loads the game in an iframe and drops it straight onto the results
+     screen so the winner's art can be screenshotted without playing a match.
+     ?id=<fighter> picks who won. Delete freely; nothing ships against it.
+     UI / Game / CHAR_BY_ID are top-level `const`s, so they are NOT properties of
+     window and cannot be reached as frame.UI -- the call has to go through eval
+     inside that frame's own global scope. -->
+<meta charset="utf-8">
+<title>win shot</title>
+<style>html,body{margin:0;height:100%;background:#050507}iframe{border:0;width:100vw;height:100vh;display:block}</style>
+<iframe id="f" src="index.html"></iframe>
+<script>
+const want = (new URLSearchParams(location.search).get('id') || 'pepe').replace(/[^a-z0-9_]/gi, '');
+const f = document.getElementById('f');
+const code = `(() => {
+  if (typeof UI === 'undefined' || typeof CHAR_BY_ID === 'undefined' || !CHAR_BY_ID['${want}']) return 'wait';
+  // the first call primes the cutout request; the art only paints once the image
+  // is in the cache, so call a few times, then stop so the entrance animation can
+  // finish before the shot is taken
+  window.__winshot = (window.__winshot || 0) + 1;
+  if (window.__winshot > 5) {
+    // headless keeps catching the .6s entrance mid-blur; park it on its end state
+    const im = document.querySelector('#scResults .winart img');
+    if (im) { im.style.animation = 'none'; im.style.opacity = 1; }
+    return 'done';
+  }
+  const mk = (id, idx, cpu) => ({
+    c: CHAR_BY_ID[id], idx, cpu, color: idx ? '#27e1ff' : '#ff2a4a',
+    stats: { kos: idx ? 1 : 3, falls: idx ? 3 : 1, dealt: idx ? 96 : 184, taken: idx ? 184 : 96 },
+  });
+  const other = '${want}' === 'doge' ? 'bonk' : 'doge';
+  const win = mk('${want}', 0, false), lose = mk(other, 1, true);
+  Game.pot = 0.1; Game.fighters = [win, lose];
+  UI.slots = [{ ctrl: 'human', char: '${want}', stake: 0.05 }, { ctrl: 'cpu', char: other, stake: 0.05 }];
+  if (!UI.wallets) UI.wallets = [1, 1];
+  UI.showResults(win);
+  return 'shown';
+})()`;
+// keep re-asserting it: the game finishes booting and shows the title after we
+// first get a handle on it, so one call lands too early and gets painted over
+f.addEventListener('load', () => {
+  setInterval(() => {
+    try { document.title = f.contentWindow.eval(code) + ':' + want; }
+    catch (e) { document.title = 'ERR ' + e.message; }
+  }, 300);
+});
+</script>
