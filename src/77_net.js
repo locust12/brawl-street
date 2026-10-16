@@ -273,8 +273,7 @@ const Net = (() => {
     home.innerHTML = `<div class="wrap nb-wrap">
       <div class="nb-top">
         <div><div class="eyebrow">Brawl Street online</div><h2 class="h2">Play online</h2></div>
-        <div class="nb-status"><span class="chip nb-conn" id="nbConn"><i></i><span>Offline</span></span><button class="btn small" id="nbRegion">Region</button><span class="chip" id="nbPing">— ms</span>
-          <span class="chip nb-bal" id="nbBal">— ETH</span><button class="btn small" id="nbRefill" hidden>Refill 1 ETH</button><button class="btn small" id="nbBack">Back</button></div>
+        <div class="nb-status"><span class="chip nb-conn" id="nbConn"><i></i><span>Offline</span></span><button class="btn small" id="nbBack">Back</button></div>
       </div>
       <div class="panel nb-row">
         <label class="nb-field"><span class="nb-lbl">Name</span><input class="nb-in" id="nbName" maxlength="16" autocomplete="nickname" spellcheck="false"></label>
@@ -282,9 +281,6 @@ const Net = (() => {
         <span class="note" id="nbStakeNote" style="text-align:left">Practice ETH. Winner takes the pot.</span>
         <div class="nb-field"><span class="nb-lbl">Maps</span><div class="nb-pills" id="nbMapMode"></div><button class="btn small" id="nbMapsBtn">Choose maps</button></div>
       </div>
-      <div class="panel" id="nbRegionPanel" hidden><div class="nb-row" style="justify-content:space-between"><span class="nb-lbl">Server region</span>
-        <button class="btn small" id="nbRegionTest">Measure again</button></div><div class="nb-pills" id="nbRegions"></div>
-        <p class="note" style="text-align:left" id="nbRegionNote">Online fights wait for the slower connection, so both players want a server close to them.</p></div>
       <div class="panel" id="nbMapsPanel" hidden><div class="nb-row" style="justify-content:space-between"><span class="nb-lbl" id="nbMapsLbl">Quick match maps</span>
         <span class="nb-pills"><button class="nb-pill" id="nbMapsAll">Select all</button><button class="nb-pill" id="nbMapsNone">Clear</button></span></div>
         <div class="nb-maps" id="nbMaps"></div>
@@ -307,7 +303,7 @@ const Net = (() => {
     room.innerHTML = `<div class="wrap nb-wrap">
       <div class="nb-top">
         <div><div class="eyebrow" id="nrKick">Room</div><h2 class="h2" id="nrTitle">Pick your fighter</h2></div>
-        <div class="nb-status"><span class="chip nb-code" id="nrCode">—</span><button class="btn small" id="nrCopy">Copy invite link</button><span class="chip" id="nrPing">— ms</span><button class="btn small" id="nrLeave">Leave</button></div>
+        <div class="nb-status"><span class="chip nb-code" id="nrCode">—</span><button class="btn small" id="nrCopy">Copy invite link</button><button class="btn small" id="nrLeave">Leave</button></div>
       </div>
       <div class="nr-wrapp"><div class="nr-players" id="nrPlayers"></div></div>
       <div class="nr-body">
@@ -388,11 +384,18 @@ const Net = (() => {
     try { CustomLook.set(lk); lookSent = JSON.stringify(CustomLook.get() || null); toast('Your saved fighter is back: ' + (lk.name || 'custom')); } catch (e) { /* creator not loaded */ }
   }
 
+  // A socket that drops and comes back is normal and the page handles it on its own, so it never
+  // says so on screen: once we have been online the chip keeps reading Online while it reopens.
+  // Only a dead end (failed) is ever shown. Nothing here alarms the player.
   function setConn(s) {
     N.conn = s;
     const el = byId('nbConn'); if (!el) return;
-    el.className = 'chip nb-conn' + (s === 'open' ? ' on' : s === 'failed' || s === 'closed' ? ' bad' : '');
-    el.querySelector('span').textContent = { idle: 'Offline', connecting: 'Connecting', open: 'Online', closed: 'Reconnecting', failed: 'No connection' }[s] || s;
+    // The chip says ONE thing: Online, once we are. Connecting, Reconnecting, Offline and No
+    // connection are all hidden, because a socket opening or reopening is this screen's normal
+    // work and announcing it reads as a broken game. A real dead end still gets the nbFail panel.
+    el.hidden = s !== 'open';
+    el.className = 'chip nb-conn on';
+    el.querySelector('span').textContent = 'Online';
   }
 
   function connect() {
@@ -500,7 +503,7 @@ const Net = (() => {
         renderHome();
         maybeSwitchRegion().catch(() => {});
         // back after a drop mid-match: the server sends "resume" right away if the match is still on
-        if (N.M && !N.M.shown) { const M = N.M; setTimeout(() => { if (N.M === M && !M.result && N.lock && N.lock.stalledFor > 2500) { toast('The match ended while you were disconnected.', true); endMatchView(); N.M = null; N.lock = null; restoreDemo(); showHome(); } }, 4000); }
+        if (N.M && !N.M.shown) { const M = N.M; setTimeout(() => { if (N.M === M && !M.result && N.lock && N.lock.stalledFor > 2500) { toast('That match is over. Pick your next fight.'); endMatchView(); N.M = null; N.lock = null; restoreDemo(); showHome(); } }, 4000); }
         if (N.pendingJoin && m.build.ok) { const c = N.pendingJoin; N.pendingJoin = null; send({ k: 'join', code: c }); }
         else if (N.lastRoom && !N.M && m.build.ok && N.view === 'room') send({ k: 'join', code: N.lastRoom });
         return;
@@ -573,8 +576,10 @@ const Net = (() => {
   function renderHome() {
     if (!built) return;
     const me = N.me, ok = N.conn === 'open' && me && me.build.ok;
-    byId('nbBal').textContent = me ? fmt(me.bal) + ' ETH · practice' : '— ETH';
-    byId('nbRefill').hidden = !(me && me.bal < 0.01);
+    // the balance chip and its refill button are gone from the header: keep the guards so the
+    // rest of the lobby renders whether or not those nodes exist
+    const bal = byId('nbBal'); if (bal) bal.textContent = me ? fmt(me.bal) + ' ETH · practice' : '';
+    const refill = byId('nbRefill'); if (refill) refill.hidden = !(me && me.bal < 0.01);
     const s = N.stats;
     byId('nbFoot').textContent = (s ? `${s.online} online · ${s.matches} match${s.matches === 1 ? '' : 'es'} live. ` : '') +
       'Every online match is replayed on the server from the inputs to decide the winner, so results can\'t be faked.';
@@ -738,8 +743,8 @@ const Net = (() => {
     byId('nrWallet').hidden = !r.real || !lobby;
     byId('nrWallet').textContent = me && me.wallet ? 'Wallet ✓' : 'Connect wallet';
     const pingLine = r.members.filter(m => m.ping).map(m => esc(m.name) + ' ' + m.ping + ' ms').join(' · ');
-    byId('nrPing').textContent = pingLine || '— ms';
-    byId('nrPing').title = 'Round trip to the ' + (r.region ? r.region.label : 'game') + ' server';
+    const np = byId('nrPing');            // the chip is off the room header now; keep the guard
+    if (np) { np.textContent = pingLine; np.title = 'Round trip to the game server'; }
     // how the match will actually feel, before anyone readies up
     const delayNote = r.delay >= 9
       ? `<b style="color:var(--gold)">Heavy connection: ${r.delay} frames of input delay (${Math.round(r.delay * 16.7)} ms).</b> Lockstep waits for the slower path, so a server closer to both of you is the fix. `
@@ -836,8 +841,9 @@ const Net = (() => {
     const w = byId('netWait');
     if (now < M.startLocal) { w.hidden = false; w.innerHTML = `<b>${Math.ceil((M.startLocal - now) / 1000)}</b>Match starting`; return; }
     const miss = L.stalledFor > 250 ? L.missing().filter(i => i !== L.me) : [];
-    if (N.conn !== 'open') { w.hidden = false; w.innerHTML = '<b>Reconnecting…</b>Hold on, your connection dropped'; }
-    else if (miss.length) {
+    // no "Reconnecting" overlay: a dropped socket reopens by itself and the fight keeps running,
+    // so saying it mid-match only makes the player think the game broke
+    if (miss.length) {
       const lag = M.lag || {};
       w.hidden = false;
       w.innerHTML = `<b>Waiting…</b>${miss.map(i => esc(M.names[i] || 'P' + (i + 1)) + (lag[i] && lag[i].gone ? ' left' : '') + (lag[i] && lag[i].secs ? ' · ' + lag[i].secs + 's' : '')).join(', ')}`;
@@ -1054,7 +1060,7 @@ const Net = (() => {
   // ------------------------------------------------------------------ wiring
   function wire() {
     byId('nbBack').onclick = () => { sfx(); leaveOnline(); };
-    byId('nbRefill').onclick = () => { send({ k: 'refill' }); sfx('coin'); };
+    const rf = byId('nbRefill'); if (rf) rf.onclick = () => { send({ k: 'refill' }); sfx('coin'); };
     const nm = byId('nbName');
     nm.onchange = () => { const v = nm.value.replace(/[^\w .\-]/g, '').trim().slice(0, 16); nm.value = v; if (v) { store.set('netName', v); send({ k: 'name', name: v }); } };
     byId('nbQuick2').onclick = () => { send({ k: 'quick', size: 2, stake: N.stake, stages: N.pool }); sfx(); };
