@@ -192,7 +192,7 @@ const WAL = (() => {
     }
     for (const d of ext) {
       const el = row(d.info.name, d.info.icon, 'Installed');
-      el.onclick = () => take(d);
+      el.onclick = () => take(d).catch(() => { });
       box.appendChild(el);
     }
     if (!ext.length) {
@@ -251,22 +251,34 @@ const WAL = (() => {
       const p = pending; pending = null;
       close();
       if (p) p.resolve(W.addr);
+      return W.addr;
     } catch (e) {
       note = say(e, who);
       if (box) box.classList.remove('wal-busy');
       fill();
+      throw new Error(note);
     }
   }
 
-  // Opens the picker and settles when a wallet is connected, or when the person closes it.
-  function choose() {
-    if (W.addr && W.p) return Promise.resolve(W.addr);
+  function sheetPromise() {
     if (pending) { open(); return pending.promise; }
     let resolve, reject;
     const promise = new Promise((a, b) => { resolve = a; reject = b; });
     pending = { resolve, reject, promise };
     open();
     return promise;
+  }
+
+  // Settles when a wallet is connected, or when the person closes the picker. With exactly one
+  // wallet in the browser there is nothing to pick, so the click goes straight to that wallet and
+  // its own popup comes up; a menu in front of it would be a second click for no decision. The
+  // picker is for the real cases: several wallets installed, or none, or one that just refused.
+  function choose() {
+    if (W.addr && W.p) return Promise.resolve(W.addr);
+    if (pending) { open(); return pending.promise; }
+    const ext = list();
+    if (ext.length === 1) return take(ext[0]).catch(() => sheetPromise());
+    return sheetPromise();
   }
 
   async function connect(chain) {
