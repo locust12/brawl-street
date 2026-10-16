@@ -373,15 +373,22 @@ const GunAudio = (() => {
     } catch (e) { return null; }
   }
   // ---- the sim's events -> sound
-  const SHOT = { pistol: ['pistol', 0.95], revolver: ['revolver', 1], shotgun: ['shotgun', 1], smg: ['smg', 0.72], sniper: ['sniper', 1], bazooka: ['rocket', 0.9] };
+  // [voice, volume, rate?] -- the AK borrows the SMG's report pitched down, which is what makes a
+  // rifle sound like a rifle next to a submachine gun rather than the same crack twice.
+  const SHOT = { pistol: ['pistol', 0.95], revolver: ['revolver', 1], shotgun: ['shotgun', 1], smg: ['smg', 0.72],
+    ak: ['smg', 1, 0.78], blaster: ['pistol', 0.8, 1.35], bow: ['sniper', 0.62, 1.5], sweeper: ['shotgun', 1, 0.9], bolt: ['shotgun', 0.85, 0.55],
+    // the Eagle is a .50: the revolver sample, louder and pitched well down, so one shot lands
+    // like nothing else on the shelf
+    deagle: ['revolver', 1.25, 0.66],
+    sniper: ['sniper', 1], bazooka: ['rocket', 0.9] };
   function onEvent(e) {
     const k = e.k, x = e.x;
     switch (e.type) {
       case 'shot': {
         const s = SHOT[k]; if (!s) break;
-        play(s[0], { x, vol: s[1], prio: true, limit: k === 'smg' ? 0.03 : 0.02, key: 'shot' + e.f });
+        play(s[0], { x, vol: s[1], rate: s[2] || 1, prio: true, limit: k === 'smg' || k === 'ak' ? 0.03 : 0.02, key: 'shot' + e.f });
         // without the 3D layer there are no casings to bounce, so the brass comes from here
-        if (!G.casings3D && k !== 'bazooka') { play(k === 'shotgun' ? 'hull' : 'tink', { x, vol: 0.35, delay: 0.32 + Math.random() * 0.1, limit: 0.03 }); }
+        if (!G.casings3D && k !== 'bazooka') { play(k === 'shotgun' ? 'hull' : 'tink', { x, vol: k === 'ak' ? 0.45 : 0.35, delay: 0.32 + Math.random() * 0.1, limit: 0.03 }); }
         break;
       }
       case 'mech': play(k, { x, vol: 0.8, limit: 0.05 }); break;

@@ -1,4 +1,25 @@
 // ===== fighter: getting hit, grabs, throws, drawing pose =====
+
+// Shop melee wears out, on the DEFAULT path and not only under Game.feel. The card is the contract:
+// the Slugger says "Four swings, then it is gone" and 25_feel.js was the only thing that enforced a
+// swing count — and it reads `feelSword`, behind a flag that is off by default. So the bat never
+// left your hand, which made the $14.99 finisher worse value per dollar than the $3.99 Fire Axe.
+// Only defs that declare `sword.hits` wear: the set-1 Beam and Hero swords do not, and the Boxing
+// Gloves deliberately do not, because their card promises they last the whole stock.
+// One tick per SWING, not per hitbox, so a multi-hit move still costs one.
+function wearSword(att, victim) {
+  if (!att || att === victim || !att.item || !att.move || att.move.wore) return;
+  const def = ITEM_DEFS[att.item.kind], sw = def && def.sword;
+  if (!sw || !sw.hits) return;
+  att.move.wore = true;
+  const it = att.item;
+  it.dur = (it.dur == null ? sw.hits : it.dur) - 1;
+  if (it.dur > 0) return;
+  att.item = null;
+  Game.text(att.x, att.y - att.h - 22, 'SPENT', sw.color || '#ffffff', 1.1);
+  Game.burst(att.x + att.face * att.w * 0.6, att.y - att.h * 0.5, sw.color || '#ffffff', 18);
+}
+
 Object.assign(Fighter.prototype, {
   takeHit(hb, att, mult, srcX, srcFace) {
     if (this.bubbleHits > 0 && Items2.absorb(this, att)) return 0;   // bubble shield (56_items2)
@@ -62,6 +83,7 @@ Object.assign(Fighter.prototype, {
     this.flashT = 8;
     Game.onHit(this, att, hb, d, kb);
     if (Game.feel) FEEL.hit(this, att, hb, d, kb);   // hitlag, lethal hits, juggle decay, meter (25_feel)
+    wearSword(att, this);
     return kb;
   },
 

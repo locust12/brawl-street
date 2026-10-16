@@ -77,6 +77,9 @@
       const card = document.getElementById('gfxCard');
       const back = setInterval(() => { if (!Game.paused || !card || !card.classList.contains('on')) { clearInterval(back); if (Game.paused && Game.state === 'match') { el.hidden = false; paint(); } } }, 200);
     }));
+    // Feedback (8i_feedback.js) sits here and only here during a match: the one place a player who
+    // just felt something off can say so without anything interrupting the fight to ask.
+    if (window.Feedback) items.push(item(String(items.length + 1).padStart(2, '0'), 'Feedback', () => Feedback.open('pause')));
     items.push(item(String(items.length + 1).padStart(2, '0'), 'Quit match', () => UI.quit()));
     box.append(...items);
     setTimeout(() => { try { items[0].focus(); } catch (e) {} }, 0);

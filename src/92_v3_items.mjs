@@ -1,5 +1,8 @@
 // ===== 3D: items on stage, held weapons, slash trails, Final Smash beam, power aura =====
 // Prop models are normalised so the grip sits at the origin and the business end points along +Y.
+// `buildModels` comes from 92a_v3_props.mjs. No import: build.py concatenates every .mjs into one
+// module, so the declaration is already in scope (and hoisted), while a real import would try to
+// fetch a path that does not exist next to the built page.
 const PROP_SPEC = {
   hammer:  { file: 'hammer',  axis: [0, 0, -1], grip: [0, 0, 0.42], len: 0.85, lay: true },
   raygun:  { file: 'raygun',  axis: [0, 0, 1],  grip: [0, -0.26, -0.12], len: 0.5, lay: true },
@@ -8,6 +11,20 @@ const PROP_SPEC = {
   // the Hero Sword GLB is modelled point-DOWN: its +Y end is the winged crossguard, which is why the
   // fighters kept holding it by the blade. -Y is the business end (9/20, verified in dev/anim/*sword*).
   blade:   { file: 'blade',   axis: [0, -1, 0], grip: [0, 0.34, 0], len: 1.05, lay: true },
+  // DESERT EAGLE, 16 Oct. Duane: *"stop trying to reinvent the wheel when 3d models are already
+  // out there"*. Right. This one is a real modelled Mark XIX (Poly Pizza, CC BY, by PuKkBuMXDD)
+  // rather than thirty hand-placed boxes, and it arrives with the slotted top rail, the squared
+  // trigger guard and the grip already on it. `tint` paints it to the reference he sent: gold
+  // everywhere the model is bright, black left alone where it is dark, which is the grip.
+  deagle:  { file: 'deagle',  axis: [0, 0, 1],  grip: [0, -0.62, -1.35], len: 0.38,
+             tint: { metal: 0xd5a52a, rough: 0.16, dark: 0x16181c } },
+  // The TASER and the NAIL GUN, same 16 Oct rule: a downloaded model, painted to the reference,
+  // rather than a pile of boxes. The taser is the yellow-and-black TASER 7 Duane sent; the nailer
+  // is a yellow power tool. `tint.metal` is the shell colour, `tint.dark` the grip.
+  freeze:  { file: 'taser',   axis: [-1, 0, 0], grip: [1.0, -1.35, 0], len: 0.30,
+             tint: { metal: 0xe8c215, rough: 0.42, dark: 0x191b1f, darkBelow: 0.45 } },
+  nailgun: { file: 'nailer',  axis: [-1, 0, 0], grip: [2.6, 3.4, 0], len: 0.38,
+             tint: { metal: 0xe3b616, rough: 0.44, dark: 0x1d2024 } },
 };
 const propModels = {};
 V3.loadProps = async function (loader, texLoader) {
@@ -16,11 +33,42 @@ V3.loadProps = async function (loader, texLoader) {
   await Promise.all(Object.values(PROP_SPEC).map(async sp => {
     try {
       const g = await tries(() => loader.loadAsync('assets/item_' + sp.file + '_glb.wasm'));
-      const tex = await tries(() => texLoader.loadAsync('assets/item_' + sp.file + '_tex.jpg'));
-      tex.flipY = false; tex.colorSpace = THREE.SRGBColorSpace;
-      // cached and cloned into every held prop: keep it out of V3.disposeArena's way (90_v3_core)
-      tex.userData.shared = true;
-      g.scene.traverse(o => { if (o.isMesh) { if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals(); o.material = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5, metalness: 0.15 }); o.castShadow = true; o.material.userData.shared = true; o.geometry.userData.shared = true; } });
+      // A TINTED prop keeps its own modelled materials and is only repainted: the four original
+      // props are one baked texture each, but a downloaded model arrives already split into
+      // metal and rubber, and overwriting that with one jpg throws away the thing worth having.
+      // Bright materials go to the tint metal, dark ones stay dark, which is the grip.
+      const tex = sp.tint ? null : await tries(() => texLoader.loadAsync('assets/item_' + sp.file + '_tex.jpg'));
+      if (tex) {
+        tex.flipY = false; tex.colorSpace = THREE.SRGBColorSpace;
+        // cached and cloned into every held prop: keep it out of V3.disposeArena's way (90_v3_core)
+        tex.userData.shared = true;
+      }
+      // `darkBelow`: everything hanging under this fraction of the model's height is the GRIP and
+      // goes black whatever colour the source gave it. Without it the taser came out all yellow,
+      // because the model it came from had a white grip and the luminance test let it through.
+      const whole = sp.tint ? new THREE.Box3().setFromObject(g.scene) : null;
+      const cut = whole && sp.tint.darkBelow != null ? whole.min.y + (whole.max.y - whole.min.y) * sp.tint.darkBelow : null;
+      const mBox = new THREE.Box3(), mC = new THREE.Vector3();
+      g.scene.traverse(o => {
+        if (!o.isMesh) return;
+        if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals();
+        if (tex) o.material = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5, metalness: 0.15 });
+        else {
+          const low = cut != null && (mBox.setFromObject(o).getCenter(mC), mC.y < cut);
+          const mats = Array.isArray(o.material) ? o.material : [o.material];
+          o.material = mats.map(m => {
+            const c = m && m.color ? m.color : new THREE.Color(0x888888);
+            const lum = 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
+            return (lum > 0.22 && !low)
+              ? new THREE.MeshStandardMaterial({ color: sp.tint.metal, metalness: 1, roughness: sp.tint.rough })
+              : new THREE.MeshStandardMaterial({ color: sp.tint.dark, metalness: 0.1, roughness: 0.82 });
+          });
+          if (o.material.length === 1) o.material = o.material[0];
+        }
+        o.castShadow = true;
+        for (const m of (Array.isArray(o.material) ? o.material : [o.material])) m.userData.shared = true;
+        o.geometry.userData.shared = true;
+      });
       const box = new THREE.Box3().setFromObject(g.scene), size = box.getSize(new THREE.Vector3());
       propModels[sp.file] = { scene: g.scene, size: Math.max(size.x, size.y, size.z) };
     } catch (e) { V3.fxErr(e, '92_v3_items:26'); /* a missing prop falls back to a procedural stand-in */ }
@@ -39,6 +87,12 @@ function heartShape() {
 // second one of anything is a handful of Object3D allocations and nothing on the GPU.
 // V3.noPropCache = build every prop from scratch (A/B).
 const propCache = {};
+// dev probe: dev/weapon_test and the prop audit build one of each kind and check it is not the
+// white stand-in. A weapon that renders as a blob in a fight is a weapon nobody can use.
+V3._makeProp = (k) => makeProp0(k);
+// dev only: the forge's own model table, un-posed and un-scaled, so a probe can measure which way
+// each model is built (dev/forgebox.mjs). Nothing in the game reads this.
+V3._forgeAll = () => { if (FORGE === null) { try { FORGE = buildModels(THREE); } catch (e) { FORGE = {}; } } return FORGE; };
 let ringGeo = null;   // one ring geometry for every item on the stage, not one each
 function makeProp(kind) {
   if (!V3.noPropCache) {
@@ -60,6 +114,142 @@ function makeProp(kind) {
   if (!V3.noPropCache) { propCache[kind] = built; }
   return built;
 }
+// The store's own weapon models, shared (src/92a_v3_props.mjs). Before this, PROP_SPEC covered five
+// kinds and EVERY other weapon fell through to a white icosahedron -- which is exactly what Duane
+// saw when he took one into a fight. Now the thing you buy and the thing you hold are one model.
+//
+// ---- HOW A SHOP WEAPON IS HELD, rebuilt 15 Oct -------------------------------------------------
+// Duane: *"make sure each of them work and look GOOD"*. They worked and they did not look good, for
+// one reason that applied to all 22 at once: the forge builds for the STORE RENDER -- side on, the
+// muzzle or the head toward +X, +Y up, Z the thickness -- while the held-prop path aligns a model's
+// +Y with the hold direction. Every weapon therefore went into the hand rotated 90 degrees, long
+// axis across the body and into the camera. That is why the rifle read as a black stub at the chin
+// and the speargun read as nothing at all. Measured on the live build with dev/holdmeasure.mjs and
+// dev/forgebox.mjs: a fighter is ~0.62 world units head to foot, and the models are 1.0-1.3 units
+// long in their own space, which the old code then squashed to a flat 0.34-0.46 for everything.
+//
+//   axis  which local axis the business end points down ('x' for everything built side-on)
+//   hold  where the hand grips it, as a fraction of the model's own box: [along the axis, across it]
+//   len   how long it should be in the WORLD. 0.62 = exactly as tall as the fighter.
+//   c     the rest angle in radians, FACE-RELATIVE and + = up: 0 is level forward, 1.4 is overhead.
+//         A rifle carries level, an axe rides up on the shoulder, a bomb is held up and out.
+//   pair  the model is two objects (two pistols, two gloves, two boots): one goes on each side
+//   limb  'hands' or 'feet' -- worn on the body rather than carried in the right fist
+//   armK  how far the ARM goes out along `c` (97_v3_pose pzCarryDir). The prop sits on the hand
+//         bone, and in the idle guard that bone is at the chin, so without this a shotgun lies
+//         across the fighter's face. A rifle goes right out; a bat only lifts to the shoulder.
+const FORGE_HOLD = {
+  // ---- guns: carried level, pointing where the fighter faces, braced with the off hand ----
+  ak:       { axis: 'x', hold: [0.38, 0.42], len: 0.58, c: 0.06, armK: 0.9 },
+  bow:      { axis: 'x', hold: [0.34, 0.45], len: 0.58, c: 0.06, armK: 0.9 },
+  sweeper:  { axis: 'x', hold: [0.36, 0.45], len: 0.54, c: 0.06, armK: 0.9 },
+  thunder:  { axis: 'x', hold: [0.33, 0.45], len: 0.52, c: 0.08, armK: 0.88 },
+  flamer:   { axis: 'x', hold: [0.33, 0.45], len: 0.50, c: 0.08, armK: 0.88 },
+  bolt:     { axis: 'x', hold: [0.40, 0.45], len: 0.38, c: 0.06, armK: 0.85 },
+  freeze:   { axis: 'x', hold: [0.24, 0.32], len: 0.30, c: 0.10, armK: 0.85 },
+  zip:      { axis: 'x', hold: [0.16, 0.42], len: 0.36, c: 0.18, armK: 0.8 },
+  blaster:  { axis: 'x', hold: [0.36, 0.45], len: 0.26, c: 0.08, armK: 0.85, pair: 1 },
+  deagle:   { axis: 'x', hold: [0.30, 0.38], len: 0.34, c: 0.06, armK: 0.9 },
+  // ---- melee: up on the shoulder at rest, swept through the target on a swing ----
+  bat:      { axis: 'x', hold: [0.07, 0.50], len: 0.66, c: 1.05, armK: 0.55, swing: 1 },
+  fireaxe:  { axis: 'x', hold: [0.13, 0.50], len: 0.58, c: 1.05, armK: 0.55, swing: 1 },
+  pipegun:  { axis: 'x', hold: [0.12, 0.50], len: 0.64, c: 1.05, armK: 0.55, swing: 1 },
+  // ---- added 16 Oct with the four weapons that came in without one ----
+  rebar:    { axis: 'x', hold: [0.12, 0.50], len: 0.70, c: 1.00, armK: 0.5, swing: 1 },
+  chain:    { axis: 'x', hold: [0.06, 0.50], len: 0.78, c: 1.10, armK: 0.5, swing: 1 },
+  nailgun:  { axis: 'x', hold: [0.34, 0.52], len: 0.36, c: 0.06, armK: 0.88 },
+  // gripped near the TOP rim, not through the middle: hold[0] 0.50 put the hand at the disc's
+  // centre and a 0.42-wide blade then sat squarely over the fighter's face at c 0.95. Now it hangs
+  // off the hand like a discus carried at the side.
+  buzzsaw:  { axis: 'y', hold: [0.84, 0.50], len: 0.34, c: 0.74, armK: 0.62 },
+  // ---- thrown, placed and carried objects: out in front, clear of the body ----
+  pipebomb: { axis: 'x', hold: [0.50, 0.45], len: 0.32, c: 0.85, armK: 0.6 },
+  mine:     { axis: 'x', hold: [0.50, 0.30], len: 0.30, c: 0.80, armK: 0.65 },
+  medkit:   { axis: 'x', hold: [0.50, 0.50], len: 0.30, c: 0.80, armK: 0.65 },
+  turret:   { axis: 'x', hold: [0.50, 0.45], len: 0.40, c: 0.55, armK: 0.7 },
+  aegis:    { axis: 'x', hold: [0.50, 0.50], len: 0.36, c: 0.90, armK: 0.6 },
+  manhole:  { axis: 'z', hold: [0.50, 0.22], len: 0.44, c: 0.10, armK: 0.75 },  // a lid, gripped at the rim
+  well:     { axis: 'y', hold: [0.50, 0.35], len: 0.28, c: 0.95, armK: 0.6 },   // spoon and pin on top
+  wreck:    { axis: 'y', hold: [0.50, 0.90], len: 0.54, c: 1.35, armK: 0.45 },  // by the hook, ball hanging
+  // ---- worn, not carried: no arm pose, they go on the limb itself ----
+  gloves:   { axis: 'x', hold: [0.45, 0.50], len: 0.30, c: 0.00, pair: 1, limb: 'hands' },
+  boots:    { axis: 'x', hold: [0.45, 0.45], len: 0.32, c: 0.00, pair: 1, limb: 'feet' },
+};
+let FORGE = null;
+function forgeModel(kind) {
+  if (FORGE === null) { try { FORGE = buildModels(THREE); } catch (e) { FORGE = {}; V3.fxErr(e, '92_v3_items:forge'); } }
+  const fn = FORGE[kind];
+  if (typeof fn !== 'function') return null;
+  const g = new THREE.Group();
+  try { fn(g); } catch (e) { V3.fxErr(e, '92_v3_items:forge ' + kind); return null; }
+  const spec = FORGE_HOLD[kind];
+  if (!spec) {
+    // no entry: the old behaviour, centred and shrunk to fit. Anything new in the store lands here
+    // and looks passable until it gets a line in the table above.
+    const bb0 = new THREE.Box3().setFromObject(g), s0 = bb0.getSize(new THREE.Vector3());
+    const big = Math.max(s0.x, s0.y, s0.z) || 1;
+    const d = ITEM_DEFS[kind] || {};
+    const want = d.sword ? 0.62 : big > 0.9 ? 0.46 : 0.34;
+    g.scale.setScalar(want / big);
+    g.position.sub(bb0.getCenter(new THREE.Vector3()).multiplyScalar(want / big));
+    return g;
+  }
+  // where the hand goes, from the model's own box and the hold fractions
+  const A = spec.axis, across = A === 'y' ? 'x' : 'y';
+  const gripOf = (bb) => {
+    const size = bb.getSize(new THREE.Vector3());
+    return new THREE.Vector3(
+      A === 'x' ? bb.min.x + size.x * spec.hold[0] : across === 'x' ? bb.min.x + size.x * spec.hold[1] : (bb.min.x + bb.max.x) / 2,
+      A === 'y' ? bb.min.y + size.y * spec.hold[0] : across === 'y' ? bb.min.y + size.y * spec.hold[1] : (bb.min.y + bb.max.y) / 2,
+      (bb.min.z + bb.max.z) / 2);
+  };
+  // A PAIR model is two objects side by side for the store card (two pistols, two gloves, two
+  // boots). Name them so the held path can show one per side, sit EACH ONE on its own grip so
+  // either can be the one in the hand, and measure only the first -- otherwise the scale comes out
+  // of the gap between them. The second is hidden by default, so an item lying on the stage reads
+  // as one clean object rather than two overlapping ones.
+  const pair = spec.pair && g.children.length >= 2;
+  if (pair) {
+    g.children[0].name = 'pairR'; g.children[1].name = 'pairL'; g.children[1].visible = false;
+    for (const ch of [g.children[0], g.children[1]]) ch.position.sub(gripOf(new THREE.Box3().setFromObject(ch)));
+  }
+  const bb = new THREE.Box3().setFromObject(pair ? g.children[0] : g), size = bb.getSize(new THREE.Vector3());
+  const along = size[A] || 1;
+  const inner = new THREE.Group();
+  inner.add(g); if (!pair) g.position.sub(gripOf(bb));
+  // point the business end at +Y, which is what the held path (and the GLB props) expect
+  const out = new THREE.Group();
+  out.add(inner);
+  if (A === 'x') inner.rotation.z = Math.PI / 2;        // +X -> +Y
+  else if (A === 'z') inner.rotation.x = -Math.PI / 2;  // +Z -> +Y
+  out.scale.setScalar(spec.len / along);
+  out.userData.forge = kind;
+  // A HELD prop hangs off the grip; an item LYING ON THE STAGE spins about its own centre and must
+  // not sink through the deck. Same model, two origins, so the offset from the grip to the centre
+  // is measured once here and added back by syncItems.
+  const b2 = new THREE.Box3().setFromObject(out), c = b2.getCenter(new THREE.Vector3());
+  out.userData.gripOff = [c.x, b2.min.y, c.z];
+  return out;
+}
+// A side-on game holds a weapon by ANGLE and MIRROR, never by a shortest-arc rotation between two
+// vectors: setFromUnitVectors rolls the model about the view axis, and a rifle that rolls is a
+// rifle lying on its side (facing left it came out upside down). `c` is the face-relative angle,
+// + = up; facing left mirrors through Y so the weapon keeps its own top side up.
+// forgeModel has already turned the business end to +Y (the convention the GLB props use), so the
+// Z angle is measured from straight up, not from forward: c = 0 is level and c = PI/2 is overhead.
+const forgeE = new THREE.Euler();
+function forgeAim(m, c, face) {
+  forgeE.set(0, face < 0 ? Math.PI : 0, face < 0 ? (Math.PI / 2 - c) : (c - Math.PI / 2), 'ZYX');
+  m.quaternion.setFromEuler(forgeE);
+}
+// a world direction (the swing arc, or the shot the fight code chose) as a face-relative angle
+function forgeAngleOf(x, y, face) { return Math.atan2(y, x * face); }
+// a pair model carries both halves; each copy shows one. The names are set in forgeModel and
+// survive Object3D.clone, which is how the cached template can serve both sides.
+function showSide(m, keep) {
+  m.traverse(o => { if (o.name === 'pairR' || o.name === 'pairL') o.visible = (o.name === keep); });
+}
+
 function makeProp0(kind) {
   const outer = new THREE.Group(), inner = new THREE.Group(); outer.add(inner);
   const sp = PROP_SPEC[kind];
@@ -110,7 +300,9 @@ function makeProp0(kind) {
   } else if (V3.makeProp2 && V3.makeProp2(kind, inner, outer)) {
     // item set 2 props (procedural, 94_v3_moves.mjs)
   } else {
-    inner.add(new THREE.Mesh(new THREE.IcosahedronGeometry(0.12, 1), new THREE.MeshStandardMaterial({ color: 0xcccccc })));
+    const fm = forgeModel(kind);
+    if (fm) { inner.add(fm); if (fm.userData.gripOff) outer.userData.gripOff = fm.userData.gripOff; }
+    else inner.add(new THREE.Mesh(new THREE.IcosahedronGeometry(0.12, 1), new THREE.MeshStandardMaterial({ color: 0xcccccc })));
   }
   outer.traverse(o => { if (o.isMesh) o.castShadow = true; });
   V3.scene.add(outer);
@@ -155,6 +347,7 @@ function syncMark(it, want, blink) {
   k.material.opacity = blink ? 0.25 : 0.95;
 }
 const Y = new THREE.Vector3(0, 1, 0), X = new THREE.Vector3(1, 0, 0), qa = new THREE.Quaternion(), qb = new THREE.Quaternion();
+const gripV = new THREE.Vector3();
 function syncItems() {
   const live = new Set(Game.items);
   for (const [it, m] of itemMeshes) if (!live.has(it)) { V3.scene.remove(m); itemMeshes.delete(it); const r = itemRings.get(it); if (r) { V3.scene.remove(r); itemRings.delete(it); } const k = itemMarks.get(it); if (k) { V3.scene.remove(k); itemMarks.delete(it); } }
@@ -169,6 +362,17 @@ function syncItems() {
       qa.setFromAxisAngle(Y, it.age * 0.035); qb.setFromAxisAngle(new THREE.Vector3(0, 0, 1), lay ? -Math.PI / 2 : 0);
       m.quaternion.copy(qa).multiply(qb);
       if (lay) m.position.x -= 0.0;
+    }
+    // A shop weapon's model is pivoted on its GRIP so it sits in a hand properly. On the stage it
+    // has to turn about its own middle instead -- or a rifle sweeps the deck around its stock --
+    // and it has to stand ON the deck: `it.y = top` puts the item's origin exactly on the floor
+    // line (55_items.js), so a centred model is buried to its waist. The GLB props have sat on
+    // their own base since the sword fix; these do now too.
+    const go = m.userData.gripOff;
+    if (go) {
+      gripV.set(go[0], 0, go[2]).applyQuaternion(m.quaternion);
+      m.position.sub(gripV);
+      m.position.y -= go[1];     // the model's own floor, unchanged by the upright spin
     }
     if (m.userData.shader) m.userData.shader.uniforms.t.value = performance.now() / 1000;
     // pulsing ring under items you can grab, and the marker above them
@@ -283,11 +487,53 @@ V3.decorate = function (av) {
   const kind = dead ? null : f.state === 'hammer' ? 'hammer' : f.item ? f.item.kind : null;
   // AKIMBO (6h_akimbo.js): a second gun of the same kind, in the LEFT hand. It is its own entry in
   // av.held under '<kind>#L' so the map stays one-mesh-per-key and nothing else in here has to know.
-  const dualKey = (kind && f.item && f.item.dual) ? kind + '#L' : null;
+  // A PAIR weapon (twin pistols, boxing gloves, rocket boots) uses the same second-mesh slot: one
+  // object per side, so the pair the store sells is the pair you wear.
+  const fhold = kind ? FORGE_HOLD[kind] : null;
+  const dualKey = (kind && ((f.item && f.item.dual) || (fhold && fhold.pair))) ? kind + '#L' : null;
   // a held prop is its own scene object: hide it with the fighter (teleport frames, swallowed; audit A13)
   for (const [k, m] of Object.entries(av.held)) m.visible = (k === kind || k === dualKey) && av.root.visible;
   let swordTip = null;
-  if (kind && B.RightHand && B.RightForeArm) {
+  // ---- the shop arsenal: a side-on carry, mirrored with the fighter (see FORGE_HOLD above) ----
+  if (kind && fhold && B.RightHand) {
+    const bodyK = Math.max(0.75, Math.min(1.25, f.h / 76));
+    const onFeet = fhold.limb === 'feet';
+    let m = av.held[kind]; if (!m) { m = av.held[kind] = makeProp(kind); }
+    // Where it sits: the fist nearest the camera (97_v3_pose picked it and posed that arm), or the
+    // foot for something worn on the feet. On the far hand the torso draws over the weapon and the
+    // near fist sits in front of it, which is what made every one of these look unheld.
+    const nearL = !onFeet && V3.carryHand && V3.carryHand(f) === 'L' && B.LeftHand;
+    const rb = onFeet ? (B.RightFoot || B.RightToeBase || B.RightHand) : (nearL ? B.LeftHand : B.RightHand);
+    const lb = onFeet ? (B.LeftFoot || B.LeftToeBase || B.LeftHand) : (nearL ? B.RightHand : B.LeftHand);
+    rb.getWorldPosition(hand);
+    // which way it points: the shot the fight code actually chose, the arc of a live swing, or the
+    // weapon's own rest angle. Never the forearm -- a rifle that follows the forearm points through
+    // the fighter's own head in half the idle poses.
+    const mv = f.move;
+    let ang = fhold.c;
+    if (fhold.swing) { const sw = swingDir(f, hand); if (sw) ang = forgeAngleOf(sw.x, sw.y, f.face); }
+    else if (mv && mv.def && mv.def.gun && mv.gnAx != null) ang = forgeAngleOf(mv.gnAx, -mv.gnAy, f.face);
+    else if (typeof GUNS !== 'undefined' && GUNS.on && GUNS.on() && GUNS.isGun && GUNS.isGun(kind)
+             && (f.state === 'ground' || f.state === 'air') && f.in && (f.in.up || (f.in.down && f.air)) && GUNS.aimVec) {
+      const A = GUNS.aimVec(f); if (A) ang = forgeAngleOf(A[0], -A[1], f.face);
+    }
+    m.position.copy(hand); forgeAim(m, ang, f.face); m.scale.setScalar(bodyK);
+    // Toward the camera. The prop rides the RIGHT hand, which in this side-on view is the FAR hand,
+    // so the body and the near fist drew over the top of it: the fire axe came out behind the
+    // shoulder and the shotgun behind a raised glove. Bringing it forward puts the weapon in front
+    // of the fighter where it reads, and the near fist then sits on it rather than in front of it.
+    if (!onFeet) m.position.z += (fhold.z == null ? 0.045 : fhold.z) * bodyK;
+    if (fhold.pair) {
+      showSide(m, 'pairR');
+      if (dualKey && lb) {
+        let m2 = av.held[dualKey]; if (!m2) { m2 = av.held[dualKey] = makeProp(kind); m2.visible = av.root.visible; }
+        showSide(m2, 'pairL');
+        lb.getWorldPosition(hand2);
+        m2.position.copy(hand2); m2.position.z -= 0.06 * bodyK;   // the far side of a side-on view
+        forgeAim(m2, ang, f.face); m2.scale.setScalar(bodyK);
+      }
+    }
+  } else if (kind && B.RightHand && B.RightForeArm) {
     let m = av.held[kind]; if (!m) { m = av.held[kind] = makeProp(kind); }
     B.RightHand.getWorldPosition(hand); B.RightForeArm.getWorldPosition(fore);
     dir.subVectors(hand, fore).normalize();
@@ -349,15 +595,21 @@ V3.decorate = function (av) {
     const bone = FOOT_CLIPS.has(av.cur) ? (B.RightToeBase || B.RightFoot) : B.RightHand;
     if (bone) { bone.getWorldPosition(tip); p = tip; }
   }
-  if (p) updateTrail(av.trail, live, p, (d && d.weapon) || f.color, swordTip ? 0.1 : 0.07);
-  // Pump Pill gold aura and Final Smash rainbow glow
-  const pumped = f.powerT > 0 && !dead, final = f.finalReady && !dead;
-  av.aura.intensity = pumped ? 6 + Math.sin(f.t * 0.4) * 2 : final ? 4 : 0;
-  if (final) av.aura.color.setHSL((f.t * 0.01) % 1, 1, 0.6); else av.aura.color.set(0xffd23f);
+  // Pump Pill gold aura, Final Smash rainbow glow, and WOLVERINU's FERAL (67_unique): while the rage
+  // is up his claws burn, so the swing trail goes to the hot colour and the body picks up a green
+  // emissive instead of the pill's gold. `feralT` exists on no other fighter, so this costs nothing.
+  const pumped = f.powerT > 0 && !dead, final = f.finalReady && !dead, feral = f.feralT > 0 && !dead;
+  if (p) updateTrail(av.trail, live, p, feral ? '#eaffb0' : (d && d.weapon) || f.color, swordTip ? 0.1 : 0.07);
+  // the feral numbers are deliberately well under the pill's: the pill glows gold on warm-coloured
+  // fighters, this glows green on a near-black wolf, and at the pill's 6 / 0.16 he read as a solid
+  // green silhouette with no armour, no claws and no face. 2.8 / 0.09 lights him without eating him.
+  av.aura.intensity = pumped ? 6 + Math.sin(f.t * 0.4) * 2 : final ? 4 : feral ? 2.1 + Math.sin(f.t * 0.5) * 0.8 : 0;
+  if (final) av.aura.color.setHSL((f.t * 0.01) % 1, 1, 0.6); else av.aura.color.set(feral && !pumped ? 0x9bf000 : 0xffd23f);
   av.aura.position.set(f.x * SC, -f.y * SC + f.h * SC * 0.7, 0.6);
-  if (pumped || final) for (const mt of av.mats) {
+  if (pumped || final || feral) for (const mt of av.mats) {
     if (f.flashT > 0) continue;
     if (pumped) mt.emissive.setRGB(0.16 + Math.sin(f.t * 0.3) * 0.06, 0.11 + Math.sin(f.t * 0.3) * 0.04, 0.0);
+    else if (feral) mt.emissive.setRGB(0.02 + Math.sin(f.t * 0.3) * 0.009, 0.065 + Math.sin(f.t * 0.3) * 0.022, 0.0);
     else mt.emissive.setHSL((f.t * 0.01) % 1, 1, 0.06);
   }
 };

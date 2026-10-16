@@ -687,6 +687,32 @@ const STYLE = {
       uair:   { f: [4, 8], landLag: -3, dmg: 0.94 },
       dair:   { f: [9, 13], landLag: -1, dmg: 1.02 },
     },
+    // WOLVERINU  Circuit Prowl. CLAW NORMALS, and the last fighter on the roster that had none: it ran
+    // the shared table, so the partner character played exactly like DOGE. A claw is the last six inches
+    // of the limb, not the whole arm, so every box here is pushed OUT (x) and made THIN (r) -- the same
+    // disjoint idea as RONIN's blade, but cheap and repeatable instead of clean and single. The cuts
+    // come out fast and carry almost no knockback, so they link into each other and into the Prowl dash
+    // (sb); the one thing in the kit that kills is the fsmash cross-rake. Nothing here is lightning:
+    // `blade` ('#9bf000', 21_roster2) already tints every one of these trails circuit green.
+    // 10/15 pass: the shapes above were right and the numbers were timid -- a claw kit that cuts fast
+    // and carries no knockback is only worth playing if the cuts actually come out faster than
+    // anybody else's and actually link. So: jab 11 frames with iasa 7 (the quickest on the roster) so
+    // it rattles, the tilts a frame or two earlier, the smashes and the dive-in cut hit harder, and
+    // the aerials autocancel deeper. He is the lead; the normals are allowed to be the best ones.
+    wolverinu: {
+      jab:    { total: 11, iasa: 7,   f: [2, 4],   dmg: 0.88, x: 1.22, r: 0.78, bkb: 0.72, kbg: 0.52, hl: 1.65 },  // two claws, in and out
+      ftilt:  { total: 22, f: [5, 8],   dmg: 1.00, x: 1.40, r: 0.80, ang: 32, kbg: 0.86, hl: 1.2 },                 // the rake: his longest ground poke
+      utilt:  { total: 22, f: [4, 8],   dmg: 0.96, x: 1.10, r: 0.90, kbg: 0.78 },                                   // rising claw, keeps them low enough to chase
+      dtilt:  { total: 18, f: [4, 7],   dmg: 0.92, x: 1.32, r: 0.78, ang: 14, kbg: 0.74 },                          // claws through the ankles
+      fsmash: { total: 50, charge: 9,  f: [14, 18], dmg: 1.26, x: 1.32, r: 0.88, kbg: 1.12, hl: 1.5 },              // cross rake: the kill move
+      usmash: { total: 40, charge: 6,  f: [8, 12],  dmg: 1.08, r: 0.94 },
+      dsmash: { total: 40, charge: 5,  f: [7, 10],  dmg: 1.06, x: 1.18, r: 0.84 },
+      nair:   { f: [4, 20],  landLag: -3, dmg: 0.96, r: 1.08 },                                                     // spin rake, the one wide box he owns
+      fair:   { f: [6, 10],  landLag: -4, dmg: 1.12, x: 1.36, r: 0.82, kbg: 1.06, hl: 1.3 },                        // the dive-in cut
+      bair:   { f: [5, 9],   landLag: -3, dmg: 1.08, x: 1.24, r: 0.84 },
+      uair:   { f: [4, 8],   landLag: -3, dmg: 0.98, r: 0.96 },
+      dair:   { f: [9, 13],  landLag: 1,  dmg: 1.10, r: 0.92 },
+    },
   };
 
   STYLE.KITS = KITS;

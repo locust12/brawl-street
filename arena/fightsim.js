@@ -124,12 +124,36 @@ function padState(i) {
     // throws sit on the two shoulder buttons, Tekken-style; the triggers keep guard
     shield: b(6) || b(7), smash: rs,
     grab: b(4), grapple: b(5), drop: b(10) || b(8),
+    // NOT free aim: the right stick is already the smash flick (`smash: rs` above), so taking it for
+    // aiming would fire a smash every time you pointed the gun. Pad free-aim needs smash moved to a
+    // button first, which is a controls decision, not a rename. Mouse aim is wired up below and is
+    // what Madness itself uses.
   };
 }
 
 // Online play: controllers 'net0'..'net3' read this tick's lockstep input (a bitmask over ACTIONS),
 // set by NetSim.step() in the page (77_net.js) and on the game server (net/), before each Game.step().
 const NetInput = { cur: [0, 0, 0, 0] };
+
+// ---- FREE AIM (Madness-style): the body faces a direction, the arms point anywhere ----
+// The angle is quantised to AIM_STEPS positions around the circle and that integer is the ONLY thing
+// that ever reaches the simulation. The table is precomputed so a given step always yields the exact
+// same cos/sin on every machine; deriving them from a float at sim time is how lockstep desyncs.
+// 128 steps is 2.8 degrees apart, which nobody can see in play, and it keeps mouse, right stick and
+// keyboard on identical footing. See NetSim.encode (63_netsim.js) for the wire format.
+const AIM_STEPS = 128;
+const AIM_COS = [], AIM_SIN = [];
+// dcos/dsin, NOT Math.cos/sin: these values become the bullet's direction, and V8 and Safari
+// disagree on Math.cos in the last bit, which is enough to fork a fight. The table is built once and
+// every step then yields the identical double on every machine.
+for (let i = 0; i < AIM_STEPS; i++) { const a = i * TAU / AIM_STEPS; AIM_COS.push(dcos(a)); AIM_SIN.push(dsin(a)); }
+// Math.atan2 maps THIS device's pointer to a step number: a local input decision, the same class as
+// the gamepad deadzone. Only the integer it produces is ever simulated or sent, so an engine
+// disagreeing by one step changes where that player aimed, never what the fight does.
+const aimStep = (dx, dy) => Math.round(Math.atan2(dy, dx) / TAU * AIM_STEPS) & (AIM_STEPS - 1);   // det-ok: local input quantising; only the integer reaches the fight
+// where the pointer is, in world space, kept by the page; null until the mouse moves over the canvas
+const Aim = { px: null, py: null, kb: [0, 0, 0, 0] };
+
 // Read one controller into a plain {action: bool} object
 function readInput(src) {
   const o = {};
@@ -145,9 +169,12 @@ function readInput(src) {
   } else if (src && src.startsWith('pad')) {
     const s = padState(+src.slice(3));
     for (const a of ACTIONS) o[a] = !!(s && s[a]);
+    if (s && s.aim != null) o.aim = s.aim;
   } else if (src && src.startsWith('net')) {
     const m = NetInput.cur[+src.slice(3)] | 0;
     for (let i = 0; i < ACTIONS.length; i++) o[ACTIONS[i]] = (m & (1 << i)) !== 0;
+    const a = (m >>> ACTIONS.length) & (AIM_STEPS * 2 - 1);
+    if (a) o.aim = a - 1;
   } else for (const a of ACTIONS) o[a] = false;
   return o;
 }
@@ -789,6 +816,7 @@ const MV2 = {
       else { p.x = o.x; if (p.y + p.vy >= o.y - o.h * 0.6) { p.dead = true; return; } }
     }
     if (p.crawl) return MV2.crawl(p, G, M);
+    if (p.boomer) MV2.boomer(p);                 // chakram: out, then back to the hand that threw it
     if (p.home) MV2.steer(p, p.home);            // arcing bolt: bends toward whoever it is chasing
     if (p.drag) { p.vx *= p.drag; p.vy *= p.drag; }
     p.vy += p.grav || 0;
@@ -801,6 +829,20 @@ const MV2 = {
       p.dead = true;
       if (p.boom) Items2.projBoom(p); else if (p.big) NOVA_BOOM(p); else if (p.spark) G.burst(p.x, p.y, '#ffd08a', 4); else G.puff(p.x, M.top, 5, '#ffffff');
     }
+  },
+  // BOOMERANG, 2026-10-16. Out for `out` frames on the velocity it was thrown with, then pulled
+  // back to the fighter who threw it, accelerating the whole way home. It keeps its hitbox on both
+  // legs, which is the entire point: throwing a chakram PAST someone is the correct play.
+  // dhypot, not Math.hypot: this runs in the seeded sim ([[determinism]] lint in build.py).
+  boomer(p) {
+    if (p.out > 0) { p.out--; return; }
+    const o = p.boomer;
+    if (!o || o.state === 'dead') { p.boomer = null; return; }
+    const dx = o.x - p.x, dy = (o.y - o.h * 0.55) - p.y;
+    const d = dhypot(dx, dy) || 1;
+    p.vx += (dx / d) * 1.6; p.vy += (dy / d) * 1.6;
+    p.vx *= 0.92; p.vy *= 0.92;
+    if (d < 28) p.dead = true;                   // caught
   },
   // homing: bend the velocity toward the nearest live opponent without changing its speed
   steer(p, k) {
@@ -1596,6 +1638,100 @@ const ROSTER2 = [
       },
     }),
   },
+  {
+    // VOLT, added 10/05. The partner character: Volt Inu, taken from voltinu.meme's own art -- a white
+    // and silver wolf with lime-green lightning, lime eyes and the grey bolt markings in the ears. It is
+    // also a playable fighter in the METABRAWL trailer (2024-03-30), where its stated style is Northern
+    // Wolf Kung Fu and its special is Volt Power Blast; both are kept here.
+    // title 10/09 Duane: the old one was meaningless and he said so. Northern Wolf is the style Volt
+    // Inu's own METABRAWL trailer gives it, so it is the one name here that is not invented.
+    id: 'volt', name: 'VOLT', title: 'Northern Wolf', blurb: 'Throws lightning. Rail dash, rising arc, ground surge.',
+    w: 56, h: 76, walk: 6.3, air: 4.6, grav: 0.66, fall: 11.5, jump: 14.4, djump: 13.4, jumps: 1, weight: 104, power: 1.1, reach: 0.92,
+    look: { kind: 'dog', fur: '#eef2f4', belly: '#cfd6da', ear: '#9aa4ab', dark: '#1b2028', eye: 'fierce', acc: 'none' },
+    ai2: [['nb', 'zone'], ['sb', 'dash'], ['db', 'slam'], ['ub', 'up']],
+    specials: c => ({
+      // THROWN BOLT, 10/09 Duane: VOLT throws the lightning now. It was a short lance off the glove,
+      // which only ever reached punching range; this winds up and hurls a forked bolt that crosses
+      // the stage, pierces, and on a deep charge lands fat enough to stagger. Charge scales speed,
+      // size, damage and knockback. The shout stays VOLT POWER BLAST -- that name is Volt Inu's own,
+      // off the 2024 METABRAWL trailer. SPARK's bolts home and chase; this one is thrown straight and
+      // hits like a spear, so the two electric fighters still read apart.
+      nb: {
+        total: 56, clip: 'cast', fx: 'thunder', color: '#c6ff2e', charge: { at: 12, key: 'special', max: 72 }, aiHold: [10, 72],
+        tick(f, t) {
+          if (f.air) f.vy = Math.min(f.vy, 1);
+          f.vx *= 0.82;
+          if (t === 12) {
+            const ch = f.move.charge;
+            if (ch && ch % 4 === 0) Game.chargeSpark(f);
+            if (ch === 1) Sfx.tone(280, 880, 0.5, 'sawtooth', 0.05);
+          }
+          if (t === 20 && Game.projCount(f, 'voltbolt') < 2) {
+            const k = f.move.charge / 72;
+            MV2.say(f, 'VOLT POWER BLAST', 1.0 + k * 0.5);
+            Sfx.tone(170, 740, 0.4, 'sawtooth', 0.15); Sfx.noise(0.28, 0.22, 1000);
+            Game.shake(3 + 7 * k); Game.flashT = Math.max(Game.flashT, 2 + 2 * k);
+            MV2.spawn(f, { kind: 'voltbolt', vx: 13 + 3 * k, vy: 0, grav: 0, r: 13 + 11 * k, dmg: 7 + 9 * k, ang: 38,
+              bkb: 26 + 16 * k, kbg: 52 + 32 * k, life: 64, step: true, pierce: true, big: k > 0.6, color: '#c6ff2e',
+              after: (p, b) => {
+                if (p.big) STATUS.stagger(b, 20, '#c6ff2e');
+                Game.ring(b.x, b.y - b.h * 0.5, '#e8ff9a', 58); Sfx.tone(1400, 240, 0.1, 'square', 0.1);
+              } }, c.w * 0.5 + 10, c.h * 0.6);
+          }
+        },
+      },
+      sb: Object.assign(mkDash({ total: 38, a: 6, b: 18, speed: 15, hit: H(0, 0, c.w * 0.5 + 10, -c.h * 0.5, 28, 12, 36, 44, 84) }), { clip: 'punch', fx: 'rush', color: '#c6ff2e' }),
+      ub: Object.assign(mkRise({ total: 44, at: 4, vy: -16.5, hits: [
+        H(4, 10, 0, -c.h * 0.55, 30, 7, 88, 36, 44, { radial: true }), fin(H(11, 16, 0, -c.h * 0.7, 32, 8, 80, 48, 92, { radial: true }))] }), { clip: 'uppercut', fx: 'spin', color: '#c6ff2e' }),
+      db: Object.assign(mkSlam({
+        ground: { total: 40, clip: 'slam', hits: [H(13, 17, c.w * 0.5 + 12, -10, 30, 12, 60, 42, 74)],
+          tick(f, t) { if (t === 14) { const w = Object.assign({}, WAVE_ROCK, { color: '#c6ff2e', dmg: 6 }); MV2.wave(f, 1, w); MV2.wave(f, -1, w); Game.shock(f.x, f.y, '#c6ff2e'); } } },
+        air: { drop: 17, clip: 'slam', hits: [H(6, 199, 0, 4, 28, 12, -78, 26, 78)],
+          land: { total: 26, clip: 'slam', hits: [H(1, 5, 0, -12, 62, 8, 62, 50, 44, { radial: true })], start(f) { const w = Object.assign({}, WAVE_ROCK, { color: '#c6ff2e', dmg: 6 }); MV2.wave(f, 1, w); MV2.wave(f, -1, w); } } },
+      }), { shout: 'GROUND SURGE' }),
+    }),
+  },
+  {
+    // WOLVERINU, the partner character: carbon armour, lime circuit seams, green eyes, white muzzle,
+    // chrome claws. A rushdown with claw reach: it closes fast, cuts on the way in, and its energy is
+    // CIRCUIT, never lightning -- lightning is VOLT's.
+    //
+    // 10/10, read off the source: this entry used to say the design came "straight off wolverinu.fun's
+    // own upright poster". There is no upright poster. Every image on wolverinu.fun AND the @WolverinuRH
+    // X header show a FOUR-LEGGED armoured wolf with a big bushy lime-tipped tail. assets3d/wolverinu_ref.png
+    // (and so wolverinu_glb.wasm, the model this fighter actually uses) is a biped with no tail, which is
+    // the roster convention but is NOT what the brand looks like. The real art is now kept beside it as
+    // assets3d/wolverinu_site_ref.png and wolverinu_site_poster.jpg, and the site roster tile uses it.
+    // Re-rigging the playable model as a quadruped is a separate job and has not been done.
+    //
+    // 10/15: the kit below is the ARENA kit (ARENA.version 1, seeded fights). What he actually plays
+    // like in a local match is 67_unique.js -- held sprint with three cancels, hanging cross rake,
+    // claw climb, FERAL -- plus the claw normals in 6g_styles, the Scent of Blood passive and the
+    // stat profile in 66_traits, and ADAMANT DRIVER in 26_grapples2. Read those, not this.
+    id: 'wolverinu', name: 'WOLVERINU', title: 'Circuit Prowl', blurb: 'Rushdown. Held sprint into claws, a cut that hangs, and he goes feral.',
+    w: 56, h: 80, walk: 7.0, air: 5.0, grav: 0.66, fall: 12, jump: 14.8, djump: 13.8, jumps: 1, weight: 102, power: 1.06, reach: 1.16, blade: '#9bf000',
+    look: { kind: 'dog', fur: '#1c2026', belly: '#8e9aa2', ear: '#9bf000', dark: '#0a0d12', eye: 'fierce', acc: 'none' },
+    ai2: [['sb', 'dash'], ['nb', 'trap'], ['db', 'punish'], ['ub', 'up']],   // nb is a wall, not a zoning shot; db is FERAL on the deck and PLUNGE off it
+    specials: c => ({
+      nb: {
+        total: 36, clip: 'punch', fx: 'slash', weapon: '#9bf000', shout: 'RAKE',
+        tick(f, t) {
+          if (f.air) f.vy = Math.min(f.vy, 1.5);
+          if (t === 10 && Game.projCount(f, 'volley') < 3)
+            MV2.spawn(f, { kind: 'volley', vx: 12, vy: 0, grav: 0, r: 13, dmg: 5, ang: 34, bkb: 22, kbg: 34, life: 30, color: '#9bf000' }, c.w * 0.5 + 14, c.h * 0.55);
+        },
+      },
+      sb: Object.assign(mkDash({ total: 38, a: 6, b: 18, speed: 16.5, hit: H(0, 0, c.w * 0.5 + 26, -c.h * 0.5, 32, 12, 38, 42, 86) }), { clip: 'flykick', fx: 'slash', weapon: '#9bf000', color: '#9bf000' }),
+      ub: Object.assign(mkRise({ total: 46, at: 4, vy: -11, hold: 22, steer: 4, hits: [
+        H(4, 26, 0, -c.h * 0.6, 44, 2.4, 88, 30, 14, { rehit: 5, radial: true }), fin(H(29, 32, 0, -c.h * 0.6, 48, 6, 62, 44, 94, { radial: true }))] }), { clip: 'spin', fx: 'spin', weapon: '#9bf000', color: '#9bf000' }),
+      db: Object.assign(mkSlam({
+        ground: { total: 40, clip: 'slam', fx: 'slash', weapon: '#9bf000', hits: [H(12, 16, c.w * 0.5 + 18, -12, 30, 11, 56, 40, 72)],
+          tick(f, t) { if (t === 13) { const w = Object.assign({}, WAVE_ROCK, { color: '#9bf000', dmg: 6 }); MV2.wave(f, 1, w); MV2.wave(f, -1, w); Game.shock(f.x, f.y, '#9bf000'); } } },
+        air: { drop: 18, clip: 'slam', hits: [H(6, 199, 0, 4, 28, 12, -80, 26, 80)],
+          land: { total: 28, clip: 'slam', hits: [H(1, 5, 0, -12, 60, 8, 60, 50, 44, { radial: true })], start(f) { const w = Object.assign({}, WAVE_ROCK, { color: '#9bf000', dmg: 6 }); MV2.wave(f, 1, w); MV2.wave(f, -1, w); } } },
+      }), { shout: 'GROUND SPLIT' }),
+    }),
+  },
 ];
 // one signature move each: [slot, the shout that lands with it]. The showpiece gets the freeze-flash.
 const SIGNATURE = {
@@ -1604,13 +1740,13 @@ const SIGNATURE = {
   wisp: ['nb', 'BUBBLE'], spark: ['db', 'THUNDERCLAP'], turbo: ['nb', 'BLAZE PUNCH'], chop: ['nb', 'WATAA'],
   ginga: ['ub', 'GINGA'], sifu: ['sb', 'TIGER'], fro: ['nb', 'ONE CUT'], bling: ['db', 'MIC DROP'],
   techno: ['sb', 'STEEL TRUCK'], hoodie: ['nb', 'TAKEDOWN'], slam: ['nb', 'POWER BOMB'], mystic: ['db', 'AXE KICK'],
-  ape: ['db', 'APE STRONG'], ember: ['sb', 'INFERNO RUSH'],
+  ape: ['db', 'APE STRONG'], ember: ['sb', 'INFERNO RUSH'], volt: ['nb', 'VOLT POWER BLAST'], wolverinu: ['sb', 'PROWL'],
 };
 const TAUNTS = {
   giga: 'SNACK TIME', ronin: 'NICE SWORD', tyrant: 'KNEEL', gwei: 'ITS LEAKING', shroom: 'FUN GUY', kaiju: 'ROAR',
   mochi: 'HI', omen: 'THINK', wisp: 'WHEEE', spark: 'ZAP ZAP', turbo: 'SHOW ME', chop: 'WAAAH', ginga: 'DANCE',
   sifu: 'BOW', fro: 'HMPH', bling: 'WAGWAN MY G', techno: 'TO THE MOON', hoodie: 'GG', slam: 'FLEX', mystic: 'WHO',
-  ape: 'OOH OOH', ember: 'TOASTY',
+  ape: 'OOH OOH', ember: 'TOASTY', volt: 'STEP UP', wolverinu: 'COME ON',
 };
 for (const c of ROSTER2) {
   c.moves = Object.assign(baseMoves(c), c.specials(c), kicks(c));
@@ -3894,6 +4030,58 @@ Object.assign(GRAPPLE.NAMED, {
       { n: 26, clip: 'slam', hold: [0.9, -0.2], toss: { at: 4, dmg: 13, ang: 62, bkb: 64, kbg: 78, ground: true, shake: 18 } },
     ],
   }),
+  // WOLVERINU: ADAMANT DRIVER. The 10/13 version was four stages at 18 damage, mid-table, which is
+  // the wrong size for the fighter on the front of the key art. Rebuilt 10/15 as the showpiece throw
+  // of the whole roster -- six stages, 25.5 held-and-thrown plus the floor wave, so it is the biggest
+  // command throw in the game by a clear margin. What pays for it is TIME: it runs a full two seconds
+  // and he is wide open for all of it, so in a 3-4P match the third fighter walks over and takes it
+  // off him. (The 20-frame break window does not grow with it -- 27_tekken opens it once, at the
+  // catch -- so the length is a cost in the free-for-all, not in the 1v1.)
+  //
+  // Reference is Tekken's KING: a long hold with real cuts in it, not a quick toss. Hook the claws
+  // in, shred across five times, hoist them off the deck, LEAP with them, and drive them head-first
+  // back through the floor. It finishes on the two circuit waves his db special cracks out, so the
+  // throw reads as his. Break button E+R (28_grapples3 TK.ESCOF).
+  wolverinu: () => ({
+    name: 'Adamant Driver', shout: 'COME HERE',
+    stages: [
+      // 1. the hook: both claws in, and he drags them a step toward him
+      { n: 12, clip: 'punch', fx: 'slash', color: '#9bf000', hold: [[1.15, -0.05], [0.95, -0.08]], ease: 8, hit: [[6, 3]],
+        go(f, t) { if (t === 6) { Game.burst(f.x + f.face * f.w * 0.8, f.y - f.h * 0.55, '#9bf000', 12); Sfx.swing(); } } },
+      // 2. the shred: five cuts across, 1.6 each. The sway is what sells it as a mauling.
+      { n: 32, clip: 'jab', fx: 'slash', color: '#9bf000', hold: (f, v, k, t) => [0.95 + 0.07 * dsin(t * 0.9), -0.1 - 0.04 * dcos(t * 0.7)],
+        hit: [[4, 1.6], [10, 1.6], [16, 1.6], [22, 1.6], [28, 1.6]],
+        go(f, t) {
+          if (t % 6 !== 4) return;
+          Game.ring(f.x + f.face * f.w * 0.9, f.y - f.h * (0.4 + (t % 12 === 4 ? 0.2 : 0)), '#9bf000', 40);
+          Game.burst(f.x + f.face * f.w * 0.85, f.y - f.h * 0.5, '#9bf000', 5); Sfx.swing();
+        } },
+      // 3. hoisted off the deck, overhead, on the claws
+      { n: 16, clip: 'uppercut', hold: [[0.95, -0.1], [0.1, -1.3]], ease: 12,
+        go(f, t) { if (t === 12) { Sfx.tone(2000, 620, 0.12, 'sawtooth', 0.07); Game.burst(f.x + f.face * 8, f.y - f.h * 1.3, '#9bf000', 14); } } },
+      // 4. the leap: he jumps WITH them
+      { n: 15, clip: 'jump', hold: [0.1, -1.25], hit: [[9, 2]],
+        go(f, t) { if (t === 1) { f.vy = -13.5; Sfx.jump(); } if (t === 9) Game.ring(f.x, f.y - f.h * 1.4, '#9bf000', 70); } },
+      // 5. and drives them down head-first. `air: true` ends the stage on the landing, not on a count.
+      { n: 60, clip: 'slam', fx: 'dive', color: '#9bf000', air: true, hold: [0.1, -1.1],
+        go(f) { f.vy = 18; } },
+      // 6. through the floor. 3 + 8 held + 2 + 12.5 thrown = 25.5, plus the forward wave on a victim
+      // who is planted on the deck right there: ~29 all in, against a roster whose next biggest
+      // command throw is MYSTIC's at 22.5.
+      { n: 32, clip: 'slam', shout: 'GAME OVER', hold: [0.4, -0.15],
+        toss: { at: 5, dmg: 12.5, ang: 72, bkb: 70, kbg: 88, ground: true, shake: 22 },
+        go(f, t) {
+          if (t !== 5) return;
+          const w = Object.assign({}, WAVE_ROCK, { color: '#9bf000', dmg: 3.5 });
+          MV2.wave(f, 1, w); MV2.wave(f, -1, w);
+          // the shock ring, the two waves, the camera punch-in and the screen flash all land on this
+          // one frame: a second big ring on top of them turned the whole finish into a white ball
+          // with no fighters in it. The shock ring is enough.
+          Game.shock(f.x, f.y, '#9bf000');
+          Game.flashT = Math.max(Game.flashT, 3); Game.shake(18); Sfx.hit(1);
+        } },
+    ],
+  }),
 });
 
 // ===== the Tekken layer: throw buttons, throw escapes, gun aiming, one-button item drop =====
@@ -4226,7 +4414,7 @@ Object.assign(TK.ESCOF, {
   blackbox: 'E', sniper: 'R', giga: 'R', ronin: 'E', tyrant: 'E', gwei: 'R', shroom: 'E',
   kaiju: 'R', mochi: 'E+R', omen: 'E+R', wisp: 'R', spark: 'E', turbo: 'R', chop: 'E',
   ginga: 'R', sifu: 'E+R', fro: 'R', bling: 'E', techno: 'E+R', hoodie: 'E', slam: 'E+R',
-  mystic: 'E', ape: 'E+R', ember: 'E+R',
+  mystic: 'E', ape: 'E+R', ember: 'E+R', wolverinu: 'E+R',
 });
 
 // ---- damage scale over a fighter's scripted throw numbers (TK.SCALE is the global knob) ----
@@ -4806,6 +4994,27 @@ class Fighter {
 }
 
 // ===== fighter: getting hit, grabs, throws, drawing pose =====
+
+// Shop melee wears out, on the DEFAULT path and not only under Game.feel. The card is the contract:
+// the Slugger says "Four swings, then it is gone" and 25_feel.js was the only thing that enforced a
+// swing count — and it reads `feelSword`, behind a flag that is off by default. So the bat never
+// left your hand, which made the $14.99 finisher worse value per dollar than the $3.99 Fire Axe.
+// Only defs that declare `sword.hits` wear: the set-1 Beam and Hero swords do not, and the Boxing
+// Gloves deliberately do not, because their card promises they last the whole stock.
+// One tick per SWING, not per hitbox, so a multi-hit move still costs one.
+function wearSword(att, victim) {
+  if (!att || att === victim || !att.item || !att.move || att.move.wore) return;
+  const def = ITEM_DEFS[att.item.kind], sw = def && def.sword;
+  if (!sw || !sw.hits) return;
+  att.move.wore = true;
+  const it = att.item;
+  it.dur = (it.dur == null ? sw.hits : it.dur) - 1;
+  if (it.dur > 0) return;
+  att.item = null;
+  Game.text(att.x, att.y - att.h - 22, 'SPENT', sw.color || '#ffffff', 1.1);
+  Game.burst(att.x + att.face * att.w * 0.6, att.y - att.h * 0.5, sw.color || '#ffffff', 18);
+}
+
 Object.assign(Fighter.prototype, {
   takeHit(hb, att, mult, srcX, srcFace) {
     if (this.bubbleHits > 0 && Items2.absorb(this, att)) return 0;   // bubble shield (56_items2)
@@ -4869,6 +5078,7 @@ Object.assign(Fighter.prototype, {
     this.flashT = 8;
     Game.onHit(this, att, hb, d, kb);
     if (Game.feel) FEEL.hit(this, att, hb, d, kb);   // hitlag, lethal hits, juggle decay, meter (25_feel)
+    wearSword(att, this);
     return kb;
   },
 
@@ -5769,13 +5979,21 @@ const Items = {
       f.takeHit({ dmg: b.dmg, ang: 55, bkb: b.bkb, kbg: b.kbg, radial: true }, it.thrownBy || null, 1, it.x, 1);
       if (it.thrownBy && it.thrownBy !== f) it.thrownBy.hitlag = keep;
     }
-    for (let i = 0; i < 46; i++) { const a = rand(0, TAU), s = rand(3, 12); G.parts.push({ x: it.x, y: it.y, vx: dcos(a) * s, vy: dsin(a) * s, life: 34, max: 34, color: i % 3 ? '#ffb347' : '#ffffff', size: rand(6, 14), g: 0.05 }); }
-    for (let i = 0; i < 14; i++) G.parts.push({ x: it.x + rand(-30, 30), y: it.y + rand(-30, 30), vx: rand(-1, 1), vy: rand(-2, 0), life: 50, max: 50, color: '#6a5a50', size: rand(14, 26), g: 0, soft: true });
-    for (let i = 0; i < 22; i++) { const a = rand(0, TAU), s = rand(1, 6); G.parts.push({ x: it.x, y: it.y, vx: dcos(a) * s, vy: dsin(a) * s - 1.5, life: 32, max: 32, color: i % 3 ? '#ff8a1a' : '#ffe27a', size: rand(24, 46), g: 0, fire: true }); }
+    // THE BLAST IS AS BIG AS THE BLAST. Duane, 2026-10-16: "the explosions were so small and
+    // uneventful". Every number below used to be a constant, so a 196-radius Vortex Grenade threw
+    // exactly the same 46 sparks the same distance as a 100-radius Grenade and read identically.
+    // `k` scales the SIZE and the SPEED of what is already there, never the COUNT: the particle
+    // loops run off the seeded `rand()`, so adding one would fork every replay and the bet arena
+    // with it. Same number of rolls, bigger explosion.
+    const k = Math.max(0.8, Math.min(2.1, b.r / 118)), k2 = k * k;
+    for (let i = 0; i < 46; i++) { const a = rand(0, TAU), s = rand(3, 12) * k; G.parts.push({ x: it.x, y: it.y, vx: dcos(a) * s, vy: dsin(a) * s, life: 34, max: 34, color: i % 3 ? '#ffb347' : '#ffffff', size: rand(6, 14) * k, g: 0.05 }); }
+    for (let i = 0; i < 14; i++) G.parts.push({ x: it.x + rand(-30, 30) * k, y: it.y + rand(-30, 30) * k, vx: rand(-1, 1) * k, vy: rand(-2, 0) * k, life: 50, max: 50, color: '#6a5a50', size: rand(14, 26) * k, g: 0, soft: true });
+    for (let i = 0; i < 22; i++) { const a = rand(0, TAU), s = rand(1, 6) * k; G.parts.push({ x: it.x, y: it.y, vx: dcos(a) * s, vy: dsin(a) * s - 1.5, life: 32, max: 32, color: i % 3 ? '#ff8a1a' : '#ffe27a', size: rand(24, 46) * k, g: 0, fire: true }); }
     G.impact = { x: it.x, y: it.y, t: 30 };
-    G.rings.push({ x: it.x, y: it.y, r: 10, max: b.r * 1.3, color: '#ffd45c', life: 20, w: 18 });
-    G.rings.push({ x: it.x, y: it.y, r: 10, max: b.r * 0.8, color: '#ffffff', life: 12, w: 10 });
-    G.shake(20); G.flashT = 5; Sfx.ko();
+    G.rings.push({ x: it.x, y: it.y, r: 10, max: b.r * 1.55, color: '#ffd45c', life: 22, w: 18 * k });
+    G.rings.push({ x: it.x, y: it.y, r: 10, max: b.r * 1.0, color: '#ffffff', life: 14, w: 10 * k });
+    G.rings.push({ x: it.x, y: it.y, r: 10, max: b.r * 2.0, color: '#ff8a1a', life: 28, w: 7 * k });
+    G.shake(18 * k2); G.flashT = Math.round(5 * k); Sfx.ko();
     G.text(it.x, it.y - 40, it.kind === 'bomb' ? 'RUGGED' : 'BOOM', '#ffb347', 1.4);
     // chain reaction
     for (const o of G.items) if (!o.dead && ITEM_DEFS[o.kind].boom && dhypot(o.x - it.x, o.y - it.y) < b.r) { o.armed = true; o.fuse = 6; }
@@ -5897,7 +6115,7 @@ Object.assign(Fighter.prototype, {
   },
 });
 
-// ===== items, set 2: banana bomb (shrapnel), holy bomb, TNT (blows a hole in the stage), landmine,
+// ===== items, set 2: TNT (blows a hole in the stage), landmine,
 // jetpack, supply crate, bubble shield, and four weapons (bazooka, shotgun, machine gun, sniper) =====
 // Fight code (runs in the page and the headless sims): seeded rand()/irand() only.
 // Every kind here has `set: 2`. Items.spawn only draws set-2 kinds when Game.itemSet >= 2, and
@@ -5913,12 +6131,6 @@ Object.assign(Fighter.prototype, {
 // Fighter.collideHoles (floor with holes), Items2.absorb (bubble shield in takeHit).
 
 Object.assign(ITEM_DEFS, {
-  banana:  { name: 'Banana Bomb', r: 18, weight: 2.4, set: 2, throwable: true, lob: true, shootable: true, fuse: 110, boom: { r: 95, dmg: 12, bkb: 55, kbg: 82 }, icon: '🍌', after: it => Items2.shrapnel(it) },
-  // the banana's shrapnel: each piece lands, sits there blinking, then pops. weight 0 = never spawns on its own
-  banalet: { name: 'Bomblet', r: 13, weight: 0, set: 2, shootable: true, fuse: 54, boom: { r: 74, dmg: 8, bkb: 46, kbg: 66 }, icon: '🍌',
-             tick: it => Items2.banaletTick(it), hittable: (it, a) => { if (a) it.thrownBy = a; Items2.smallBoom(it); } },
-  holy:    { name: 'Holy Bomb', r: 20, weight: 0.8, set: 2, throwable: true, fuse: 100, boom: { r: 235, dmg: 32, bkb: 110, kbg: 118 }, icon: '😇',
-             tick: it => Items2.holyTick(it), after: it => { Game.flashT = 10; Game.shake(30); Game.text(it.x, it.y - 70, 'AMEN', '#fff3b0', 2); } },
   tnt:     { name: 'TNT', r: 22, weight: 1.6, set: 2, fuse: 360, shootable: true, boom: { r: 150, dmg: 26, bkb: 82, kbg: 100 }, icon: '🧱',
              use: (f, it) => Items2.placeTnt(f, it), hittable: (it, a) => Items2.setOff(it, a), after: it => Items2.hole(it.x, it.y) },
   mine:    { name: 'Landmine', r: 14, weight: 1.8, set: 2, shootable: true, boom: { r: 92, dmg: 15, bkb: 58, kbg: 80 }, icon: '🛑',
@@ -5980,19 +6192,6 @@ const Items2 = {
   // ---- banana bomb: the blast throws seven pieces out, and every piece is a live bomblet ----
   // They arc out, bounce, settle on the deck with the fuse spark blinking, then pop a beat later - and
   // one popping sets off the ones beside it, so the floor goes off in a rolling chain.
-  shrapnel(it) {
-    const N = 7;
-    for (let i = 0; i < N; i++) {
-      const a = deg(-158 + i * (116 / (N - 1))), sp = rand(6.5, 9.5);
-      Game.items.push({ kind: 'banalet', x: it.x + dcos(a) * 14, y: it.y - 12 + dsin(a) * 8, vx: dcos(a) * sp, vy: dsin(a) * sp - 1.5,
-        age: 0, armed: true, thrownBy: it.thrownBy || null, fuse: irand(44, 74), hp: 0, ammo: 0 });
-    }
-    Game.text(it.x, it.y - 46, 'SPLIT', '#ffe04a', 1.1);
-  },
-  banaletTick(it) {
-    if (it.armed && it.fuse != null && it.fuse <= 1) { this.smallBoom(it); return true; }   // own, quieter blast
-    return false;                                                                           // otherwise normal item physics
-  },
   smallBoom(it) {
     if (it.dead) return;
     it.dead = true;
@@ -6010,17 +6209,6 @@ const Items2 = {
     G.shake(7); Sfx.tone(150, 60, 0.18, 'square', 0.09);
     let n = 0;
     for (const o of G.items) if (!o.dead && o.kind === 'banalet' && o !== it && dhypot(o.x - it.x, o.y - it.y) < b.r) { o.armed = true; o.fuse = Math.min(o.fuse == null ? 99 : o.fuse, 5 + (++n) * 3); }
-  },
-  // ---- holy bomb: when the fuse runs out it hangs in the air for a beat, then goes off huge ----
-  holyTick(it) {
-    if (it.holyT > 0) { it.vx = 0; it.vy = 0; if (--it.holyT <= 0) Items.explode(it); return true; }
-    if (it.armed && it.fuse != null && it.fuse <= 1) {
-      it.holyT = 54; it.y -= 30;
-      Game.text(it.x, it.y - 60, 'HALLELUJAH', '#fff3b0', 1.6); Game.rings.push({ x: it.x, y: it.y, r: 10, max: 150, color: '#fff3b0', life: 30, w: 10 });
-      for (const [n, d] of [[523, 0], [659, 0.05], [784, 0.1], [1047, 0.18]]) Sfx.tone(n, n, 0.9, 'sine', 0.07, d);
-      return true;
-    }
-    return false;
   },
   // ---- bubble shield ----
   giveBubble(f) {
@@ -6212,7 +6400,6 @@ const Items2 = {
   // ---- CPU ----
   ai(f, tgt, o, press) {
     const k = f.item.kind, dx = tgt.x - f.x, toward = dx > 0 ? 'right' : 'left';
-    if ((k === 'banana' || k === 'holy') && Math.abs(dx) < 420 && Rng.next() < 0.05) { o[toward] = true; press('attack'); return true; }
     if (k === 'tnt' && Math.abs(dx) < 160 && !f.air && Rng.next() < 0.03) { press('attack'); return true; }
     const reach = { bazooka: 520, shotgun: 190, mgun: 400, sniper: 760 }[k];
     // local rules: the CPU can tilt the shot, so someone under you on a platform is worth shooting at
@@ -6304,46 +6491,134 @@ Object.assign(ITEM_DEFS, {
 
   // ================= THE ARSENAL: every kind below is weight 0 and can NEVER spawn =================
   // $15 tier — cheap, high personality, low power
-  peel:    { name: 'Banana Peel', r: 15, weight: 0, set: 3, icon: '🍌', use: (f, it) => Items3.place(f, it, { peel: 3, life: 780 }), tick: (it, G) => Items3.peelTick(it, G) },
-  prod:    { name: 'Prod', r: 16, weight: 0, set: 3, ammo: 3, cool: 20, icon: '👉', use: (f, it) => Items3.swing(f, it, 'prod') },
-  girder:  { name: 'Girder', r: 22, weight: 0, set: 3, ammo: 2, cool: 40, icon: '🏗️', use: (f, it) => Items3.girder(f, it) },
-  bouncer: { name: 'Spring Bumper', r: 20, weight: 0, set: 3, icon: '🛸', use: (f, it) => Items3.place(f, it, { life: 900 }), tick: (it, G) => Items3.bouncerTick(it, G) },
+  // ================= THE SHELF, REBUILT 15 OCT =================
+  // Duane: *"its just a copy of worms, thats not what i told you to do ... remove banana peel as a
+  // weapon and other direct idiotic copies of worms, the sheep has to go too and the statue"*.
+  // He was right and the code said it out loud: there was a bundle whose id was literally `bnd_worms`.
+  //
+  // Eleven items are gone: Banana Peel, Prod, Cluster Bomb, Sheep, Homing Missile, Mole Bomb,
+  // Airstrike, Concrete Donkey, Armageddon, Banana Bomb, Holy Hand Grenade. Every one of them is a
+  // Worms weapon, and Worms is turn-based artillery, not a platform fighter.
+  //
+  // What replaced them, checked against the genre rather than invented:
+  //   * BRAWLHALLA is nothing but melee archetypes -- Spear, Axe, Scythe, Cannon, Battle Boots,
+  //     Chakram -- so five of the replacements are those, built on the same `sword:` buff the
+  //     Greatsword already uses. No new systems.
+  //   * SMASH supplies the item classes: a thrown explosive (Bob-omb), a proximity trap
+  //     (Motion-Sensor Bomb), a burying trap (Pitfall).
+  //   * Rivals of Aether II and MultiVersus were checked too and have NO pickup arsenal at all --
+  //     they are pure moveset fighters -- so there was nothing there to copy.
+  // Then every one was renamed into Brawl Street's own world: a street fight, not a fantasy tourney.
+  // Rebar, not Spear. Fire Axe, not Axe. Manhole, not Pitfall. Wrecking Ball, not a concrete donkey.
+
+  gloves:  { name: 'Boxing Gloves', r: 24, weight: 0, set: 3, icon: '\u{1F94A}',
+             sword: { reach: 12, dmg: 2.05, kb: 1.72, slow: 3, color: '#ff5a3c' },
+             feelSword: { reach: 10, dmg: 1.5, kb: 1.3, slow: 3, color: '#ff5a3c', hits: 10 } },
+  bat:     { name: 'Slugger', r: 28, weight: 0, set: 3, icon: '\u{1F3CF}',
+             // `hits` is the DEFAULT-path durability (41_combat), not the Game.feel one. Without it
+             // the card's "Four swings, then it is gone" was never enforced and the bat lasted the
+             // whole stock, which made the $14.99 finisher worse value than the $3.99 Fire Axe.
+             sword: { reach: 50, dmg: 3.15, kb: 3.4, slow: 13, hits: 4, color: '#e8d6a8' },
+             feelSword: { reach: 44, dmg: 2.1, kb: 2.3, slow: 13, color: '#e8d6a8', hits: 4 } },
+
+  // RECOVERY. Every fighter in the genre has one and we had none on the shelf at all: Smash has the
+  // Maxim Tomato and the Heart Container, Brawlhalla has none because it has no damage to heal.
+  // `instant` + `pick` is the same path the HODL Heart uses (55_items.js).
+  medkit:  { name: 'Med Kit', r: 18, weight: 0, set: 3, instant: true, icon: '\u{1FA79}',
+             pick: (f) => { const heal = Math.min(f.dmg, 45); if (heal <= 0) return false; f.dmg -= heal;
+               Game.text(f.x, f.y - f.h - 20, '-' + Math.round(heal) + '%', '#6dff8c', 1.1);
+               for (let i = 0; i < 16; i++) Game.parts.push({ x: f.x + rand(-18, 18), y: f.y - rand(0, f.h), vx: rand(-1, 1), vy: rand(-3, -1), life: 34, max: 34, color: '#6dff8c', size: rand(4, 8), g: 0 });
+               return true; } },
+
+  // BOXING GLOVES, Duane 2026-10-14: *"big boxing gloves? so ppl can super punch with it"*.
+  // No `use` and no ammo: like the swords in set 1, these buff every normal while they are held
+  // (40_fighter startMove -> swordify). Barely any extra reach, because a fist is not a blade -- what
+  // they buy is the hardest hit in the game and knockback that actually launches people, which is the
+  // whole point of the thing. `slow` keeps them off being strictly better than everything.
   zip:     { name: 'Zip Hook', r: 18, weight: 0, set: 3, ammo: 3, cool: 30, icon: '🪝', use: (f, it) => Items3.zip(f, it) },
 
   // $20–50 tier — the shadowed shelf
-  boots:   { name: 'Rocket Boots', r: 20, weight: 0, set: 3, delay: 1200, ammo: 2, cool: 60, icon: '🥾', use: (f, it) => Items3.boots(f, it) },
-  cluster: { name: 'Cluster Bomb', r: 18, weight: 0, set: 3, delay: 1200, throwable: true, lob: true, shootable: true, fuse: 84, icon: '🎇',
-             boom: { r: 92, dmg: 11, bkb: 52, kbg: 80 }, after: it => Items3.cluster(it) },
-  clustlet: { name: 'Cluster', r: 11, weight: 0, set: 3, shootable: true, impact: true, icon: '🎇', boom: { r: 72, dmg: 7, bkb: 44, kbg: 64 } },
-  sheep:   { name: 'Sheep', r: 20, weight: 0, set: 3, delay: 1200, icon: '🐑', use: (f, it) => Items3.place(f, it, { walk: 1, life: 320 }),
-             tick: (it, G, st) => Items3.sheepTick(it, G, st), hittable: (it, a) => Items2.setOff(it, a), shootable: true,
-             boom: { r: 128, dmg: 22, bkb: 78, kbg: 98 } },
-  flamer:  { name: 'Flame Thrower', r: 22, weight: 0, set: 3, delay: 1200, ammo: 2, cool: 80, icon: '🔥', use: (f, it) => Items3.gun(f, it, I3_FLAME) },
-  homer:   { name: 'Homing Missile', r: 22, weight: 0, set: 3, delay: 1200, ammo: 2, cool: 70, icon: '🚀', use: (f, it) => Items3.homer(f, it) },
-  drill:   { name: 'Mole Bomb', r: 18, weight: 0, set: 3, delay: 1200, throwable: true, icon: '🐹', boom: { r: 118, dmg: 20, bkb: 74, kbg: 96 }, tick: (it, G, st) => Items3.drillTick(it, G, st) },
-  aegis:   { name: 'Aegis Drone', r: 18, weight: 0, set: 3, delay: 2400, instant: true, icon: '🛰️', pick: f => Items3.giveAegis(f) },
-  freeze:  { name: 'Freeze Ray', r: 22, weight: 0, set: 3, delay: 2400, ammo: 2, cool: 75, icon: '❄️', use: (f, it) => Items3.gun(f, it, I3_FREEZE) },
+  boots:   { name: 'Nitro Boots', r: 20, weight: 0, set: 3, delay: 1200, ammo: 2, cool: 60, icon: '🥾', use: (f, it) => Items3.boots(f, it) },
+  thunder: { name: 'Thunderbolt', r: 24, weight: 0, set: 3, delay: 2400, ammo: 2, cool: 86, icon: '\u{26A1}', use: (f, it) => Items3.gun(f, it, I3_BOLT) },
+  flamer:  { name: 'Flamethrower', r: 22, weight: 0, set: 3, delay: 1200, ammo: 2, cool: 80, icon: '🔥', use: (f, it) => Items3.gun(f, it, I3_FLAME) },
+  aegis:   { name: 'Riot Drone', r: 18, weight: 0, set: 3, delay: 2400, instant: true, icon: '🛰️', pick: f => Items3.giveAegis(f) },
+  freeze:  { name: 'Taser', r: 22, weight: 0, set: 3, delay: 2400, ammo: 2, cool: 75, icon: '❄️', use: (f, it) => Items3.gun(f, it, I3_FREEZE) },
   turret:  { name: 'Sentry Turret', r: 22, weight: 0, set: 3, delay: 2400, icon: '🔫', use: (f, it) => Items3.place(f, it, { life: 460, hp: 26 }),
              tick: (it, G, st) => Items3.turretTick(it, G, st), hittable: (it, a, h) => Items3.hurt(it, a, h) },
-  well:    { name: 'Gravity Well', r: 20, weight: 0, set: 3, delay: 2400, icon: '🕳️', use: (f, it) => Items3.place(f, it, { pull: 1, life: 200 }),
-             tick: (it, G) => Items3.wellTick(it, G), boom: { r: 150, dmg: 18, bkb: 96, kbg: 104 } },
-  strike:  { name: 'Airstrike', r: 20, weight: 0, set: 3, delay: 2400, icon: '✈️', use: (f, it) => Items3.aimStart(f, it, 'strike') },
-  donkey:  { name: 'Concrete Donkey', r: 22, weight: 0, set: 3, delay: 2400, icon: '🫏', use: (f, it) => Items3.aimStart(f, it, 'donkey') },
+  well:    { name: 'Vortex Grenade', r: 20, weight: 0, set: 3, delay: 2400, icon: '🕳️', use: (f, it) => Items3.place(f, it, { pull: 1, life: 200 }),
+             // $9.99. It drags everything in and THEN goes off, so the burst has to pay for the
+             // setup: 18 damage was less than a free Grenade. Biggest radius on the shelf.
+             tick: (it, G) => Items3.wellTick(it, G), boom: { r: 196, dmg: 32, bkb: 118, kbg: 122 } },
 
-  // $100 tier — the finishers. `banana` and `holy` keep their kinds and their code; all that changes
-  // is `weight: 0`, which takes them out of the random pool (Duane: "dont make that available randomly").
-  armageddon: { name: 'Armageddon', r: 24, weight: 0, set: 3, delay: 5400, icon: '☄️', use: (f, it) => Items3.armageddon(f, it) },
+  // ---- melee: the five Brawlhalla archetypes, as street objects ----
+  fireaxe: { name: 'Fire Axe', r: 26, weight: 0, set: 3, icon: '\u{1FA93}',
+             sword: { reach: 42, dmg: 2.1, kb: 1.9, slow: 8, hits: 6, color: '#d4341f' },
+             feelSword: { reach: 38, dmg: 1.5, kb: 1.3, slow: 8, color: '#d4341f', hits: 6 } },
+  pipegun: { name: 'Pipe Cannon', r: 28, weight: 0, set: 3, delay: 2400, icon: '\u{1F6E2}\uFE0F',
+             sword: { reach: 52, dmg: 2.75, kb: 2.95, slow: 11, hits: 5, color: '#e0922e' },
+             feelSword: { reach: 46, dmg: 1.7, kb: 1.5, slow: 11, color: '#e0922e', hits: 5 } },
+
+  // ---- thrown and placed: Smash's item classes, as street hardware ----
+  pipebomb:{ name: 'Pipe Bomb', r: 18, weight: 0, set: 3, delay: 1200, throwable: true, lob: true,
+             shootable: true, fuse: 90, icon: '\u{1F4A3}',
+             // $3.99. WAS 104/15/62, which is under the free Grenade (100/16/62) and barely half a
+             // free Dynamite (165/30/90). You cannot sell a weapon that loses to the one lying on
+             // the floor. On par with TNT now, which is what a pipe bomb should be.
+             boom: { r: 152, dmg: 26, bkb: 84, kbg: 102 } },
+  mine:    { name: 'Detonator', r: 16, weight: 0, set: 3, delay: 1200, ammo: 2, cool: 24, icon: '\u{1F4E1}',
+             use: (f, it) => Items3.detonator(f, it), shootable: true,
+             // $3.99, TWO charges and you pick the moment, so slightly under the Pipe Bomb each but
+             // far more total damage in a round. Was 118/20/74: under free TNT.
+             boom: { r: 148, dmg: 25, bkb: 84, kbg: 100 } },
+  manhole: { name: 'Bear Trap', r: 20, weight: 0, set: 3, delay: 2400, icon: '\u{1F573}\uFE0F',
+             use: (f, it) => Items3.place(f, it, { life: 900, arm: 24 }),
+             tick: (it, G, st) => Items3.manholeTick(it, G, st) },
+
+  // ---- the finisher. Reuses the mark-a-lane machinery, with a demolition ball on the end of it. ----
+  wreck:   { name: 'Wrecking Ball', r: 26, weight: 0, set: 3, delay: 5400, icon: '\u{1F3D7}\uFE0F',
+             use: (f, it) => Items3.aimStart(f, it, 'wreck') },
+
+  // ================= FOUR NEW WEAPONS, 2026-10-16 =================
+  // Duane: "add more weapons". Picked for the HOLES in the shelf rather than for being more of what
+  // is already there, which is the mistake the Worms copies were ([[weapon-catalogue-design]]):
+  //   * there was no cheap LONG-REACH melee at all. Every cheap melee was a short heavy swing.
+  //   * there was no weapon with reach as its whole identity (Brawlhalla's Scythe slot).
+  //   * every automatic was a bullet hose; nothing chipped through a shield.
+  //   * nothing you throw came BACK, so there was no reason to ever miss on purpose.
+  // Each one is built out of machinery that already works -- a sword def, a gun def, a throwable --
+  // so none of this is new fight code, which is why it can ship without a balance season.
+
+  // REBAR: Brawlhalla's Spear. The cheapest thing on the shelf and the longest reach under $4,
+  // because a length of bar off a building site is exactly that. Fast, thin, almost no knockback.
+  rebar:   { name: 'Rebar', r: 24, weight: 0, set: 3, icon: '\u{1F9EF}',
+             sword: { reach: 62, dmg: 1.55, kb: 1.15, slow: 4, hits: 8, color: '#9a6a3a' },
+             feelSword: { reach: 56, dmg: 1.2, kb: 1.0, slow: 4, color: '#9a6a3a', hits: 8 } },
+
+  // CHAIN WHIP: Brawlhalla's Scythe. The longest reach in the game, full stop, and it pays for it
+  // with the slowest swing on the melee shelf and knockback that sends rather than kills.
+  chain:   { name: 'Chain Whip', r: 26, weight: 0, set: 3, delay: 1200, icon: '\u{26D3}\uFE0F',
+             sword: { reach: 86, dmg: 1.95, kb: 2.3, slow: 16, hits: 5, color: '#8d97a6' },
+             feelSword: { reach: 78, dmg: 1.5, kb: 1.9, slow: 16, color: '#8d97a6', hits: 5 } },
+
+  // NAIL GUN: the chip weapon. Nothing else on the shelf eats a shield, and a tool that fires
+  // fasteners is the one thing that obviously should.
+  nailgun: { name: 'Nail Gun', r: 20, weight: 0, set: 3, delay: 1200, ammo: 2, cool: 60, icon: '\u{1FA9B}',
+             use: (f, it) => Items3.gun(f, it, { total: 64, clip: 'punch', gunAnim: true, fx: 'burst', sfx: 'none',
+               tick(f2, t) { Items3.nailTick(f2, t); } }) },
+
+  // BUZZSAW: Brawlhalla's Chakram. It comes BACK, which is the only reason on this shelf to throw
+  // something past them on purpose: it hits on the way out and again on the way home.
+  buzzsaw: { name: 'Buzzsaw', r: 20, weight: 0, set: 3, delay: 1200, ammo: 2, cool: 48, icon: '\u{1FA9A}',
+             use: (f, it) => Items3.buzz(f, it) },
 });
-ITEM_DEFS.banana.weight = 0;   // Banana Bomb: store only ($50)
-ITEM_DEFS.holy.weight = 0;     // Holy Grenade: store only ($100)
-// WEAPON DELAY, straight out of Worms. A `.wsc` scheme file is 4 bytes per weapon — ammo, power,
+// WEAPON DELAY: a weapon is locked for the first N frames of a round, priced against how much it
+// swings a fight. The Wrecking Ball cannot appear in the opening exchange; Rebar can.
+
 // DELAY and crate chance — and the delay (a turn-count lock before a weapon becomes available) is
 // priced against power: Mole Bomb 0 turns, Sheep 1, Homing Pigeon 2, HOLY HAND GRENADE 4, Super
 // Sheep 7. It is the reason a Holy Hand Grenade can be absurd without being broken. Ours is a
 // wall-clock lock in frames, on the same curve: cheap tools from the first second, the $20-35 shelf
 // at 20 s, the $40-50 shelf at 40 s, and the two $100 finishers at 90 s.
-ITEM_DEFS.banana.delay = 2400;
-ITEM_DEFS.holy.delay = 5400;
 
 // ---- PRACTICE: every market weapon free, and back in the random drops (9/22) ----
 // Duane: "bring back the banana grenades and the holy grenades, make them free. just add all the
@@ -6353,9 +6628,18 @@ ITEM_DEFS.holy.delay = 5400;
 // unlocked. Set 2 is the pool unseeded matches draw from; the seeded bet arena draws set 1 only, so
 // it never sees any of these and its replays are unchanged. Flip PRACTICE_FREE to false to go back
 // to the paid shop exactly as it was.
-const PRACTICE_FREE = true;
-const PRACTICE_WEAPONS = ['banana', 'holy', 'peel', 'prod', 'girder', 'bouncer', 'zip', 'boots', 'cluster', 'sheep',
-  'flamer', 'homer', 'drill', 'aegis', 'freeze', 'turret', 'well', 'strike', 'donkey', 'armageddon'];
+// OFF 2026-10-16, on Duane's word, the day the crypto checkout went in (docs/PAYMENTS.md): the shop
+// cannot sell a weapon it is also giving away, and `Econ.owns()` was answering "you already own it"
+// for all 22. Turning it off does TWO things, which is worth knowing before turning it back on:
+//   1. the shop sells them again (this is the point), and
+//   2. they stop dropping from supply crates in ordinary matches, because the block below is what
+//      put them in set 2 at weight 2 with no warm-up lock.
+// A bought weapon reaches a fight through the ARSENAL (three slots, casual and party only), which
+// is the economy as designed; the seeded bet arena never saw any of this either way.
+const PRACTICE_FREE = false;
+const PRACTICE_WEAPONS = ['zip', 'boots', 'flamer', 'aegis', 'freeze', 'turret', 'well',
+  'gloves', 'bat', 'medkit', 'thunder', 'bolt', 'blaster', 'bow', 'sweeper',
+  'fireaxe', 'pipegun', 'pipebomb', 'mine', 'manhole', 'wreck', 'deagle'];   // the gloves are a shop weapon like the rest, so practice hands them out too
 if (PRACTICE_FREE) for (const k of PRACTICE_WEAPONS) {
   const d = ITEM_DEFS[k]; if (!d) continue;
   d.weight = 2; d.set = 2; d.delay = 0;
@@ -6367,6 +6651,9 @@ const I3_PAN = { total: 34, clip: 'punch', reflect: [4, 16], weapon: '#c8ccd4', 
 const I3_PROD = { total: 22, clip: 'punch', sfx: 'none',
   hits: [H(4, 7, 40, -44, 20, 1, 6, 74, 4)] };            // 1% damage, enormous flat shove: a ring-out tool
 const I3_FLAME = { total: 78, clip: 'punch', gunAnim: true, fx: 'burst', sfx: 'none', tick(f, t) { Items3.flameTick(f, t); } };
+// QUAKE's Thunderbolt: a CONTINUOUS beam, not a projectile you lead. It holds you in place while it
+// fires and eats its charge fast, which is the trade the original made too.
+const I3_BOLT = { total: 84, clip: 'punch', gunAnim: true, fx: 'scope', sfx: 'none', tick(f, t) { Items3.boltTick(f, t); } };
 const I3_FREEZE = { total: 52, clip: 'punch', gunAnim: true, fx: 'scope', sfx: 'none', tick(f, t) { Items3.freezeTick(f, t); } };
 const I3_BOOTS = { total: 46, clip: 'punch', sfx: 'none', tick(f, t) { Items3.bootsTick(f, t); },
   hits: [H(8, 34, 26, -44, 30, 6, 40, 46, 70, { radial: true, rehit: 12 })] };
@@ -6374,12 +6661,12 @@ const I3_AIM = { total: 210, clip: 'idle', sfx: 'none', tick(f, t) { Items3.aimT
 const I3_ZIP = { total: 26, clip: 'punch', sfx: 'none' };
 
 const Items3 = {
-  game: null, strikes: [], rain: null, drops: null, girders: [],
+  game: null, strikes: [], rain: null, drops: null,
 
   // ---------- match lifecycle (no edit to Game.start needed: we notice a new fighter array) ----------
   fresh(G) {
     this.game = G.fighters;
-    this.strikes = []; this.rain = null; this.girders = [];
+    this.strikes = []; this.rain = null;
     // scheduled loadout drops for online casual (see "how a bought weapon enters a fight" below)
     const L = G.arsenalOn && Array.isArray(G.loadouts) ? G.loadouts : null;
     // sorted by weapon delay, so the cheap tools arrive first and the finishers last — the same
@@ -6434,7 +6721,6 @@ const Items3 = {
       if (f.aegis > 0) this.aegisTick(f, G);
     }
     this.strikeTick(G, st);
-    this.girderTick(G);
     if (this.rain) this.rainTick(G, st);
     if (this.drops) this.dropTick(G);
   },
@@ -6538,52 +6824,8 @@ const Items3 = {
     G.shake(6); Sfx.tone(180, 1500, 0.22, 'sine', 0.16);
   },
 
-  // ---- girder: a solid beam you bolt into the air. No damage: it rewrites the stage ----
-  girder(f, it) {
-    if (it.cd > 0) return true;
-    const G = Game, st = G.stage, y = Math.round(f.y - (f.air ? 0 : 96)), x = f.x + f.face * 96;
-    if (y < st.blast.t + 120 || y > st.main.top - 30) { G.text(f.x, f.y - f.h - 24, 'NO ROOM', '#aaa', 0.9); return true; }
-    it.cd = 40; it.ammo--; if (it.ammo <= 0) f.dropAfter = 'girder';
-    const p = { x0: x - 78, x1: x + 78, y, soft: true, girder: true, born: G.frame, life: 1200 };
-    st.plats.push(p); (this.girders || (this.girders = [])).push(p);
-    G.text(x, y - 30, 'GIRDER', '#cfd4e8', 1.1); G.ring(x, y, '#cfd4e8', 90);
-    f.startMove({ total: 20, throwAnim: 'f' }); Sfx.tone(140, 90, 0.3, 'square', 0.14); Sfx.noise(0.12, 0.1, 700);
-    return true;
-  },
-  girderTick(G) {
-    if (!this.girders || !this.girders.length) return;
-    const st = G.stage, keep = [];
-    for (const p of this.girders) {
-      if (G.frame - p.born < p.life && st.plats.includes(p)) { keep.push(p); continue; }
-      const i = st.plats.indexOf(p); if (i >= 0) st.plats.splice(i, 1);
-      for (const f of G.fighters) if (f.plat === p) { f.plat = null; f.leaveGround(); }
-      G.puff(p.x0 + 78, p.y, 8, '#cfd4e8');
-    }
-    this.girders = keep;
-  },
 
   // ---- spring bumper: no damage, pure chaos. Owns the space in front of a ledge ----
-  bouncerTick(it, G) {
-    if (it.life != null && --it.life <= 0) { it.dead = true; G.burst(it.x, it.y, '#9fe8ff', 16); return true; }
-    it.vy = Math.min((it.vy || 0) + 0.5, 14);
-    const py = it.y; it.y += it.vy;
-    const s = MV2.surf(G.stage, it.x, py, it.x, it.y);
-    if (s) { it.y = s.y; it.vy = 0; }
-    if (it.y > G.stage.blast.b) { it.dead = true; return true; }
-    for (const f of G.fighters) {
-      if (f.state === 'dead' || f.state === 'respawn' || f.untouchable || f.bumpT > 0) continue;
-      const bdx = f.x - it.x, bdy = (f.y - f.h * 0.4) - it.y, bL = dhypot(bdx, bdy);
-      if (bL > 52 + f.w * 0.4) continue;
-      // Unit vector straight off the delta. Math.atan2/cos/sin are engine-dependent and this
-      // sets fighter velocity; dhypot is built on Math.sqrt, which IS exactly specified.
-      const bux = bL > 0 ? bdx / bL : 1, buy = bL > 0 ? bdy / bL : 0;   // atan2(0,0) -> (1, 0)
-      f.vx = bux * 13; f.vy = buy * 13 - 3;
-      f.air = true; f.plat = null; f.move = null; f.hitstun = 16; f.tumble = true; f.setState('hitstun'); f.bumpT = 24;
-      G.text(it.x, it.y - 34, 'BOING', '#9fe8ff', 1.3); G.ring(it.x, it.y, '#9fe8ff', 80);
-      G.shake(6); Sfx.tone(240, 1100, 0.14, 'sine', 0.16);
-    }
-    return true;
-  },
 
   // ---- zip hook: fire up-forward, get yanked to the anchor, jumps reset. Pure mobility ----
   zip(f, it) {
@@ -6665,6 +6907,53 @@ const Items3 = {
     MV2.spawn(f, { kind: 'flame', vx: V[0], vy: V[1], grav: -0.03, drag: 0.965, step: true, r: 15, rgrow: 0.65,
       dmg: 1.4, ang: 32, bkb: 18, kbg: 6, life: 18, rehit: 10, pierce: true, color: '#ff7a1a' }, f.w * 0.5 + 12, f.h * 0.6);
     if (t % 9 === 0) Sfx.noise(0.16, 0.09, 700);
+  },
+
+  // ---- NAIL GUN. The chip weapon, 2026-10-16. Fast, light, PIERCES, and it is the only thing on
+  // the shelf that eats a shield: 22 nails at 1.1 each is not a kill on its own, it is what you do
+  // to somebody who will not stop blocking. Short range, so it cannot do that from across the stage.
+  nailTick(f, t) {
+    if (f.air) f.vy = Math.min(f.vy, 1.5);
+    f.vx *= 0.93;
+    if (t < 6 || t > 58 || t % 3) return;
+    const V = TK.rot(f.move.aim, 21, rand(-1.1, 1.1) - (f.move.up || 0) * 3.4);
+    MV2.spawn(f, { kind: 'nail', vx: V[0], vy: V[1], grav: 0.02, step: true, r: 5,
+      dmg: 1.1, ang: 24, bkb: 7, kbg: 5, life: 26, pierce: true, shieldEat: 1.9, color: '#cfd6e4' }, f.w * 0.5 + 12, f.h * 0.6);
+    if (t % 6 === 0) Sfx.noise(0.07, 0.04, 2100);
+  },
+
+  // ---- BUZZSAW. Brawlhalla's Chakram: it goes out, it comes back, and it hits on both legs. The
+  // return is the whole weapon -- throwing it PAST someone is the correct play, which is true of
+  // nothing else on this shelf. `rehit` lets the same blade catch them twice in one throw.
+  buzz(f, it) {
+    // It had no cooldown and never spent a charge: a $6.99 weapon with two uses that in fact threw
+    // a saw every single frame you held Attack, for the whole stock. Same two lines every other
+    // arsenal weapon runs (zip, boots, gun), and `dropAfter` is what takes the empty one out of
+    // your hand once you are out of the move (56_items2).
+    if (it.cd > 0) return true;
+    it.cd = ITEM_DEFS.buzzsaw.cool || 48;
+    it.ammo--; if (it.ammo <= 0) f.dropAfter = 'buzzsaw';
+    const dir = f.face;
+    // `boomer` is read by MV2.projStep: fly out for `out` frames, then pull back to the thrower.
+    // NOT `home`, which is the homing-missile steer and chases an OPPONENT.
+    MV2.spawn(f, { kind: 'buzz', vx: dir * 13, vy: -1.2, grav: 0, step: true, spin: 0.9, r: 17,
+      dmg: 4.2, ang: 42, bkb: 26, kbg: 44, life: 110, rehit: 18, pierce: true, color: '#b8c2cf',
+      boomer: f, out: 34 }, f.w * 0.5 + 14, f.h * 0.55);
+    Sfx.noise(0.12, 0.07, 1400);
+    return true;
+  },
+
+  // ---- the Thunderbolt. A held beam: fast, straight, repeat-hitting, almost no knockback, so it
+  // melts someone standing still and does nothing at all to someone who keeps moving. ----
+  boltTick(f, t) {
+    if (f.air) f.vy = Math.min(f.vy, 1.2);
+    f.vx *= 0.86;
+    if (t < 10 || t > 74 || t % 2) return;
+    const V = TK.rot(f.move.aim, 34, -(f.move.up || 0) * 4.5);
+    MV2.spawn(f, { kind: 'arcbolt', vx: V[0], vy: V[1], grav: 0, drag: 1, step: true, r: 10,
+      dmg: 2.2, ang: 14, bkb: 6, kbg: 4, life: 9, rehit: 6, pierce: true, color: '#9fdcff' },
+      f.w * 0.5 + 14, f.h * 0.62);
+    if (t % 6 === 0) { Sfx.tone(2400, 1800, 0.07, 'sawtooth', 0.07); Sfx.noise(0.05, 0.05, 6000); }
   },
 
   // ---- freeze ray: the pure control tool. 1 second of doing nothing at all ----
@@ -6814,12 +7103,76 @@ const Items3 = {
   // with Attack, because the marker has to be identical on every page and on the server: a mouse
   // position is not in the input stream. On a mouse or a touchscreen, tapping the stage still works
   // (UI.aimTo -> Items3.aimPoint) in LOCAL matches only; online it is stick-only. See docs/ECONOMY.md.
+  // A proximity mine, which is Smash's Motion-Sensor Bomb. It arms after a beat (so you cannot stick
+  // one to someone's face) and then goes off when anyone but the owner walks into it.
+  // First press plants a charge, every press after that sets off everything you have planted.
+  // Two charges max, so it is a decision rather than a carpet.
+  detonator(f, it) {
+    if (it.cd > 0) return true;
+    it.cd = ITEM_DEFS.mine.cool || 24;
+    const G = Game;
+    // One charge out at a time, and the rule is dead simple so nobody has to learn a modifier:
+    // a charge on the floor means PRESS BLOWS IT. No charge means press plants one.
+    const mine = G.items.filter(x => x.kind === 'mine' && x.owner === f.idx);
+    if (mine.length) return this.blow(f, mine, it);
+    if (it.ammo <= 0) { Game.text(f.x, f.y - f.h - 24, 'OUT OF CHARGES', '#8d99a7', 0.95); return true; }
+    // plant one
+    it.ammo--;
+    G.items.push({ kind: 'mine', x: f.x + f.face * f.w * 0.3, y: f.y - 2, vx: 0, vy: f.air ? 2 : 0,
+      age: 0, armed: true, thrownBy: f, owner: f.idx, hp: 0, ammo: 0, face: f.face, arm: 22 });
+    f.startMove({ total: 14, throwAnim: 'f' });
+    G.text(f.x, f.y - f.h - 24, 'CHARGE SET \u2014 PRESS AGAIN', '#ff6a3d', 1.1);
+    G.ring(f.x, f.y - f.h * 0.4, '#ff6a3d', 40);
+    Sfx.tone(380, 240, 0.08, 'square', 0.07);
+    return true;
+  },
+  // the press that matters
+  blow(f, mine, it) {
+    const G = Game;
+    if (!mine.length) { G.text(f.x, f.y - f.h - 24, 'NOTHING SET', '#8d99a7', 0.95); return true; }
+    for (const m of mine) { m.fuse = 0; Items.explode(m); }
+    G.text(f.x, f.y - f.h - 30, 'DETONATE', '#ff3b2f', 1.5);
+    Game.shake(12); Sfx.tone(140, 60, 0.26, 'square', 0.2);
+    if (it && it.ammo <= 0) f.dropAfter = 'mine';
+    return true;
+  },
+  mineTick(it, G, st) {
+    if (it.arm > 0) { it.arm--; if (it.arm === 0) G.ring(it.x, it.y, '#ff4a4a', 26); return; }
+    // a planted charge no longer triggers on proximity: it waits for the remote
+    it.blink = (it.blink || 0) + 1;
+    return;
+    /* eslint-disable no-unreachable */
+    it.blink = (it.blink || 0) + 1;
+    for (const f of G.fighters) {
+      if (f.state === 'dead' || f.idx === it.owner) continue;
+      if (Math.abs(f.x - it.x) < 34 && Math.abs((f.y - f.h * 0.5) - it.y) < 44) { Items2.setOff(it, f); return; }
+    }
+    /* eslint-enable no-unreachable */
+  },
+
+  // A manhole, which is Smash's Pitfall: it does no damage, it takes the opponent out of the fight
+  // for a moment. Reuses `chill`, the freeze ray's hold, rather than inventing a second stun.
+  manholeTick(it, G, st) {
+    if (it.arm > 0) { it.arm--; return; }
+    for (const f of G.fighters) {
+      if (f.state === 'dead' || f.idx === it.owner) continue;
+      if (Math.abs(f.x - it.x) < 30 && Math.abs((f.y - f.h * 0.5) - it.y) < 46) {
+        Items3.chill(f);
+        f.vx *= 0.2; f.vy = 0;
+        G.text(f.x, f.y - f.h - 20, 'DOWN THE HOLE', '#9fe8ff', 1.1);
+        G.ring(it.x, it.y, '#5a6472', 44);
+        it.life = 0;
+        return;
+      }
+    }
+  },
+
   aimStart(f, it, kind) {
     const G = Game;
     f.aimKind = kind; f.aimX = clamp(f.x + f.face * 150, G.stage.main.x0, G.stage.main.x1); f.aimV = 0;
     f.item = null;
     f.startMove(I3_AIM);
-    G.text(f.x, f.y - f.h - 36, kind === 'donkey' ? 'PICK A LANE' : 'MARK THE TARGET', '#ff4a4a', 1.3);
+    G.text(f.x, f.y - f.h - 36, kind === 'wreck' ? 'PICK A LANE' : 'MARK THE TARGET', '#ff4a4a', 1.3);
     Sfx.tone(1200, 1200, 0.08, 'square', 0.08); Sfx.tone(1600, 1600, 0.08, 'square', 0.08, 0.12);
     return true;
   },
@@ -6845,8 +7198,8 @@ const Items3 = {
     const G = Game, kind = f.aimKind || 'strike', x = f.aimX;
     f.aimKind = null;
     f.move = null; f.setState(f.air ? 'air' : 'ground');
-    if (kind === 'donkey') {
-      this.strikes.push({ kind: 'donkey', x, t: 96, by: f, face: f.face });
+    if (kind === 'wreck') {
+      this.strikes.push({ kind: 'wreck', x, t: 96, by: f, face: f.face });
       G.text(x, G.stage.main.top - 180, 'INCOMING', '#c8ccd4', 1.6);
     } else {
       this.strikes.push({ kind: 'strike', x, t: 150, by: f, face: x >= f.x ? 1 : -1 });
@@ -6865,7 +7218,7 @@ const Items3 = {
         G.rings.push({ x: s.x, y: st.main.top - 4, r: 6, max: 90, color: s.t < 50 ? '#ff2a3a' : '#ff9a4a', life: 12, w: 5 });
         Sfx.tone(s.t < 50 ? 1500 : 900, s.t < 50 ? 1500 : 900, 0.05, 'square', 0.07);
       }
-      if (s.kind === 'donkey') {
+      if (s.kind === 'wreck') {
         if (s.t === 60) { G.text(s.x, st.blast.t + 200, 'CONCRETE DONKEY', '#c8ccd4', 1.6); Sfx.tone(120, 60, 1.1, 'sawtooth', 0.2); }
         if (s.t > 0) continue;
         G.items.push({ kind: 'blastx', x: s.x, y: st.main.top - 18, vx: 0, vy: 0, age: 0, thrownBy: s.by });
@@ -6925,7 +7278,7 @@ const Items3 = {
   // ---------- CPU: make the bots use what they are handed, so party matches read right ----------
   ai(f, tgt, o, press) {
     const k = f.item.kind, dx = tgt.x - f.x, adx = Math.abs(dx), toward = dx > 0 ? 'right' : 'left';
-    if (k === 'peel' || k === 'bouncer' || k === 'girder') { if (Rng.next() < 0.02) { press('attack'); return true; } return false; }
+    if (k === 'peel' || k === 'bouncer') { if (Rng.next() < 0.02) { press('attack'); return true; } return false; }
     if (k === 'turret' || k === 'well') { if (adx < 320 && Rng.next() < 0.03) { press('attack'); return true; } return false; }
     if (k === 'sheep' || k === 'drill' || k === 'dyna') { if (adx < 340 && Rng.next() < 0.035) { if ((dx > 0 ? 1 : -1) !== f.face) { o[toward] = true; return true; } press('attack'); return true; } return false; }
     if (k === 'cluster') { if (adx < 420 && Rng.next() < 0.05) { o[toward] = true; press('attack'); return true; } return false; }
@@ -6953,7 +7306,7 @@ const Items3 = {
 // The 3D layer (src/98_v3_econ.mjs) is a MODULE and this is a classic script, so `Items3` reaches it
 // through the global lexical environment — which a module can read by name but which is NOT a
 // property of `window`. 98 reached for `window.Items3`, got undefined, and silently drew no marker,
-// no jets, no missiles, no donkey, no girders and no Armageddon sky for the life of the file.
+// no jets, no missiles, no donkey and no Armageddon sky for the life of the file.
 // 98 now reads it by name; this line is the belt, and it matches how 89_econ.js exports `Econ`.
 if (typeof window !== 'undefined') window.Items3 = Items3;
 
@@ -7149,7 +7502,7 @@ const Game = {
           if (h.hb.pre && h.hb.pre(a, b, h.hb)) break;
           const mult = a.chargeMult() * (a.powerT > 0 ? 1.4 : 1);
           if (this.feel && FEEL.dropParry(b, h.hb.dmg * mult, a)) break;   // parry just after the shield came down (25_feel)
-          if (b.state === 'shield') { this.shieldHit(b, h.hb.dmg * mult, a.x, a); break; }
+          if (b.state === 'shield') { this.shieldHit(b, h.hb.dmg * mult, a.x, a, h.hb.shieldEat); break; }
           const bonk = a.move.def.bonk;
           b.takeHit(h.hb, a, mult, a.x, a.face);
           COMBO.landed(a, b);   // opens the cancel window (23_combo)
@@ -7160,9 +7513,13 @@ const Game = {
       }
     }
   },
-  shieldHit(b, dmg, srcX, a) {
+  // `eat` is the shield multiplier, 2026-10-16. Everything has always drained a shield at a flat
+  // 1.3x its damage, which meant no weapon could ever BE the anti-shield weapon -- the Nail Gun's
+  // whole identity is that it eats a block, and the field it declared was being read by nothing.
+  // Default unchanged, so every existing weapon and every seeded fight behaves exactly as before.
+  shieldHit(b, dmg, srcX, a, eat) {
     if (this.feel && FEEL.shield(b, dmg, srcX, a)) return;   // perfect shield = parry (25_feel)
-    b.shieldHP -= dmg * 1.3;
+    b.shieldHP -= dmg * (eat || 1.3);
     b.vx = (b.x >= srcX ? 1 : -1) * Math.min(7, 1 + dmg * 0.4);
     const lag = clamp(Math.floor(dmg * 0.3 + 3), 3, 12);
     b.hitlag = lag; if (a) a.hitlag = Math.max(a.hitlag, lag);
@@ -7195,7 +7552,7 @@ const Game = {
         if (b.state === 'move' && b.move.def.reflect && MV2.reflect(p, b)) break;
         if (p.rehit ? MV2.rehitWait(p, b) : p.hitSet && p.hitSet.has(b)) continue;
         if (!p.rehit) (p.hitSet = p.hitSet || new Set()).add(b);
-        if (b.state === 'shield') { this.shieldHit(b, p.dmg, p.x, null); if (!p.boomer && !p.pierce) p.dead = true; continue; }
+        if (b.state === 'shield') { this.shieldHit(b, p.dmg, p.x, null, p.shieldEat); if (!p.boomer && !p.pierce) p.dead = true; continue; }
         const keep = p.owner.hitlag;
         b.takeHit({ dmg: p.dmg, ang: p.ang, bkb: p.bkb, kbg: p.kbg, radial: true, kind: p.kind }, p.owner, 1, p.x - p.vx, 1);
         p.owner.hitlag = keep;
@@ -7373,7 +7730,22 @@ const NetSim = {
   CHECK: 60,            // players and server compare a state hash every 60 ticks
   done: null, elim: [], onEnd: null,
 
-  encode(o) { let m = 0; for (let i = 0; i < ACTIONS.length; i++) if (o[ACTIONS[i]]) m |= 1 << i; return m; },
+  // Bits 0..11 are the ACTIONS mask and never move. Bits 12..18 carry FREE AIM: the aim angle
+  // quantised to AIM_STEPS positions around the circle, stored as `step + 1` so that an input with
+  // no aim encodes to exactly the number it always did. Every replay and every seeded arena fight
+  // therefore produces bit-identical masks to before this existed.
+  //
+  // The quantising is the whole point, not a shortcut. A raw float angle would be a different number
+  // on every machine's mouse and would desync lockstep; it would also hand a mouse player perfect
+  // angles against a gamepad player, which in a wagered match is not a style question. 128 steps is
+  // 2.8 degrees, far below what anyone can see in play, it is one byte on the wire, and mouse, right
+  // stick and keyboard all drive the same 128 positions, so no input device has an advantage.
+  encode(o) {
+    let m = 0;
+    for (let i = 0; i < ACTIONS.length; i++) if (o[ACTIONS[i]]) m |= 1 << i;
+    if (o.aim != null) m |= ((((o.aim | 0) % AIM_STEPS + AIM_STEPS) % AIM_STEPS) + 1) << ACTIONS.length;
+    return m;
+  },
 
   // The rule flags Game.start gates on `seed` (item set, signature moves, reach, duck, combos, feel, and
   // whatever gets added next). Online has to play the same game as local practice, and every peer has to
@@ -8116,6 +8488,11 @@ const PROFILE = {
   topg:     { weight: 98, walk: 6.6, power: 1.12 },
   pepe:     { weight: 98, walk: 6.6, power: 1.02 },
   ronin:    { weight: 96, walk: 6.3, power: 1.06, reach: 1.24, ai2: [['nb', 'punish'], ['sb', 'dash'], ['db', 'breaker'], ['ub', 'up']] },   // sword set (21_roster2 moves2)
+  // 10/15: the lead of the key art played at DOGE's pace on DOGE's reach. He is the rushdown now --
+  // second-fastest walk behind TURBO (7.6), the longest arms outside the sword/limb fighters, and
+  // real power -- and he pays for it in weight: 100 is dead middleweight, no armour at all. His claw kit, the
+  // held sprint and the FERAL state are in 67_unique.js.
+  wolverinu:{ weight: 100, walk: 7.3, power: 1.1, reach: 1.22, jump: 15.0, air: 5.2 },
   doge:     { weight: 96, walk: 6.4, power: 1.0 },
   wojak:    { weight: 88, walk: 7.1, power: 0.92, grav: 0.58 },
   mystic:   { weight: 92, walk: 6.4, power: 1.04 },
@@ -8143,6 +8520,7 @@ const PROFILE = {
 };
 
 // one passive each. kb = knockback taken, dmg = damage dealt, rage = [own damage %, damage multiplier],
+// hunt = [VICTIM's damage %, damage multiplier] -- rage read off the other fighter instead of yourself,
 // run = top ground speed after a run-up, airc = air control, shield = shield HP (60 is standard),
 // burn = fire damage taken, fall = fast-fall speed, land = landing lag.
 const TRAIT = {
@@ -8159,6 +8537,7 @@ const TRAIT = {
   floki:    { name: 'Axe Master', dmg: 1.05 },
   trump:    { name: 'Big League', dmg: 1.04 },
   gwei:     { name: 'Torque', dmg: 1.06 },
+  volt:     { name: 'Live Wire', dmg: 1.03 },
 
   wojak:    { name: 'Cope Harder', rage: [80, 1.18] },
   sin:      { name: 'No Filter', rage: [90, 1.20] },
@@ -8200,6 +8579,13 @@ const TRAIT = {
   cashcat:  { name: 'Cat Landing', land: 0.68 },
 
   wif:      { name: 'Hat Drop', fall: 1.30 },
+
+  // 10/15: the only passive on the roster that reads the OTHER fighter. WOLVERINU is a hunter, so he
+  // is at his worst against a fresh opponent and at his best finishing a hurt one: over 70% damage
+  // every claw he lands does 16% more. He also gets a real run-up, because a rushdown that could not
+  // run was the whole problem (his held sprint is sb PROWL, 67_unique). Two mechanics in one trait,
+  // which nobody else has either -- he is the lead of the key art and the kit is allowed to say so.
+  wolverinu:{ name: 'Scent of Blood', hunt: [70, 1.16], run: 1.19 },
 };
 
 const TR = {
@@ -8233,6 +8619,7 @@ const TR = {
     if (ta) {
       if (ta.dmg) mult = (mult || 1) * ta.dmg;
       if (ta.rage && att.dmg >= ta.rage[0]) mult = (mult || 1) * ta.rage[1];
+      if (ta.hunt && this.dmg >= ta.hunt[0]) mult = (mult || 1) * ta.hunt[1];   // rage read off the VICTIM
     }
     if (tv && tv.kb && hb && (hb.bkb != null || hb.kbg != null)) {
       hb = Object.assign({}, hb, { bkb: (hb.bkb || 0) * tv.kb, kbg: (hb.kbg || 0) * tv.kb });
@@ -8284,6 +8671,9 @@ const TR = {
 //   MYSTIC    nb  HEX         marks them; the mark goes off on its own three seconds later
 //   POPCAT    nb  POP         swallows a shot and spits it back bigger and faster
 //   GIGACHAD  db  FLEX        a parry that leaves him pumped instead of hitting back
+//   WOLVERINU --  THE WHOLE KIT. He is the lead of the key art and he gets the lead's moveset: see the
+//                 block at the bottom of this file. Nobody else on the roster has a held sprint with
+//                 three cancels out of it, a hanging hitbox, or a rage state.
 {
   // ---- WHALE: MAELSTROM ----
   const w = CHAR_BY_ID.whale;
@@ -8451,6 +8841,323 @@ const TR = {
     };
     g.moves2 = Object.assign({}, g.moves, { db: FLEX });
   }
+}
+{
+  // ================================ WOLVERINU: the lead's kit ====================================
+  // 2026-10-15. He is the front of the hero key art and the partner character, and he played like a
+  // reskin: his four specials were mkDash / mkRise / mkSlam with VOLT's numbers and a different
+  // colour, so "the main character" picked up the pad and did exactly what DOGE does. The 10/13 pass
+  // gave him claw normals (6g_styles) and ONE unique special (CROSS RAKE, below). This is the rest:
+  // all four slots, a rage state, and a passive, built around the one thing the model actually has.
+  //
+  //   nb  CROSS RAKE   an X cut that HANGS in the air where it was made and keeps cutting (kept)
+  //   sb  PROWL        a HELD sprint -- the roster's only one -- with three cancels out of it:
+  //                      Attack -> SHRED    a four-cut crossing flurry that carries forward
+  //                      Special-> POUNCE   a leap into a claws-first dive spike
+  //                      Down   -> SLIDE    a low claw slide that ducks high attacks and trips
+  //                      Shield -> a hard skid, so the sprint is a neutral tool and not a commitment
+  //                    running THROUGH his own hanging X detonates it (the kit's one combination)
+  //   ub  CLIMB        a vertical claw rip, and Attack at the apex drops him straight back down as
+  //                    PLUNGE instead of leaving him helpless
+  //   db  FERAL        ground: he drives both claws into the deck, splits it, and goes feral for 5 s
+  //                    air:    PLUNGE, the claws-first meteor
+  //
+  // Every number here is local-match only (c.moves2, read by 40_fighter when Game.sigs is on), so the
+  // bet arena at ARENA.version 1 and online lockstep replay the old kit untouched. Seeded rand() only.
+  // Energy is CIRCUIT green, never lightning -- lightning is VOLT's (see [[wolverinu-claw-set]]).
+  const wv = CHAR_BY_ID.wolverinu;
+  if (wv) {
+    const CIRC = '#9bf000';        // circuit green: his claws, his trails, his waves
+    const HOT = '#eaffb0';         // what the claws burn to while he is feral
+    const FW = wv.w * 0.5;         // half-width, i.e. the front of the body
+    const FH = wv.h;
+
+    // the closest live opponent within `d` px, or null. No RNG: the CPU's cancels have to replay.
+    const near = (f, d) => {
+      let best = null, bd = d;
+      for (const g of Game.fighters) {
+        if (g === f || g.state === 'dead' || g.untouchable) continue;
+        const dx = Math.abs(g.x - f.x);
+        if (dx < bd && Math.abs(g.y - f.y) < 100) { bd = dx; best = g; }
+      }
+      return best;
+    };
+    // claw dust off the deck: one spark per call, his colour, cheap
+    const spark = (f, x, y, n, c) => {
+      for (let i = 0; i < n; i++) Game.parts.push({ x: x + rand(-10, 10), y: y - rand(0, 10), vx: -f.face * rand(1, 5), vy: rand(-3.4, -0.4),
+        life: 20, max: 20, color: i % 3 ? (c || CIRC) : '#ffffff', size: rand(3, 7), g: 0.12 });
+    };
+    const WAVES = (f, dmg) => {
+      const w = Object.assign({}, WAVE_ROCK, { color: CIRC, dmg });
+      MV2.wave(f, 1, w); MV2.wave(f, -1, w);
+      Game.shock(f.x, f.y, CIRC);
+    };
+
+    // ---------------------------------------------------------------------------------------------
+    // nb  CROSS RAKE -- the only hitbox on the roster a fighter leaves standing and walks away from.
+    // Every other projectile MOVES (coin, bone, bolt, star, flame) or sits on the deck (MOODENG's
+    // mud). This one is the CUT ITSELF: he slashes an X in front of him and the X stays where it was
+    // made for 1.3 s, cutting anyone who walks into it every 18 frames, while he is free to keep
+    // pressing. It is his wall: he fences a lane off, then forces them through it with PROWL -- and
+    // running through it himself sets it off. One at a time so he can never fence the stage; two
+    // while he is feral, because that is what the rage state is for.
+    const CUT = (p, v) => { Game.burst(v.x, v.y - v.h * 0.5, p.color || CIRC, 8); Sfx.swing(); };
+    const XRAKE = {
+      total: 42, clip: 'punch', fx: 'slash', color: CIRC, weapon: CIRC, shout: 'CROSS RAKE', sfx: 'none',
+      hits: [
+        H(7, 9, FW + 20, -FH * 0.58, 26, 4.2, 58, 16, 20, { after: LINK }),   // the first arc keeps them there
+        fin(H(12, 14, FW + 24, -FH * 0.44, 28, 5.8, 38, 24, 48)),             // the second crosses it
+      ],
+      tick(f, t) {
+        if (f.air) f.vy = Math.min(f.vy, 1.6);
+        if (t <= 14) f.vx = approach(f.vx, f.face * 2.6, 0.5); else f.vx *= 0.84;
+        if (t === 7 || t === 12) Sfx.swing();
+        if (t !== 16 || Game.projCount(f, 'rake') >= (f.feralT > 0 ? 2 : 1)) return;
+        const hot = f.feralT > 0;
+        MV2.spawn(f, {
+          // 2.8 every 18 frames over 72 is four cuts at most, and only if they stand in it: measured
+          // 26 damage at 3.2/16/78 with the victim pinned inside, which is more than the move is worth
+          kind: 'rake', vx: 0, vy: 0, grav: 0, r: 34, dmg: hot ? 3.2 : 2.8, ang: 36, bkb: 14, kbg: 24,
+          life: 72, pierce: true, rehit: 18, noReflect: true, color: hot ? HOT : CIRC, after: CUT,
+        }, FW + 34, FH * 0.52);
+        Game.ring(f.x + f.face * (FW + 34), f.y - FH * 0.52, hot ? HOT : CIRC, 64);
+        Sfx.tone(2200, 520, 0.14, 'sawtooth', 0.07);
+      },
+    };
+    // he ran through his own X: it goes off instead of waiting to be walked into
+    const BURST_X = (f) => {
+      for (const p of Game.projs) {
+        if (p.owner !== f || p.kind !== 'rake' || p.burst) continue;
+        if (Math.abs(p.x - f.x) > 70 || Math.abs(p.y - (f.y - FH * 0.5)) > 80) continue;
+        p.burst = true;
+        p.r = 62; p.dmg = 9.5; p.ang = 46; p.bkb = 40; p.kbg = 78; p.rehit = 0; p.hitT = null; p.hitSet = null;
+        p.life = p.age + 7; p.color = HOT;
+        Game.ring(p.x, p.y, HOT, 170); Game.burst(p.x, p.y, CIRC, 20); Game.shake(9);
+        Game.flashT = Math.max(Game.flashT, 3); Sfx.tone(1500, 420, 0.2, 'sawtooth', 0.11);
+        return true;
+      }
+      return false;
+    };
+
+    // ---------------------------------------------------------------------------------------------
+    // the three cancels out of the sprint. Declared before PROWL so its tick can name them.
+    //
+    // SHRED: the payoff. Four cuts that cross each other, the first three link the victim in front of
+    // him and the last one launches with the signature freeze. 16.6 damage if the whole string lands,
+    // which is what a committed four-hit string off a sprint is worth.
+    const SHRED = {
+      total: 40, clip: 'punch', fx: 'slash', color: CIRC, weapon: CIRC, shout: 'SHRED', sigText: 'SHREDDED', sfx: 'none',
+      hits: [
+        H(3, 4, FW + 18, -FH * 0.62, 26, 2.8, 30, 10, 14, { after: LINK }),
+        H(7, 8, FW + 22, -FH * 0.40, 26, 2.8, 22, 10, 14, { after: LINK }),
+        H(11, 12, FW + 25, -FH * 0.58, 27, 3.2, 34, 12, 16, { after: LINK }),
+        fin(H(16, 19, FW + 30, -FH * 0.50, 33, 7.8, 46, 36, 94, { after: SIG })),
+      ],
+      tick(f, t) {
+        if (f.air) f.vy = Math.min(f.vy, 1.4);
+        if (t <= 19) f.vx = approach(f.vx, f.face * 7.5, 0.9); else f.vx *= 0.82;
+        if (t === 3 || t === 7 || t === 11) { Sfx.swing(); spark(f, f.x + f.face * (FW + 22), f.y - FH * 0.5, 3); }
+        if (t === 16) { Sfx.swing(); Game.shake(5); }
+      },
+    };
+    // POUNCE: the leap. A real spike in the air, and the landing cracks the deck.
+    const POUNCE_LAND = {
+      total: 24, clip: 'slam', fx: 'slash', color: CIRC, weapon: CIRC, sfx: 'none',
+      hits: [H(1, 5, 0, -14, 58, 7.5, 62, 48, 46, { radial: true })],
+      start(f) { WAVES(f, 5); Game.shake(11); Sfx.hit(0.7); spark(f, f.x, f.y, 10); },
+      tick(f) { f.fric(0.7); },
+    };
+    const POUNCE = {
+      total: 150, clip: 'flykick', fx: 'dive', color: CIRC, weapon: CIRC, shout: 'POUNCE', sfx: 'none',
+      hits: [H(6, 149, FW * 0.45, -FH * 0.3, 30, 11.5, -74, 26, 80)],
+      tick(f, t) {
+        if (t === 2) { f.vy = -12.8; f.vx = f.face * 12.5; Sfx.jump(); spark(f, f.x, f.y, 8); return; }
+        if (t < 14) { f.vx = f.face * 12.5; return; }            // the leap arc, gravity does the rest
+        f.vy = f.vy < 7 ? f.vy + 2.8 : 17;                       // then the claws come down
+        f.vx = approach(f.vx, f.face * 6.5, 0.5);
+        if (t % 3 === 0) spark(f, f.x, f.y - FH * 0.4, 1);
+      },
+      onLand(f) { f.startMove(POUNCE_LAND); },
+    };
+    // SLIDE: the low option. f.crouch is re-cleared by Fighter.update every frame, so setting it here
+    // holds the hurtbox down for exactly as long as the slide runs -- he goes UNDER a high attack, and
+    // (27_tekken TK.ducks) he cannot be thrown out of it either.
+    const SLIDE = {
+      total: 34, clip: 'sweep', fx: 'slash', color: CIRC, weapon: CIRC, shout: 'SLIDE', sfx: 'none',
+      hits: [H(3, 20, FW + 24, -9, 23, 6.5, 12, 22, 54, { after: TRIP(24) })],
+      start(f) { Sfx.slide(); Sfx.noise(0.22, 0.1, 1600); },
+      tick(f, t) {
+        f.crouch = true;
+        if (t <= 20) { f.vx = f.face * (14.5 - t * 0.34); if (!f.air) f.vy = 0; if (t % 3 === 0) spark(f, f.x - f.face * 10, f.y, 2, '#cfd8c0'); }
+        else f.vx *= 0.72;
+      },
+    };
+
+    // ---------------------------------------------------------------------------------------------
+    // sb  PROWL -- the held sprint, and the thing that makes him the fastest closer in the game.
+    //
+    // Everyone else's side special is a fixed-length dash: it travels a set distance and ends. This
+    // one is a STATE. He drops onto the claws, runs at 17.5 and keeps accelerating to ~21 (23 feral),
+    // can turn around mid-run, and stays in it for 46 frames (62 feral) or until the player cancels.
+    // The run clip is the rig's own `run`, so he visibly runs rather than sliding with a hitbox on.
+    // The body check is deliberately weak (3.2, almost no knockback, re-hits every 14 frames): the
+    // damage is in what you cancel into, which is the whole point of giving him three exits.
+    const PROWL = {
+      total: 72, airOnce: 'side', clip: 'run', fx: 'prowl', color: CIRC, weapon: CIRC, shout: 'PROWL', sfx: 'none',
+      hits: [H(6, 62, FW + 6, -FH * 0.45, 25, 3.2, 30, 10, 16, { rehit: 14, after: LINK })],
+      start(f) {
+        f.move.lim = f.feralT > 0 ? 62 : 46;
+        Sfx.tone(260, 220, 0.16, 'sawtooth', 0.08);
+      },
+      tick(f, t) {
+        const mv = f.move, lim = mv.lim || 46;
+        if (t <= 4) { f.vx *= 0.66; f.crouch = !f.air; if (t === 4) spark(f, f.x, f.y, 5); return; }
+        if (t > lim) { f.vx *= 0.74; return; }                 // the skid out
+
+        // steer: a held direction turns him, so the sprint is not a one-way commitment
+        const dx = f.dirX();
+        if (dx && dx !== f.face && t > 8) { f.face = dx; f.vx *= 0.4; spark(f, f.x, f.y, 4); }
+        const top = (f.feralT > 0 ? 20.5 : 17.5) + Math.min(3.2, (t - 5) * 0.14);
+        f.vx = f.face * top;
+        if (f.air) f.vy = Math.min(f.vy, 1.5); else f.vy = 0;
+
+        // the cancels. Checked before anything else can end the move, and only once he is actually
+        // running, so a tap of Special+direction can never come out as an instant SHRED.
+        if (t >= 8) {
+          if (f.pressed('attack')) return f.startMove(SHRED);
+          if (f.pressed('special')) return f.startMove(POUNCE);
+          if (f.pressed('down') && !f.air) return f.startMove(SLIDE);
+          if (f.pressed('shield')) { mv.t = lim + 1; f.vx *= 0.45; spark(f, f.x, f.y, 6); return; }
+          // the CPU runs the same kit: close the gap, then pick an exit the way a player would --
+          // pounce at someone above him, slide under a shield, shred everything else. Seeded Rng,
+          // like the rest of the AI, so a replay takes the same exits.
+          if (f.cpu && t >= 12) {
+            const g = near(f, 92);
+            if (g && g.air && g.y < f.y - 36) return f.startMove(POUNCE);
+            if (g && (g.state === 'shield' || Rng.next() < 0.22) && !f.air) return f.startMove(SLIDE);
+            if (g) return f.startMove(SHRED);
+          }
+        }
+        // his own hanging X, detonated by running through it
+        if (t % 2 === 0) BURST_X(f);
+        // never runs itself off the deck (BULL's STAMPEDE rule, extended to platforms)
+        if (!f.air) {
+          const p = f.plat, M = Game.stage.main;
+          const x0 = p ? p.x0 : M.x0, x1 = p ? p.x1 : M.x1;
+          if ((f.face > 0 ? x1 - f.x : f.x - x0) < 46) { f.vx *= 0.3; mv.t = lim; }
+        }
+        // claw gouges and afterimages
+        if (t % 2 === 0) spark(f, f.x - f.face * FW * 0.6, f.y, 1, f.feralT > 0 ? HOT : CIRC);
+        if (t % 3 === 0) Game.parts.push({ x: f.x - f.face * 6, y: f.y - FH * 0.5, vx: 0, vy: 0, life: 14, max: 14,
+          color: f.feralT > 0 ? HOT : CIRC, size: 13, g: 0, soft: true });
+        if (t % 8 === 0) Sfx.tone(180, 90, 0.07, 'sawtooth', 0.05);
+      },
+    };
+    // In the air there is no sprint to hold: a short claws-out air dash instead, once per jump. No
+    // `shout` of its own on purpose -- split2 keeps PROWL's on the outer def, so either version calls
+    // out once and the select-screen strip (8d_movehint) reads "Prowl" for the slot.
+    const AIRCUT = Object.assign(mkDash({ total: 34, a: 5, b: 15, speed: 17, hit: H(0, 0, FW + 24, -FH * 0.5, 31, 9.5, 40, 36, 86) }),
+      { clip: 'flykick', fx: 'slash', weapon: CIRC, color: CIRC });
+
+    // ---------------------------------------------------------------------------------------------
+    // db air / ub apex  PLUNGE -- the claws-first meteor. One def, two ways in.
+    const PLUNGE_LAND = {
+      total: 26, clip: 'slam', fx: 'slash', color: CIRC, weapon: CIRC, sfx: 'none',
+      hits: [H(1, 5, 0, -14, 64, 8.5, 60, 50, 48, { radial: true })],
+      start(f) { WAVES(f, 6); Game.shake(14); Game.flashT = Math.max(Game.flashT, 3); Sfx.hit(0.85); spark(f, f.x, f.y, 14); },
+      tick(f) { f.fric(0.66); },
+    };
+    const PLUNGE = {
+      total: 150, clip: 'slam', fx: 'dive', color: CIRC, weapon: CIRC, shout: 'PLUNGE', sfx: 'none',
+      hits: [H(5, 149, 0, 6, 29, 12.5, -82, 26, 84)],
+      tick(f, t) {
+        if (t < 5) { f.vy = -3; f.vx *= 0.5; return; }
+        f.vy = 19; f.vx = approach(f.vx, f.dirX() * 3.4, 0.4);
+        if (t % 2 === 0) spark(f, f.x, f.y - FH * 0.3, 1);
+      },
+      onLand(f) { f.startMove(PLUNGE_LAND); },
+    };
+
+    // ---------------------------------------------------------------------------------------------
+    // ub  CLIMB -- he hooks the claws and rips straight up, a tight multi-hit spiral with a real
+    // finisher on it, and Attack from frame 24 drops him out of it as PLUNGE. Every other recovery on
+    // the roster leaves you helpless with nothing to decide; this one asks a question on the way down.
+    const CLIMB = {
+      total: 54, helpless: true, airOnce: 'up', clip: 'spin', fx: 'spin', color: CIRC, weapon: CIRC, shout: 'CLIMB', sfx: 'jump',
+      hits: [
+        H(4, 28, 0, -FH * 0.62, 42, 2.6, 86, 28, 13, { rehit: 5, radial: true }),
+        fin(H(29, 33, 0, -FH * 0.66, 47, 6.8, 68, 46, 96, { radial: true })),
+      ],
+      tick(f, t) {
+        if (t === 3) { f.vy = -13.8; Sfx.swing(); }
+        else if (t > 3 && t <= 24) f.vy = Math.min(f.vy, -11.4);          // held rise, taller than the old spin
+        if (t >= 3) f.vx = lerp(f.vx, f.dirX() * 4.8, 0.16);
+        if (t >= 3 && t < 30 && t % 2 === 0) Game.parts.push({ x: f.x + rand(-14, 14), y: f.y - rand(0, FH), vx: rand(-1, 1), vy: rand(1, 3),
+          life: 16, max: 16, color: f.feralT > 0 ? HOT : CIRC, size: rand(5, 9), g: 0, soft: true });
+        if (t >= 24 && f.pressed('attack')) return f.startMove(PLUNGE);   // bail out of the spin, claws down
+      },
+    };
+
+    // ---------------------------------------------------------------------------------------------
+    // db ground  FERAL -- the rage state, and the reason to pick him.
+    //
+    // Nobody else on the roster transforms. He plants both claws in the deck, splits it two ways (the
+    // GROUND SPLIT motif his grapple finishes on), and for five seconds the claws burn: +15% on
+    // everything he lands, a longer and faster PROWL, and two hanging X cuts instead of one. It is 22
+    // frames of armour and then 24 frames of nothing, so it is a read and not a free press, and the
+    // buff is on a 9 s cooldown -- the crack and the waves still come out meanwhile, so the press is
+    // never dead.
+    const FERAL = {
+      total: 48, clip: 'slam', fx: 'pound', color: CIRC, weapon: CIRC, shout: 'FERAL', sfx: 'none',
+      armor: 42, armorF: [4, 22],
+      hits: [H(16, 20, 0, -12, 56, 7, 56, 38, 56, { radial: true })],
+      tick(f, t) {
+        f.vx *= 0.72;
+        if (f.air) f.vy = Math.max(f.vy, 9);
+        if (t === 6) { Sfx.tone(90, 420, 0.4, 'sawtooth', 0.12); spark(f, f.x, f.y, 6); }
+        if (t === 16) { WAVES(f, 6); Game.shake(12); }
+        if (t !== 20) return;
+        if (f.feralCd > 0) return;                       // still cooling: the crack landed, the rage does not
+        f.feralT = 300; f.feralCd = 540;
+        Game.text(f.x, f.y - FH - 34, 'FERAL', HOT, 1.7);
+        Game.rings.push({ x: f.x, y: f.y - FH * 0.5, r: 12, max: 200, color: HOT, life: 20, w: 12 });
+        Game.burst(f.x, f.y - FH * 0.5, HOT, 24);
+        Game.flashT = Math.max(Game.flashT, 5); Game.shake(16);
+        Sfx.tone(150, 620, 0.42, 'sawtooth', 0.13);
+      },
+    };
+
+    wv.moves2 = Object.assign({}, wv.moves, {
+      nb: XRAKE,
+      sb: split2(PROWL, AIRCUT),
+      ub: CLIMB,
+      db: { ground: FERAL, air: PLUNGE },
+    });
+  }
+}
+{
+  // ---- WOLVERINU: the FERAL state itself ----
+  // Two hooks, both no-ops for every other fighter and for every seeded fight: `feralT` is only ever
+  // set by the db above, which only exists in moves2. 66_traits wrapped these first, so this sits
+  // outside its wrappers and its multiplier compounds with the profile's -- which is intended, the
+  // rage state is supposed to be felt.
+  const up0 = Fighter.prototype.update;
+  Fighter.prototype.update = function (stage) {
+    const r = up0.call(this, stage);
+    if (this.feralCd > 0) this.feralCd--;
+    if (this.state === 'dead') { this.feralT = 0; return r; }   // a stock lost ends the rage
+    if (!(this.feralT > 0) || this.hitlag > 0) return r;
+    this.feralT--;
+    if (this.t % 2 === 0) Game.parts.push({ x: this.x + rand(-this.w * 0.5, this.w * 0.5), y: this.y - rand(0, this.h * 1.05),
+      vx: rand(-0.5, 0.5), vy: rand(-3.4, -1.2), life: 20, max: 20, color: this.t % 5 ? '#9bf000' : '#eaffb0', size: rand(4, 8), g: 0 });
+    if (this.feralT === 0) Game.text(this.x, this.y - this.h - 20, 'CALM', '#8c9a86', 0.9);
+    return r;
+  };
+  const take0 = Fighter.prototype.takeHit;
+  Fighter.prototype.takeHit = function (hb, att, mult, srcX, srcFace) {
+    if (att && att !== this && att.feralT > 0) mult = (mult || 1) * 1.15;
+    return take0.call(this, hb, att, mult, srcX, srcFace);
+  };
 }
 
 // ===== facing: "I press left, he faces left" — every input path, not just attacks =====
@@ -8912,6 +9619,50 @@ const GUNS = {
                 rec: 6, airRec: 8.5, walk: 0.3, round: 'buck', mech: ['pump', 12], shake: 7, throwDmg: 9 },
     smg:      { name: 'SMG', mag: 30, rate: 5, recov: 10, spd: 145, range: 820, r: 5, dmg: 1.5, bkb: 5, kbg: 9, ang: 16,
                 spread: 2.2, climb: 0.35, climbMax: 6, rec: 0.35, airRec: 0.55, walk: 0.5, auto: true, round: 'rsmg', shake: 0.6, throwDmg: 7 },
+    // BLASTERS and BOW: the two ranged archetypes the genre agrees on and we did not have.
+    // Brawlhalla's Blasters are "long-range attacks that can be strung together"; Smash's Ray Gun is
+    // the same idea. The Bow is Brawlhalla's "projectile that shoots out surprisingly fast", and
+    // Smash's charged-shot slot. Between them our shooting shelf stops being three flamethrower
+    // variants and an assault rifle.
+    blaster:  { name: 'Twin Nines', mag: 16, rate: 6, recov: 11, spd: 230, range: 920, r: 6, dmg: 2.7, bkb: 9, kbg: 16, ang: 18,
+                spread: 1.0, rec: 0.4, airRec: 0.7, walk: 0.62, auto: true, round: 'rbls', shake: 1.6, throwDmg: 7 },
+    bow:      { name: 'Speargun', mag: 5, wind: 14, rate: 30, recov: 15, spd: 300, range: 1600, r: 7, dmg: 15, bkb: 44, kbg: 78, ang: 26,
+                spread: 0, rec: 1.6, airRec: 2.2, walk: 0.35, stop: 2, stagger: 14, round: 'rarw', shake: 5, throwDmg: 8 },
+    // STREET SWEEPER: the close-range shotgun. Smash has no shotgun, but the shop is a weapon shop
+    // and every shooter the store art is modelled on carries one. Pellets, so it is devastating in
+    // someone's face and nothing at all across the stage.
+    sweeper:  { name: 'Street Sweeper', mag: 6, wind: 6, rate: 34, recov: 20, spd: 180, range: 360, r: 6, dmg: 4.8, bkb: 18, kbg: 28, ang: 22,
+                pellets: 8, spread: 7.5, rec: 1.5, airRec: 2.1, walk: 0.4, stop: 1, round: 'rsweep', shake: 5, throwDmg: 8 },
+    // CAPTIVE BOLT: a cattle stunner run off a compressed air tank, which is a real industrial tool
+    // and sits on the same shelf as the Fire Axe and the Pipe Cannon. It is the shortest range in
+    // the game by a wide margin -- it has to be touching -- and in exchange it hits harder than
+    // anything else that fires. Two shots, and a long recovery you have to commit to.
+    bolt:     { name: 'Captive Bolt', mag: 2, wind: 16, rate: 46, recov: 30, spd: 150, range: 72, r: 9, dmg: 36, bkb: 94, kbg: 136, ang: 12,
+                spread: 0, rec: 2.4, airRec: 3.2, walk: 0.3, stop: 3, stagger: 24, round: 'rbolt', shake: 9, throwDmg: 9 },
+    // THE AK, built from the real Madness numbers, not from feel.
+    // `studio-minus/madness-interactive-reloaded` -> base/data/weapons/ak_47.json:
+    //   UseDelay 0.1s -> 6 frames between shots (600 rpm) · RoundsPerMagazine 20 · Automatic true
+    //   Accuracy 1.0 · Recoil 1.0 · RotationalRecoilIntensity 0.25 · BulletsPerShot 1
+    // and Weapons/Systems/BulletEmitter.cs raycasts, recursing up to 8 times THROUGH targets, which
+    // is why this is the only automatic here with `pierce`. Ours fires a projectile rather than a
+    // hitscan ray, so `spd` is pushed to 300: a round crosses its whole range in about four frames,
+    // which reads as instant at fighting distance while keeping deflection, tracers and impacts
+    // working instead of bypassing the entire projectile path.
+    ak:       { name: 'The Chopper', mag: 20, rate: 6, recov: 12, spd: 320, range: 1250, r: 6, dmg: 3.4, bkb: 12, kbg: 20, ang: 20,
+                spread: 1.3, climb: 0.5, climbMax: 8, rec: 0.8, airRec: 1.15, walk: 0.45, auto: true, pierce: true,
+                round: 'rak', shake: 3, throwDmg: 9 },
+    // DESERT EAGLE. Duane, 15 Oct: *"make one of the pistols take all of the other players health
+    // but leave a little bit with one shot ... only let it have one bullet ... leaves them in
+    // critical health"*. This game has no health bar -- damage counts UP and a high number is what
+    // gets you launched off the stage -- so "takes nearly all their health" is `crit`: the round
+    // leaves the victim sitting at 160%, one clean hit from a stock, however healthy they were a
+    // moment earlier. The knockback is deliberately tiny (kbg 6) so the Eagle itself does NOT get
+    // the KO: it hands you the kill and makes you land it. ONE round, a heavy draw, and a recovery
+    // you are stuck in if you miss.
+    deagle:   { name: 'Desert Eagle', mag: 1, wind: 20, rate: 60, recov: 46, spd: 280, range: 1150, r: 9, dmg: 24,
+                crit: 160, bkb: 14, kbg: 6, ang: 28,
+                spread: 0, rec: 7, airRec: 9, walk: 0.25, stop: 5, stagger: 30, round: 'rdeagle',
+                mech: ['cock', 14], shake: 11, throwDmg: 10 },
     sniper:   { name: 'Sniper Rifle', mag: 3, wind: 16, rate: 54, recov: 16, spd: 320, range: 2600, r: 6, dmg: 19, bkb: 52, kbg: 92, ang: 18,
                 spread: 0, rec: 5, airRec: 6, walk: 0.15, stop: 7, stagger: 20, pierce: true, round: 'r308', mech: ['bolt', 20], shake: 10, throwDmg: 10 },
     bazooka:  { name: 'Bazooka', mag: 2, rate: 50, recov: 20, rocket: true, rec: 3, airRec: 5, walk: 0.2, shake: 6, throwDmg: 10 },
@@ -9134,7 +9885,7 @@ const GUNS = {
     for (const q of list) {
       const b = q.b, o = q.o, x = q.x / q.n, y = q.y / q.n;
       if (b.state === 'dead' || b.untouchable) continue;
-      if (b.state === 'shield') { G.shieldHit(b, q.dmg, x - q.vx, null); this.emit('hit', x, y, q.vx, 0, q.gn, b.idx, q.dmg); continue; }
+      if (b.state === 'shield') { G.shieldHit(b, q.dmg, x - q.vx, null, q.shieldEat); this.emit('hit', x, y, q.vx, 0, q.gn, b.idx, q.dmg); continue; }
       const keep = o ? o.hitlag : 0, n = q.n;
       this.curN = n;
       b.takeHit({ dmg: q.dmg, ang: n >= 6 ? 34 : 28, bkb: 10 + 5 * n, kbg: 30 + 9 * n, radial: true, kind: 'buck' }, o, 1, x - q.vx, 1);
@@ -9277,6 +10028,14 @@ Object.assign(ITEM_DEFS, {
   pistol:   { name: 'Pistol', r: 20, weight: 0, set: 2, ammo: GUNS.DEF.pistol.mag, icon: '🔫' },        // spawns in the Laser Gun's slot (GUNS.tick)
   revolver: { name: 'Revolver', r: 20, weight: 3, set: 2, ammo: GUNS.DEF.revolver.mag, icon: '🤠' },
   smg:      { name: 'SMG', r: 22, weight: 3, set: 2, ammo: GUNS.DEF.smg.mag, icon: '🔫' },
+  ak:       { name: 'The Chopper', r: 24, weight: 2, set: 2, ammo: GUNS.DEF.ak.mag, icon: '🔫' },
+  blaster:  { name: 'Twin Nines', r: 22, weight: 0, set: 3, ammo: GUNS.DEF.blaster.mag, icon: '🔫' },
+  bow:      { name: 'Speargun', r: 24, weight: 0, set: 3, ammo: GUNS.DEF.bow.mag, icon: '🏹' },
+  sweeper:  { name: 'Street Sweeper', r: 26, weight: 0, set: 3, delay: 1200, ammo: GUNS.DEF.sweeper.mag, icon: '💥' },
+  bolt:     { name: 'Captive Bolt', r: 24, weight: 0, set: 3, delay: 2400, ammo: GUNS.DEF.bolt.mag, icon: '🔩' },
+  // one round, and it is locked for the first minute of the match: this is a finisher, on the same
+  // warm-up shelf as the Wrecking Ball, not something you open with
+  deagle:   { name: 'Desert Eagle', r: 22, weight: 0, set: 3, delay: 3600, ammo: GUNS.DEF.deagle.mag, icon: '\u{1F52B}' },
 });
 ITEM_DEFS.mgun.weight = 0;
 ITEM_DEFS.shotgun.weight = 3; ITEM_DEFS.shotgun.ammo = GUNS.DEF.shotgun.mag;
@@ -9288,7 +10047,7 @@ for (const id of Object.keys(GUNS.DEF)) {
   const oldPick = d.pick; d.pick = (f, it) => (GUNS.on() ? GUNS.pick(f, it) : oldPick ? oldPick(f, it) : false);
 }
 // every round kind stale-scales on repeat hits, like every other shot (65_balance "keep shooting til they fall off")
-for (const k of ['r9', 'r44', 'rsmg', 'r308', 'buck', 'gunthrow']) BAL.SHOTS.add(k);
+for (const k of ['r9', 'r44', 'rsmg', 'rak', 'rbls', 'rarw', 'rsweep', 'rbolt', 'r308', 'buck', 'gunthrow']) BAL.SHOTS.add(k);
 
 // ---- hook: the shared projectile stepper runs our rounds (anything without `gn` is untouched)
 MV2.projStep = (function (base) {
@@ -9325,7 +10084,20 @@ Fighter.prototype.takeHit = (function (base) {
         return 0;
       }
     }
+    const d0 = this.dmg;
     const kb = base.call(this, hb, att, mult, srcX, srcFace);
+    // THE DESERT EAGLE'S ROUND. `crit` is a damage FLOOR, applied AFTER the hit has already worked
+    // out its knockback -- so the shot itself still barely moves them, and what it leaves behind is
+    // a fighter at 160% who goes off the top of the screen on the next thing that touches them.
+    // Only on a hit that actually landed: a shielded or whiffed round changes nothing.
+    if (g.crit && this.dmg > d0 && this.dmg < g.crit) {
+      const top = g.crit - this.dmg;
+      this.dmg = g.crit;
+      this.stats.taken += top;
+      if (att && att !== this) att.stats.dealt += top;
+      this.flashT = Math.max(this.flashT, 10);
+      if (typeof Game !== 'undefined' && Game.text) Game.text(this.x, this.y - this.h - 26, 'CRITICAL', '#ff3a4a', 1.4);
+    }
     GUNS.after(this, att, g, kb || 0, hb);
     return kb;
   };
@@ -10286,6 +11058,32 @@ const STYLE = {
       bair:   { f: [5, 9], landLag: -3, dmg: 1.00 },
       uair:   { f: [4, 8], landLag: -3, dmg: 0.94 },
       dair:   { f: [9, 13], landLag: -1, dmg: 1.02 },
+    },
+    // WOLVERINU  Circuit Prowl. CLAW NORMALS, and the last fighter on the roster that had none: it ran
+    // the shared table, so the partner character played exactly like DOGE. A claw is the last six inches
+    // of the limb, not the whole arm, so every box here is pushed OUT (x) and made THIN (r) -- the same
+    // disjoint idea as RONIN's blade, but cheap and repeatable instead of clean and single. The cuts
+    // come out fast and carry almost no knockback, so they link into each other and into the Prowl dash
+    // (sb); the one thing in the kit that kills is the fsmash cross-rake. Nothing here is lightning:
+    // `blade` ('#9bf000', 21_roster2) already tints every one of these trails circuit green.
+    // 10/15 pass: the shapes above were right and the numbers were timid -- a claw kit that cuts fast
+    // and carries no knockback is only worth playing if the cuts actually come out faster than
+    // anybody else's and actually link. So: jab 11 frames with iasa 7 (the quickest on the roster) so
+    // it rattles, the tilts a frame or two earlier, the smashes and the dive-in cut hit harder, and
+    // the aerials autocancel deeper. He is the lead; the normals are allowed to be the best ones.
+    wolverinu: {
+      jab:    { total: 11, iasa: 7,   f: [2, 4],   dmg: 0.88, x: 1.22, r: 0.78, bkb: 0.72, kbg: 0.52, hl: 1.65 },  // two claws, in and out
+      ftilt:  { total: 22, f: [5, 8],   dmg: 1.00, x: 1.40, r: 0.80, ang: 32, kbg: 0.86, hl: 1.2 },                 // the rake: his longest ground poke
+      utilt:  { total: 22, f: [4, 8],   dmg: 0.96, x: 1.10, r: 0.90, kbg: 0.78 },                                   // rising claw, keeps them low enough to chase
+      dtilt:  { total: 18, f: [4, 7],   dmg: 0.92, x: 1.32, r: 0.78, ang: 14, kbg: 0.74 },                          // claws through the ankles
+      fsmash: { total: 50, charge: 9,  f: [14, 18], dmg: 1.26, x: 1.32, r: 0.88, kbg: 1.12, hl: 1.5 },              // cross rake: the kill move
+      usmash: { total: 40, charge: 6,  f: [8, 12],  dmg: 1.08, r: 0.94 },
+      dsmash: { total: 40, charge: 5,  f: [7, 10],  dmg: 1.06, x: 1.18, r: 0.84 },
+      nair:   { f: [4, 20],  landLag: -3, dmg: 0.96, r: 1.08 },                                                     // spin rake, the one wide box he owns
+      fair:   { f: [6, 10],  landLag: -4, dmg: 1.12, x: 1.36, r: 0.82, kbg: 1.06, hl: 1.3 },                        // the dive-in cut
+      bair:   { f: [5, 9],   landLag: -3, dmg: 1.08, x: 1.24, r: 0.84 },
+      uair:   { f: [4, 8],   landLag: -3, dmg: 0.98, r: 0.96 },
+      dair:   { f: [9, 13],  landLag: 1,  dmg: 1.10, r: 0.92 },
     },
   };
 

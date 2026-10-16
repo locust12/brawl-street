@@ -23,7 +23,7 @@ contract Deploy is Script {
         address treasury = vm.envAddress("TREASURY");
         address stable = vm.envAddress("STABLE");
         address rekt = vm.envAddress("REKT");
-        uint256 cutBps = vm.envUint("CUT_BPS");
+        uint256 cutBps = vm.envOr("CUT_BPS", uint256(500));
 
         require(owner != address(0), "OWNER unset");
         require(operator != address(0), "OPERATOR unset");

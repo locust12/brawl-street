@@ -43,6 +43,16 @@
     box-shadow:0 10px 26px rgba(0,0,0,.5);animation:instIn .4s .6s both}
   #instBtn.on{display:flex}
   #instBtn:hover{background:linear-gradient(180deg,#fff,#ff8a9c)}
+  /* 15 Oct: this sat on top of the bottom-right card on every tab of the Store, the Locker and the
+     Profile — a permanent floating button over a grid the player is trying to read and click. Those
+     screens scroll and have their own chrome, so it stands down while one of them is open and comes
+     back on the title and in the lobby, where there is nothing underneath it. */
+  body:has(#scStore:not([hidden])) #instBtn,
+  body:has(#scProfile:not([hidden])) #instBtn,
+  body:has(#scLocker:not([hidden])) #instBtn,
+  body:has(#scStore:not([hidden])) #instTip,
+  body:has(#scProfile:not([hidden])) #instTip,
+  body:has(#scLocker:not([hidden])) #instTip{display:none}
   @keyframes instIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
   #instTip{position:fixed;right:max(16px,env(safe-area-inset-right));bottom:calc(max(16px,env(safe-area-inset-bottom)) + 46px);z-index:8;display:none;
     max-width:min(300px,76vw);padding:12px 14px;background:rgba(8,9,14,.92);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);

@@ -1,4 +1,4 @@
-// ===== items, set 2: banana bomb (shrapnel), holy bomb, TNT (blows a hole in the stage), landmine,
+// ===== items, set 2: TNT (blows a hole in the stage), landmine,
 // jetpack, supply crate, bubble shield, and four weapons (bazooka, shotgun, machine gun, sniper) =====
 // Fight code (runs in the page and the headless sims): seeded rand()/irand() only.
 // Every kind here has `set: 2`. Items.spawn only draws set-2 kinds when Game.itemSet >= 2, and
@@ -14,12 +14,6 @@
 // Fighter.collideHoles (floor with holes), Items2.absorb (bubble shield in takeHit).
 
 Object.assign(ITEM_DEFS, {
-  banana:  { name: 'Banana Bomb', r: 18, weight: 2.4, set: 2, throwable: true, lob: true, shootable: true, fuse: 110, boom: { r: 95, dmg: 12, bkb: 55, kbg: 82 }, icon: '🍌', after: it => Items2.shrapnel(it) },
-  // the banana's shrapnel: each piece lands, sits there blinking, then pops. weight 0 = never spawns on its own
-  banalet: { name: 'Bomblet', r: 13, weight: 0, set: 2, shootable: true, fuse: 54, boom: { r: 74, dmg: 8, bkb: 46, kbg: 66 }, icon: '🍌',
-             tick: it => Items2.banaletTick(it), hittable: (it, a) => { if (a) it.thrownBy = a; Items2.smallBoom(it); } },
-  holy:    { name: 'Holy Bomb', r: 20, weight: 0.8, set: 2, throwable: true, fuse: 100, boom: { r: 235, dmg: 32, bkb: 110, kbg: 118 }, icon: '😇',
-             tick: it => Items2.holyTick(it), after: it => { Game.flashT = 10; Game.shake(30); Game.text(it.x, it.y - 70, 'AMEN', '#fff3b0', 2); } },
   tnt:     { name: 'TNT', r: 22, weight: 1.6, set: 2, fuse: 360, shootable: true, boom: { r: 150, dmg: 26, bkb: 82, kbg: 100 }, icon: '🧱',
              use: (f, it) => Items2.placeTnt(f, it), hittable: (it, a) => Items2.setOff(it, a), after: it => Items2.hole(it.x, it.y) },
   mine:    { name: 'Landmine', r: 14, weight: 1.8, set: 2, shootable: true, boom: { r: 92, dmg: 15, bkb: 58, kbg: 80 }, icon: '🛑',
@@ -81,19 +75,6 @@ const Items2 = {
   // ---- banana bomb: the blast throws seven pieces out, and every piece is a live bomblet ----
   // They arc out, bounce, settle on the deck with the fuse spark blinking, then pop a beat later - and
   // one popping sets off the ones beside it, so the floor goes off in a rolling chain.
-  shrapnel(it) {
-    const N = 7;
-    for (let i = 0; i < N; i++) {
-      const a = deg(-158 + i * (116 / (N - 1))), sp = rand(6.5, 9.5);
-      Game.items.push({ kind: 'banalet', x: it.x + dcos(a) * 14, y: it.y - 12 + dsin(a) * 8, vx: dcos(a) * sp, vy: dsin(a) * sp - 1.5,
-        age: 0, armed: true, thrownBy: it.thrownBy || null, fuse: irand(44, 74), hp: 0, ammo: 0 });
-    }
-    Game.text(it.x, it.y - 46, 'SPLIT', '#ffe04a', 1.1);
-  },
-  banaletTick(it) {
-    if (it.armed && it.fuse != null && it.fuse <= 1) { this.smallBoom(it); return true; }   // own, quieter blast
-    return false;                                                                           // otherwise normal item physics
-  },
   smallBoom(it) {
     if (it.dead) return;
     it.dead = true;
@@ -111,17 +92,6 @@ const Items2 = {
     G.shake(7); Sfx.tone(150, 60, 0.18, 'square', 0.09);
     let n = 0;
     for (const o of G.items) if (!o.dead && o.kind === 'banalet' && o !== it && dhypot(o.x - it.x, o.y - it.y) < b.r) { o.armed = true; o.fuse = Math.min(o.fuse == null ? 99 : o.fuse, 5 + (++n) * 3); }
-  },
-  // ---- holy bomb: when the fuse runs out it hangs in the air for a beat, then goes off huge ----
-  holyTick(it) {
-    if (it.holyT > 0) { it.vx = 0; it.vy = 0; if (--it.holyT <= 0) Items.explode(it); return true; }
-    if (it.armed && it.fuse != null && it.fuse <= 1) {
-      it.holyT = 54; it.y -= 30;
-      Game.text(it.x, it.y - 60, 'HALLELUJAH', '#fff3b0', 1.6); Game.rings.push({ x: it.x, y: it.y, r: 10, max: 150, color: '#fff3b0', life: 30, w: 10 });
-      for (const [n, d] of [[523, 0], [659, 0.05], [784, 0.1], [1047, 0.18]]) Sfx.tone(n, n, 0.9, 'sine', 0.07, d);
-      return true;
-    }
-    return false;
   },
   // ---- bubble shield ----
   giveBubble(f) {
@@ -313,7 +283,6 @@ const Items2 = {
   // ---- CPU ----
   ai(f, tgt, o, press) {
     const k = f.item.kind, dx = tgt.x - f.x, toward = dx > 0 ? 'right' : 'left';
-    if ((k === 'banana' || k === 'holy') && Math.abs(dx) < 420 && Rng.next() < 0.05) { o[toward] = true; press('attack'); return true; }
     if (k === 'tnt' && Math.abs(dx) < 160 && !f.air && Rng.next() < 0.03) { press('attack'); return true; }
     const reach = { bazooka: 520, shotgun: 190, mgun: 400, sniper: 760 }[k];
     // local rules: the CPU can tilt the shot, so someone under you on a platform is worth shooting at

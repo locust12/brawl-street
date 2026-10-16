@@ -90,6 +90,7 @@ const UI = {
     for (const [id, name, sub] of [['isle', 'Rune Isle', 'Floating rock island, rune stones, crystals'], ['moon', 'Lava Temple', 'Three floating platforms over molten lava'], ['chart', 'Tropic Dock', 'One wide wooden dock, no hiding'], ['miami', 'Miami Strip', 'Art-deco beachfront at sunset'], ['roof', 'Neon Rooftop', 'Helipad over a city at night'], ['dojo', 'Sakura Dojo', 'Temple floor under falling blossoms'], ['keep', 'Shadow Keep', 'Two lantern-lit gates over fogged stone']]) {
       if (!coreStage(id)) continue;   // 79_core
       const b = document.createElement('button'); b.className = 'stagec' + (this.stageId === id ? ' on' : '');
+      b.dataset.stage = id;   // the Random card (85_menu) rolls from whatever is actually on screen
       b.innerHTML = `<canvas width="480" height="240"></canvas><div>${name}<small>${sub}</small></div>`;
       b.addEventListener('click', () => { this.stageId = id; Sfx.ui(); this.renderWager(); });
       sb.appendChild(b);

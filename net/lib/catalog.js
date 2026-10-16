@@ -30,7 +30,19 @@ const CAT = read();
 const BY = new Map();
 for (const w of CAT.weapons) BY.set(w.id, Object.assign({ type: 'weapon' }, w));
 for (const c of CAT.cosmetics) BY.set(c.id, Object.assign({ type: 'cosmetic' }, c));
+// weapon finishes: a cosmetic in every way that matters, but equipped per weapon rather than into
+// one global slot, so it carries its own type and the server keeps its own map of them
+for (const s of (CAT.skins || [])) BY.set(s.id, Object.assign({ type: 'skin' }, s));
+// Locker gear is sellable as of 2026-10-16 (the appearance half of the shop). It carries its own
+// type because buying one MINTS AN INSTANCE -- it is never an entitlement, so `grant()` must not
+// see it and `owned()` must never list it.
+for (const g of ((CAT.locker && CAT.locker.gear) || [])) BY.set(g.id, Object.assign({ type: 'gear' }, g));
 for (const b of CAT.bundles) BY.set(b.id, Object.assign({ type: 'bundle' }, b));
+// The vault: the two secret stages and the secret fighter. A plain entitlement with a price, so
+// `buy()` and `grant()` need no special case at all -- but it HAS to be in here, because `buy()`
+// refuses anything `BY` does not know and `grant()` skips it, so a paid unlock would take the money
+// (once a provider exists) and hand back nothing.
+for (const v of (CAT.vault || [])) BY.set(v.id, Object.assign({ type: 'vault' }, v));
 for (const p of CAT.season.plates) BY.set(p.id, Object.assign({ type: 'cosmetic', slot: 'plate', price: null, season: true }, p));
 
 const WEAPON_IDS = CAT.weapons.map(w => w.id);

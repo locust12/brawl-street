@@ -58,13 +58,82 @@ const STYLE_CLIP = {
 };
 // which of the fighter's own move slots this definition is, so the table above can be keyed by name
 const MOVE_KEY = ['jab', 'ftilt', 'utilt', 'dtilt', 'fsmash', 'usmash', 'dsmash', 'nair', 'fair', 'bair', 'uair', 'dair'];
+
+// ---- AUTO-STYLE: the same treatment for the OTHER 34 fighters -------------------------------
+// The table above is hand-authored and covers 11 fighters. Everyone else fell through to the
+// body-type swap, which reaches exactly TWO clips (HEAVY_CLIP punch->fists2, FAST_CLIP
+// kick->fkick2) -- so 34 of the 46 still threw the same jab, the same smash and the same aerial as
+// each other, which is the "every character feels the same" note again, just further down the
+// roster. This derives a moveset per fighter instead of authoring 34 more by hand.
+//
+// It is NOT random. Two constraints come straight off the 9/23 render sheets documented above:
+//   * the palette is only clips that were LOOKED AT on a real body -- the eight that read on every
+//     body, plus the ones the hand-authored tables already use;
+//   * the body-dependent ones stay gated. `fkick2`/`flykick` put a round or short fighter on its
+//     back, and `slam` folds one double, so both are reserved for slim/tall or heavy frames.
+//     `punch` raises a leg on several rigs (only Ronin keeps it) so it is not in any pool.
+// Within those limits the choice is a stable draw off the fighter's own id, biased by the identity
+// 97_v3_pose already computes (heavy / quick / brawn), so a tank and a runner reach for different
+// clips and two fighters with the same stat line still differ. No per-fighter authoring, and a new
+// roster entry is covered the moment it exists.
+// V3.noAutoStyle = off (A/B against the old shared mapping).
+const AUTO_POOL = {
+  jab:    { base: ['jab2', 'punch2', 'jab'],          heavy: ['fists2'] },
+  ftilt:  { base: ['punch2', 'kick', 'cast2'],        heavy: ['fists2', 'slam'], slim: ['uppercut'] },
+  utilt:  { base: ['uppercut', 'upper2'] },
+  dtilt:  { base: ['sweep', 'spin'] },
+  fsmash: { base: ['kick', 'spin', 'uppercut'],       heavy: ['slam'],           slim: ['fkick2'] },
+  usmash: { base: ['uppercut', 'upper2'] },
+  dsmash: { base: ['sweep', 'spin'] },
+  nair:   { base: ['spin'] },
+  fair:   { base: ['kick', 'punch2'],                 heavy: ['slam'],           slim: ['fkick2', 'flykick'] },
+  bair:   { base: ['kick'],                           heavy: ['fists2'],         slim: ['fkick2'] },
+  uair:   { base: ['uppercut', 'upper2'] },
+  // `slam` is NOT in this base pool. It was, and it reached 30 fighters including mochi -- one of
+  // the four round bodies the 9/23 pass says it folds double. A gated clip has to be gated in
+  // EVERY slot, not just the ones where it looks obviously wrong.
+  dair:   { base: ['sweep', 'spin'],                  heavy: ['slam'] },
+};
+// The bodies the render sheets named by hand: `fkick2` / `flykick` put these on their back and
+// `slam` folds them double, whatever their stat line says. Three of the four are hand-authored
+// already; mochi is not, and it is exactly the one the ungated pool caught out.
+const ROUND_BODY = new Set(['pengu', 'whale', 'mochi', 'mochi_v2', 'moodeng']);
+const autoCache = new Map();
+function autoStyleFor(c) {
+  const id = (c && c.id) || 'x';
+  let t = autoCache.get(id); if (t) return t;
+  const G = V3.gaitOf ? V3.gaitOf(c) : null;
+  const round = ROUND_BODY.has(id) || ROUND_BODY.has((c && c.baseOf && c.baseOf.id) || '');
+  const heavy = !round && (G ? G.heavy > 0.45 : (c.weight || 100) >= 115);
+  // slim = quick AND not heavy: the frames fkick2 / flykick / slam were cleared on
+  const slim = !round && (G ? (G.quick > 0.45 && G.heavy < 0.5) : ((c.walk || 6) >= 7 && (c.weight || 100) <= 95));
+  let h = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) { h ^= id.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  t = {};
+  let n = 0;
+  for (const k of MOVE_KEY) {
+    const p = AUTO_POOL[k]; if (!p) continue;
+    const pool = p.base.concat(heavy && p.heavy ? p.heavy : [], slim && p.slim ? p.slim : [])
+      .filter(x => !V3.hasClip || V3.hasClip(x));
+    if (!pool.length) continue;
+    // a separate draw per slot, so one fighter does not take the same index everywhere
+    const r = ((h >>> ((n++ % 6) * 5)) & 31) / 31;
+    t[k] = pool[Math.min(pool.length - 1, Math.floor(r * pool.length))];
+  }
+  autoCache.set(id, t);
+  return t;
+}
 function styleClip(f, d) {
   if (V3.noStyleClips || !V3.hasClip) return null;
-  const t = STYLE_CLIP[f.c && f.c.id]; if (!t) return null;
+  const c = f.c, id = c && c.id;
+  const t = STYLE_CLIP[id] || (V3.noAutoStyle ? null : autoStyleFor(c));
+  if (!t) return null;
   const M = f.m;
-  for (const k of MOVE_KEY) if (M[k] === d) { const c = t[k]; return c && V3.hasClip(c) ? c : null; }
+  for (const k of MOVE_KEY) if (M[k] === d) { const cl = t[k]; return cl && V3.hasClip(cl) ? cl : null; }
   return null;
 }
+V3.autoStyleFor = autoStyleFor;   // dev inspection (dev/aaa/movesets.mjs)
+V3.STYLE_CLIP_FOR = id => STYLE_CLIP[id] || null;
 function stateClipNew(f, c) {
   if (V3.oldClips || !V3.hasClip) return c;
   const pick = n => (V3.hasClip(n) ? n : c);

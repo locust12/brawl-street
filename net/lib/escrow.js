@@ -3,6 +3,9 @@
 const { createPublicClient, createWalletClient, http, defineChain, verifyMessage, getAddress } = require('viem');
 const { privateKeyToAccount } = require('viem/accounts');
 
+// Two escrows exist and they differ only in how a stake arrives: BrawlEscrow takes native ETH via a
+// payable deposit(), BrawlEscrowToken takes an ERC20 the match was opened for. Set ESCROW_TOKEN to
+// run the token one. `open` is the only operator call whose signature differs.
 const ABI = [
   { type: 'function', name: 'open', stateMutability: 'nonpayable', inputs: [{ name: 'id', type: 'bytes32' }, { name: 'players', type: 'address[]' }, { name: 'stake', type: 'uint128' }, { name: 'window', type: 'uint64' }], outputs: [] },
   { type: 'function', name: 'report', stateMutability: 'nonpayable', inputs: [{ name: 'id', type: 'bytes32' }, { name: 'winner', type: 'address' }, { name: 'replayHash', type: 'bytes32' }], outputs: [] },
@@ -13,6 +16,17 @@ const ABI = [
     { name: 'winner', type: 'address' }, { name: 'replayHash', type: 'bytes32' }] }] },
   { type: 'function', name: 'operator', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'address' }] },
 ];
+// BrawlEscrowToken.open takes the token the match is played for, between the players and the stake.
+const MATCH_TOKEN = { type: 'function', name: 'getMatch', stateMutability: 'view', inputs: [{ name: 'id', type: 'bytes32' }], outputs: [{ name: '', type: 'tuple', components: [
+  { name: 'stake', type: 'uint128' }, { name: 'depositDeadline', type: 'uint64' }, { name: 'fundedAt', type: 'uint64' }, { name: 'status', type: 'uint8' },
+  { name: 'playerCount', type: 'uint8' }, { name: 'depositCount', type: 'uint8' }, { name: 'paid', type: 'bool' }, { name: 'cutBps', type: 'uint16' },
+  { name: 'winner', type: 'address' }, { name: 'token', type: 'address' }, { name: 'replayHash', type: 'bytes32' }] }] };
+const ABI_TOKEN = ABI.filter(e => e.name !== 'getMatch').concat([MATCH_TOKEN,
+  { type: 'function', name: 'openToken', stateMutability: 'nonpayable', inputs: [{ name: 'id', type: 'bytes32' }, { name: 'players', type: 'address[]' }, { name: 'token', type: 'address' }, { name: 'stake', type: 'uint128' }, { name: 'window', type: 'uint64' }], outputs: [] },
+  { type: 'function', name: 'tokenAllowed', stateMutability: 'view', inputs: [{ name: '', type: 'address' }], outputs: [{ name: '', type: 'bool' }] },
+]).map(e => (e.name === 'openToken' ? Object.assign({}, e, { name: 'open' }) : e)).filter((e, i, a) =>
+  // keep the token `open`, drop the native one
+  !(e.name === 'open' && e.inputs.length === 4));
 
 // Transaction lanes. Every operator transaction is serialised (one nonce at a time), but they are
 // NOT first-come-first-served: a SETTLE always overtakes any queued OPEN.
@@ -27,9 +41,14 @@ const LANE_SETTLE = 0;   // report / cancel — money already in escrow, always 
 const LANE_OPEN = 1;     // open — speculative, triggered by a player action, expendable
 
 class Escrow {
-  constructor({ rpc, chainId, address, operatorKey, chainName, explorer }) {
+  constructor({ rpc, chainId, address, operatorKey, chainName, explorer, token, tokenSymbol, tokenDecimals }) {
     if (!rpc || !chainId || !address || !operatorKey) throw new Error('REAL_MONEY=1 needs CHAIN_RPC, CHAIN_ID, ESCROW_ADDRESS and OPERATOR_KEY');
     this.rpc = rpc; this.chainId = chainId; this.address = getAddress(address); this.chainName = chainName || 'Robinhood Chain'; this.explorer = explorer || '';
+    // a token escrow: every match is opened for this ERC20 and players deposit it, never ETH
+    this.token = token ? getAddress(token) : null;
+    this.tokenSymbol = tokenSymbol || 'USDC';
+    this.tokenDecimals = tokenDecimals == null ? 6 : Number(tokenDecimals);
+    this.abi = this.token ? ABI_TOKEN : ABI;
     const chain = defineChain({ id: chainId, name: this.chainName, nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: { default: { http: [rpc] } } });
     this.account = privateKeyToAccount(operatorKey);
     this.pub = createPublicClient({ chain, transport: http(rpc) });
@@ -39,7 +58,10 @@ class Escrow {
     this.seq = 0;
     this.sent = { open: 0, report: 0, cancel: 0, stale: 0, failed: 0 };
   }
-  info() { return { chainId: this.chainId, chainName: this.chainName, rpc: this.rpc, escrow: this.address, explorer: this.explorer }; }
+  info() {
+    return { chainId: this.chainId, chainName: this.chainName, rpc: this.rpc, escrow: this.address, explorer: this.explorer,
+      token: this.token, tokenSymbol: this.tokenSymbol, tokenDecimals: this.tokenDecimals };
+  }
   // How much work is waiting, per lane. server.js refuses to open new funding when the open lane is
   // already backed up, so a flood cannot keep growing.
   depth(lane) { return lane === undefined ? this.pending.length : this.pending.filter(p => p.lane === lane).length; }
@@ -71,7 +93,7 @@ class Escrow {
         // self-limiting rather than an unbounded gas bill.
         if (it.deadline && Date.now() > it.deadline) { this.sent.stale++; it.rej(new Error(it.fn + ' dropped: queued past its deadline')); continue; }
         try {
-          const hash = await this.wallet.writeContract({ address: this.address, abi: ABI, functionName: it.fn, args: it.args });
+          const hash = await this.wallet.writeContract({ address: this.address, abi: this.abi, functionName: it.fn, args: it.args });
           const rc = await this.pub.waitForTransactionReceipt({ hash, timeout: 120000 });
           if (rc.status !== 'success') throw new Error(it.fn + ' reverted ' + hash);
           this.sent[it.fn] = (this.sent[it.fn] || 0) + 1;
@@ -81,10 +103,14 @@ class Escrow {
     } finally { this.busy = false; }
   }
   // ttlMs: give up rather than send a stale open. Defaults to the deposit window.
-  open(id, players, stakeWei, windowSecs, ttlMs) { return this.send('open', [id, players.map(a => getAddress(a)), BigInt(stakeWei), BigInt(windowSecs)], LANE_OPEN, ttlMs || windowSecs * 1000); }
+  open(id, players, stake, windowSecs, ttlMs) {
+    const who = players.map(a => getAddress(a));
+    const args = this.token ? [id, who, this.token, BigInt(stake), BigInt(windowSecs)] : [id, who, BigInt(stake), BigInt(windowSecs)];
+    return this.send('open', args, LANE_OPEN, ttlMs || windowSecs * 1000);
+  }
   report(id, winner, replayHash) { return this.send('report', [id, getAddress(winner), replayHash], LANE_SETTLE); }
   cancel(id) { return this.send('cancel', [id], LANE_SETTLE); }
-  async getMatch(id) { const m = await this.pub.readContract({ address: this.address, abi: ABI, functionName: 'getMatch', args: [id] }); return { status: Number(m.status), depositCount: Number(m.depositCount), playerCount: Number(m.playerCount), winner: m.winner, paid: m.paid }; }
+  async getMatch(id) { const m = await this.pub.readContract({ address: this.address, abi: this.abi, functionName: 'getMatch', args: [id] }); return { status: Number(m.status), depositCount: Number(m.depositCount), playerCount: Number(m.playerCount), winner: m.winner, paid: m.paid }; }
   verify(address, message, signature) { return verifyMessage({ address: getAddress(address), message, signature }); }
 }
 

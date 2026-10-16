@@ -11,26 +11,170 @@
     ['toxic', 'Toxic', '#8dff3a'], ['cyan', 'Cyan', '#27e1ff'], ['cobalt', 'Cobalt', '#3a6bff'], ['violet', 'Violet', '#9b5cff'],
     ['pink', 'Pink', '#ff4fd8'], ['shadow', 'Shadow', '#5a5070'], ['ghost', 'Ghost', '#dfe9ff']];
   const FINISH = [['orig', 'Original'], ['matte', 'Matte'], ['gloss', 'Gloss'], ['chrome', 'Chrome'], ['gold', 'Gold plated']];
-  // HATS and HAIR are deliberately empty. 9/21: Duane, on hats for the fifth time — "all the caps are
-  // fucking fucked. just remove caps cus i asked you 5 times already and it just keeps getting worse" —
-  // and on hair — "dreads and hair are disproportionate just remove them".
+  // ---- HATS: a catalogue plus a measured fit table, 10/14 -----------------------------------------
+  // 9/21 every hat was deleted from the list, because one procedural mesh cannot be made to sit on 46
+  // different heads and Duane had asked five times: "all the caps are fucking fucked. just remove caps".
+  // Deleting them was right at the time and wrong as an end state, because the fault was never the art.
+  // It was that the game had no per-fighter record of where a hat belongs, so every piece was a guess
+  // that happened to work on the three bodies anyone looked at.
   //
-  // Nothing is commented out or hidden behind a flag: the entries are gone from the list, which is the only
-  // thing that makes them unpickable AND retires them from an existing save. `sanitize()` walks GROUPS and
-  // falls any value it no longer recognises back to DEF, so a fighter saved with `hat:'cap'` loads as
-  // `hat:'none'`, renders with no hat and is re-saved that way. No throw, no missing-mesh gap.
+  // 10/14, from a teardown of how the shops that do this at scale actually hold it together. Three
+  // mechanics, copied directly, all of them metadata rather than modelling:
   //
-  // The mesh builders in buildHat/buildHair are left where they are. They are unreachable while these lists
-  // are empty, and if a piece is ever brought back it has to be re-added here deliberately, with the
-  // per-fighter measurement to back it up. The bar he set: a few pieces that sit perfectly beats a lot that
-  // look wrong.
-  const HATS = [['none', 'None']];
+  //  1. ROBLOX publishes a hard size box per accessory slot, measured in the body's own units, and
+  //     rules that an accessory floating off the visible head is a violation and not a tuning job.
+  //     -> `box` below: a width band and a height ceiling in skull units. dev/gearprobe2.js rejects
+  //        any piece that measures outside its own box, so "too big" and "too small" are now failures
+  //        with a number attached instead of something he has to spot and report again.
+  //  2. DOTA 2 never lets the item decide where it goes. Attachment data is per hero, owned by the
+  //     game, and an item simply is not offered on a hero it was not authored for.
+  //     -> `HAT_FIT` below: per kind, the bodies it measured clean on. The creator only ever offers a
+  //        hat the selected fighter is in the table for, so there is no combination a player can reach
+  //        that was not measured first. Written by the harness, never edited by hand.
+  //  3. TEAM FORTRESS 2 has every cosmetic declare what it switches off underneath, which is why a
+  //     hat removes the hair instead of growing through it.
+  //     -> `hides` below, read by buildGear.
+  //
+  // The bar he set stands: a few pieces that sit perfectly beats a lot that look wrong. What changes is
+  // that "sits perfectly" is now decided per fighter instead of per roster, so one bad head costs that
+  // head one hat rather than costing everybody the hat.
+  //
+  // box = [wMin, wMax, riseMax]: the piece's widest point as a multiple of the skull's own half-width,
+  // and how far it may stand proud of the crown in head heights. Both are measured on the posed skin by
+  // dev/gearprobe2.js, in the body's units, so one box holds on a 46-body roster.
+  //   kind        label          box                                hides
+  // The numbers are the roster's own, not a guess. dev/gearcheck_hat_all.json measured all 14 pieces on
+  // all 48 bodies with the box off, and each band is set at [0.85, 1.37] x that piece's own median
+  // width and 2x its median rise. Checked against the bodies rendered and judged by eye: for the ball
+  // cap the band keeps all 7 that look right and refuses all 10 that do not, which is the whole point
+  // of writing it down as a number rather than deciding it again every time someone looks at a cap.
+  // Width is measured against the skull AT THE CROWN, so a snout or a beak cannot flatter the score.
+  const HAT_ALL = [
+    ['cap',     'Ball cap',      { box: [2.12, 3.42, 0.87], hides: ['hair'] }],
+    ['backcap', 'Cap backwards', { box: [2.06, 3.33, 0.87], hides: ['hair'] }],
+    ['trucker', 'Trucker',       { box: [2.14, 3.44, 0.89], hides: ['hair'] }],
+    ['beanie',  'Beanie',        { box: [1.54, 2.48, 1.43], hides: ['hair'] }],
+    ['bucket',  'Bucket hat',    { box: [2.06, 3.32, 0.66], hides: ['hair'] }],
+    ['cowboy',  'Cowboy hat',    { box: [2.34, 3.77, 0.62], hides: ['hair'] }],
+    ['tophat',  'Top hat',       { box: [2.08, 3.35, 2.13], hides: ['hair'] }],
+    ['crown',   'Royal crown',   { box: [1.44, 2.32, 1.08], hides: [] }],
+    ['kabuto',  'Kabuto',        { box: [2.60, 4.19, 1.01], hides: ['hair'] }],
+    ['ninja',   'Kung-fu band',  { box: [1.45, 2.34, 0.27], hides: [] }],
+    ['band',    'Sweatband',     { box: [1.44, 2.32, 0.22], hides: [] }],
+    ['bandana', 'Bandana',       { box: [1.47, 2.37, 0.69], hides: ['hair'] }],
+    ['halo',    'Halo',          { box: [1.17, 1.89, 0.70], hides: [] }],
+    ['horns',   'Devil horns',   { box: [1.30, 2.09, 2.03], hides: [] }],
+    // Added 2026-10-15 for the locker, which was selling five head pieces with no mesh behind any of
+    // them. Boxes set the same way the fourteen above were: [0.85, 1.37] x the piece's own median
+    // width across all 48 bodies and 2x its median rise, from `NOBOX=1 SLOTS=hat node
+    // dev/gearcheck.mjs` (dev/gearcheck_new_nobox.json). The visor's median rise is NEGATIVE (-0.11
+    // head heights: its top sits below the crown, which is what a visor is), so its ceiling is the
+    // 0.2 floor rather than twice a negative number.
+    ['visor',   'Sun visor',     { box: [2.29, 3.70, 0.20], hides: [] }],
+    ['fedora',  'Fedora',        { box: [2.05, 3.31, 0.55], hides: ['hair'] }],
+    ['cans',    'Headphones',    { box: [1.61, 2.59, 0.53], hides: [] }],
+    ['pilot',   'Pilot cap',     { box: [1.60, 2.58, 0.93], hides: ['hair'] }],
+    ['wreath',  'Laurel wreath', { box: [1.41, 2.27, 0.20], hides: [] }],
+  ];
+  const HAT_META = {}; for (const [k, , m] of HAT_ALL) HAT_META[k] = m;
+  // Bodies each hat measured clean on, written by `SLOTS=hat node dev/gearcheck.mjs`. A kind missing from
+  // this object, or a body missing from its list, is not offered and is stripped from a saved look.
+  // EDITED BY THE HARNESS ONLY. Hand-adding a body here puts a floating hat back in the game.
+  const HAT_FIT = {
+    backcap: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'wojak', 'topg',
+               'clanker', 'giga', 'gwei', 'mochi', 'turbo', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'slam',
+               'mystic', 'ape', 'volt', 'wolverinu', 'bogdanoff', 'bear', 'whale', 'sin', 'gigachad', 'popcat',
+               'brett', 'moodeng'],
+    band: ['doge', 'bonk', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump',
+            'clanker', 'tyrant', 'gwei', 'mochi', 'wisp', 'spark', 'turbo', 'ginga', 'sifu', 'fro', 'bling',
+            'techno', 'hoodie', 'slam', 'mystic', 'ape', 'volt', 'wolverinu', 'bogdanoff', 'bear', 'whale',
+            'sin', 'gigachad', 'popcat', 'moodeng'],
+    bandana: ['doge', 'bonk', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump',
+               'clanker', 'giga', 'tyrant', 'gwei', 'mochi', 'wisp', 'spark', 'turbo', 'ginga', 'sifu', 'fro',
+               'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'wolverinu', 'bogdanoff', 'bull', 'bear',
+               'whale', 'sin', 'gigachad', 'popcat', 'moodeng'],
+    beanie: ['doge', 'bonk', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'clanker',
+              'giga', 'tyrant', 'gwei', 'mochi', 'wisp', 'spark', 'turbo', 'ginga', 'sifu', 'fro', 'bling',
+              'techno', 'hoodie', 'slam', 'mystic', 'ape', 'volt', 'wolverinu', 'bogdanoff', 'bull', 'bear',
+              'whale', 'sin', 'gigachad', 'popcat', 'moodeng'],
+    bucket: ['doge', 'bonk', 'pengu', 'floki', 'cheems', 'cashcat', 'wojak', 'topg', 'clanker', 'giga',
+              'tyrant', 'gwei', 'mochi', 'spark', 'turbo', 'ginga', 'sifu', 'fro', 'bling', 'techno',
+              'hoodie', 'slam', 'mystic', 'ape', 'wolverinu', 'bogdanoff', 'bear', 'whale', 'sin', 'gigachad',
+              'popcat', 'moodeng'],
+    cans: ['doge', 'bonk', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'clanker',
+            'giga', 'tyrant', 'gwei', 'mochi', 'turbo', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'slam',
+            'mystic', 'ape', 'wolverinu', 'bogdanoff', 'bear', 'whale', 'sin', 'gigachad', 'popcat',
+            'brett', 'moodeng'],
+    cap: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'wojak', 'topg',
+           'trump', 'clanker', 'giga', 'gwei', 'mochi', 'turbo', 'ginga', 'sifu', 'fro', 'bling', 'techno',
+           'slam', 'mystic', 'ape', 'volt', 'wolverinu', 'bogdanoff', 'bear', 'whale', 'sin', 'gigachad',
+           'popcat', 'brett', 'moodeng'],
+    cowboy: ['doge', 'bonk', 'pengu', 'floki', 'cashcat', 'wojak', 'topg', 'clanker', 'giga', 'tyrant',
+              'gwei', 'mochi', 'turbo', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic',
+              'ape', 'wolverinu', 'bogdanoff', 'fartcoin', 'bear', 'whale', 'sin', 'gigachad', 'popcat',
+              'moodeng'],
+    crown: ['doge', 'shib', 'pengu', 'floki', 'cheems', 'cashcat', 'wojak', 'topg', 'giga', 'gwei', 'mochi',
+             'spark', 'turbo', 'sifu', 'fro', 'bling', 'slam', 'mystic', 'ape', 'wolverinu', 'bogdanoff',
+             'bear', 'whale', 'sin', 'gigachad', 'popcat', 'moodeng'],
+    fedora: ['doge', 'bonk', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'clanker',
+              'giga', 'tyrant', 'gwei', 'mochi', 'wisp', 'spark', 'turbo', 'ginga', 'sifu', 'fro', 'bling',
+              'techno', 'slam', 'mystic', 'ape', 'wolverinu', 'bogdanoff', 'bear', 'whale', 'sin', 'gigachad',
+              'popcat', 'moodeng'],
+    halo: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster',
+            'wojak', 'topg', 'clanker', 'giga', 'tyrant', 'gwei', 'kaiju', 'mochi', 'turbo', 'ginga',
+            'sifu', 'fro', 'bling', 'techno', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu',
+            'bogdanoff', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    horns: ['doge', 'bonk', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga',
+             'gwei', 'mochi', 'omen', 'wisp', 'turbo', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie',
+             'mystic', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'bull', 'bear', 'whale', 'gigachad',
+             'popcat', 'brett', 'moodeng'],
+    kabuto: ['doge', 'bonk', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'clanker',
+              'giga', 'tyrant', 'gwei', 'mochi', 'wisp', 'spark', 'turbo', 'ginga', 'sifu', 'fro', 'bling',
+              'techno', 'slam', 'mystic', 'ape', 'wolverinu', 'bogdanoff', 'bear', 'whale', 'sin', 'gigachad',
+              'popcat', 'moodeng'],
+    ninja: ['doge', 'bonk', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump',
+             'clanker', 'tyrant', 'gwei', 'mochi', 'wisp', 'spark', 'turbo', 'ginga', 'sifu', 'fro', 'bling',
+             'techno', 'hoodie', 'slam', 'mystic', 'ape', 'volt', 'wolverinu', 'bogdanoff', 'bull', 'bear',
+             'whale', 'sin', 'gigachad', 'popcat', 'moodeng'],
+    pilot: ['doge', 'bonk', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump',
+             'clanker', 'giga', 'tyrant', 'gwei', 'mochi', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu',
+             'fro', 'bling', 'techno', 'slam', 'mystic', 'ape', 'wolverinu', 'bogdanoff', 'bull', 'bear',
+             'whale', 'sin', 'gigachad', 'popcat', 'moodeng'],
+    tophat: ['doge', 'bonk', 'pengu', 'floki', 'cheems', 'cashcat', 'wojak', 'clanker', 'giga', 'tyrant',
+              'gwei', 'mochi', 'spark', 'turbo', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam',
+              'mystic', 'ape', 'wolverinu', 'bogdanoff', 'fartcoin', 'bear', 'whale', 'sin', 'gigachad',
+              'popcat', 'moodeng'],
+    trucker: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'wojak', 'topg',
+               'trump', 'clanker', 'giga', 'gwei', 'mochi', 'turbo', 'ginga', 'sifu', 'fro', 'bling', 'techno',
+               'slam', 'mystic', 'ape', 'volt', 'wolverinu', 'bogdanoff', 'bear', 'whale', 'sin', 'gigachad',
+               'popcat', 'brett', 'moodeng'],
+    visor: ['doge', 'shib', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak',
+             'topg', 'clanker', 'giga', 'tyrant', 'gwei', 'mochi', 'turbo', 'ginga', 'sifu', 'fro', 'bling',
+             'slam', 'mystic', 'ape', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bear', 'whale', 'sin',
+             'gigachad', 'popcat', 'brett', 'moodeng'],
+    wreath: ['doge', 'pengu', 'floki', 'cheems', 'cashcat', 'wojak', 'topg', 'trump', 'giga', 'gwei',
+              'mochi', 'wisp', 'spark', 'turbo', 'sifu', 'fro', 'bling', 'slam', 'mystic', 'ape', 'volt',
+              'wolverinu', 'bogdanoff', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'moodeng'],
+  };
+  // The harness has to be able to fit a piece the gate would otherwise refuse, or it could never measure
+  // a new one. Nothing in the page turns this off.
+  let HAT_GATE = true;
+  const hatFits = (kind, base) => kind === 'none' || (!HAT_GATE && !!HAT_META[kind]) || ((HAT_FIT[kind] || []).indexOf(base) >= 0);
+  // every kind, for sanitize and for the harness; the creator asks hatsFor(base) instead
+  const HATS = [['none', 'None']].concat(HAT_ALL.map(([k, label]) => [k, label]));
+  const hatsFor = base => [['none', 'None']].concat(HAT_ALL.filter(([k]) => hatFits(k, base)).map(([k, label]) => [k, label]));
   const EYES = [['none', 'None'], ['rayban', 'Thick rims'], ['aviator', 'Aviators'], ['mafia', 'Mafia shades'],
     // Shutter shades removed 9/21 as well: it survived the first cut by accident (the edit only replaced the
     // second line of this list) and the proof run caught it floating on cheems, trump, bling and moodeng.
     // Monocle removed the same day: floating off KAIJU's face by 0.423 head-heights.
     // Same rule as the hats — a piece that cannot be shown to sit right on every fighter does not ship.
-    ['goggles', 'Ski goggles'], ['shades', 'Pixel shades']];
+    ['goggles', 'Ski goggles'], ['shades', 'Pixel shades'],
+    // Restored / added 2026-10-15, and GATED (see EYES_GATED below). `shutter` and `monocle` were cut
+    // on 9/21 for floating on a handful of bodies -- which was the right call with no per-body table
+    // to put them behind, and the wrong one now that there is. A piece that measures clean on 40 of 44
+    // bodies should be offered on those 40, exactly like a hat, rather than taken away from everyone.
+    // `patch` is new. None of the three is offered to anybody until the harness writes EYES_FIT.
+    ['shutter', 'Shutter shades'], ['monocle', 'Monocle'], ['patch', 'Eyepatch']];
   // Trimmed 9/21 from ten styles to five, on measurement, not taste. `SLOTS=eyes dev/gearcheck.mjs` over the
   // whole roster scored 417/460 with only 24 of 46 fighters clean: `laser` floated on ten bodies, `visor` on
   // eight, `shutter` on six, `monocle` on four and `round` on three. The five left are 44/46 each, and the
@@ -61,8 +205,319 @@
   // stated plainly: "id rather u leave out what looks shit before we ship to newgrounds then keeping
   // something that lowers the value of our product." The builder branch stays, so re-adding it later
   // is one word in this list.
-  const NECK = [['none', 'None'], ['gold', 'Gold chain'], ['ice', 'Diamond chain'], ['bowtie', 'Bow tie']];
+  const NECK = [['none', 'None'], ['gold', 'Gold chain'], ['ice', 'Diamond chain'], ['bowtie', 'Bow tie'],
+    // `scarf` has had a mesh in buildNeck the whole time and was simply never in this list; `tags` is
+    // new. Both are gated, so neither reaches a body the harness has not measured them on.
+    ['scarf', 'Scarf'], ['tags', 'Dog tags']];
   const SHOES = [['none', 'None'], ['sneak', 'Sneakers'], ['boots', 'Boots'], ['sandal', 'Sandals'], ['kicks', 'Gold kicks']];
+  // ---------------------------------------------------------------- hands + back (2026-10-15)
+  // The locker (89_econ.js) sells six slots and this file could only render four of them: nine of the
+  // 27 gear pieces had nowhere to go, because `measure()` published no hand or chest frame and
+  // `M.ax` had no entry to attach them to. Both are measured now (see `measure()`), and these two
+  // lists follow the hats' rules exactly, for the same reasons:
+  //   * `box` is the Roblox rule -- a hard size band in the PART'S OWN measured units, so "too big"
+  //     is a failure with a number on it rather than something Duane has to spot and report again.
+  //     hands: [spanMax, reachMax] = the piece's widest cross-section as a multiple of the measured
+  //     hand half-width, and how far past the fingertips it may reach, in hand lengths.
+  //     back:  [outMax, dropMax, offMax?] = how far it may stand off the measured back surface in
+  //     torso depths, how far below the chest it may hang in torso heights, and -- only where the
+  //     piece is deliberately asymmetric -- how far off centre it may sit. A slung katana IS
+  //     diagonal, so it declares 0.70 rather than the probe loosening the rule for every piece.
+  //   * `HAND_FIT` / `BACK_FIT` are the Dota rule -- per kind, the bodies the harness measured clean.
+  //     WRITTEN BY `SLOTS=hands,back node dev/gearcheck.mjs`, NEVER BY HAND. Hand-adding a body here
+  //     is exactly how a floating hat got back into the game last time.
+  //   * `hides` is the TF2 rule, read by buildGear: a gauntlet switches off the hand wraps under it.
+  // `hides` is empty on every piece in both lists and that is correct, not an oversight: the six
+  // locker slots are mutually exclusive, so a gauntlet can never be worn over hand wraps and has
+  // nothing to switch off. It stays in the shape because the hide list is read as a union in
+  // buildGear, so the day a piece does cover another slot it is one line of data here.
+  // Span ceilings are 1.37 x the piece's own median across 96 hands (48 bodies x 2), measured with
+  // `NOBOX=1 SLOTS=hands,back` -> dev/gearcheck_hb_all.json. The reach ceiling is a flat 0.12 hand
+  // lengths for every piece, because it is a design rule and not a fitted statistic: nothing in this
+  // slot may stick out past the fingertips, and every piece here currently measures well inside it
+  // (median reach runs -0.20 to -0.66, i.e. they all stop short of the fingers, as they should).
+  const HANDS_ALL = [
+    ['tape',  'Hand wraps',    { box: [2.51, 0.12], hides: [] }],
+    ['mitts', 'Fingerless',    { box: [2.73, 0.12], hides: [] }],
+    ['rings', 'Knuckle rings', { box: [2.30, 0.12], hides: [] }],
+    // `one` declares a piece that is deliberately worn on ONE hand, so the probe's "built on one hand
+    // only" rule knows the difference between a single watch and a glove that failed to build
+    ['watch', 'Gold watch',    { box: [2.66, 0.12], hides: [], one: 'handR' }],
+    ['gaunt', 'Gauntlets',     { box: [2.29, 0.12], hides: [] }],
+    // ---- six more, 2026-10-16 ----
+    // Counter-Strike ships eight glove TYPES and that slot is the second most valuable in the game.
+    // Ours had five. Each of these is a different silhouette at the wrist and the knuckle, which is
+    // the only place a glove is readable at tile size.
+    ['driver', 'Driving gloves', { box: [2.60, 0.12], hides: [] }],
+    ['moto',   'Moto gloves',    { box: [2.60, 0.12], hides: [] }],
+    ['work',   'Work gloves',    { box: [2.75, 0.12], hides: [] }],
+    ['latex',  'Surgical',       { box: [2.45, 0.12], hides: [] }],
+    ['boxing', 'Boxing gloves',  { box: [2.95, 0.12], hides: [] }],
+    ['chrome', 'Chrome gauntlet',{ box: [2.60, 0.12], hides: [] }],
+  ];
+  // Stand-off ceilings are 1.37 x the median across 48 bodies, from the same run. The DROP ceiling is
+  // a design number where the median is zero or negative (a pack and a pair of wings both sit on the
+  // chest band, so 1.37 x 0 would be a ceiling nothing could ever meet). Only the katana declares an
+  // off-centre allowance, because it is the only piece here that is deliberately diagonal.
+  const BACK_ALL = [
+    ['pack',   'Backpack',     { box: [1.36, 0.25], hides: [] }],
+    ['cape',   'Cape',         { box: [1.15, 1.78], hides: [] }],
+    ['katana', 'Slung katana', { box: [1.24, 0.40, 0.25], hides: [] }],
+    // RE-DERIVED after the wings were rebuilt. The box is defined as 1.37x the piece's OWN median,
+    // so when the piece changes the number has to be measured again -- the first wings fanned out
+    // sideways and sat 0.88 torso depths off the back; these sweep out and BACK, which is what makes
+    // them read as wings at all, and they sit 1.44 off it. Re-measured, not relaxed: leaving the old
+    // 1.20 in place would have gated the better-looking piece off 46 of 48 bodies on a number that
+    // was describing a different object.
+    ['wings',  'Wings',        { box: [1.98, 0.30], hides: [] }],
+  ];
+  // ---- GUARD and CHARM, the two slots added 2026-10-16 ---------------------------------------
+  // Duane: "i like the shields btw", and from the shop teardown, the CS2 charm — a 2 cm object on a
+  // chain off the grip, added to that game in 2024 and now its own nav category, trading from $0.12
+  // to $106. Teardown: https://claude.ai/artifact/Ag7J6RSPKQwHZPfjMYKtrY
+  //
+  // NEITHER NEEDED A NEW ATTACHMENT POINT, which is why they were cheap to add. A shield rides on
+  // the measured BACK surface (`M.back`) when it is idle, exactly where a cape or a pack already
+  // sits, and a charm hangs off the measured HAND frame (`M.hands`). The slots are separate so a
+  // shield never competes with a cape and a charm never competes with a glove — that separation is
+  // the whole reason to have them rather than stuffing both into `back` and `hands`.
+  //
+  // Boxes are the same Roblox rule as every other slot: [outMax, dropMax, offMax] for a back piece,
+  // [spanMax, reachMax] for a hand piece, and they are ceilings the harness enforces. The numbers
+  // here are the DESIGN intent; `SLOTS=guard,charm node dev/gearcheck.mjs` measures each piece and
+  // writes GUARD_FIT / CHARM_FIT below. Nothing is offered on a body until that table says so.
+  const GUARD_ALL = [
+    ['dumpster', 'Dumpster lid',    { box: [1.45, 0.45], hides: [] }],
+    ['plyboard', 'Ply board',       { box: [1.45, 0.45], hides: [] }],
+    ['stopsign', 'Stop sign',       { box: [1.50, 0.45], hides: [] }],
+    ['manhole',  'Manhole cover',   { box: [1.45, 0.40], hides: [] }],
+    ['plank',    'Scaffold plank',  { box: [1.40, 0.50], hides: [] }],
+    ['cardoor',  'Car door',        { box: [1.55, 0.55], hides: [] }],
+    ['riot',     'Riot shield',     { box: [1.45, 0.60], hides: [] }],
+    ['table',    'Café table top', { box: [1.45, 0.40], hides: [] }],
+    ['ticker',   'Ticker board',    { box: [1.50, 0.45], hides: [] }],
+    ['vault',    'Vault door',      { box: [1.55, 0.40], hides: [] }],
+    ['bullion',  'Bullion stack',   { box: [1.50, 0.40], hides: [] }],
+    ['desk',     'The Floor',       { box: [1.60, 0.50], hides: [] }],
+    // ---- eight more, 2026-10-16 ----
+    // Duane wanted the shelf three times the size, and a shield is the piece he asked for by name.
+    // Every one is picked for a SILHOUETTE that is not any of the twelve above: a disc with spokes,
+    // a disc with a rolled rim, a tall door, a see-through round grate, a sign on a post, a
+    // parabola, a slatted rectangle and a grid of screens.
+    ['wheelrim', 'Alloy wheel',     { box: [1.45, 0.40], hides: [] }],
+    ['oildrum',  'Drum lid',        { box: [1.45, 0.40], hides: [] }],
+    ['firedoor', 'Fire door',       { box: [1.55, 0.55], hides: [] }],
+    ['grill',    'Grill grate',     { box: [1.40, 0.40], hides: [] }],
+    ['sign',     'Street sign',     { box: [1.50, 0.50], hides: [] }],
+    ['dish',     'Satellite dish',  { box: [1.55, 0.45], hides: [] }],
+    ['pallet',   'Pallet',          { box: [1.50, 0.50], hides: [] }],
+    ['screens',  'The Wall',        { box: [1.55, 0.45], hides: [] }],
+    // ---- ten more, same day ----
+    ['hubcap',    'Hubcap',         { box: [1.45, 0.40], hides: [] }],
+    ['cellar',    'Cellar door',    { box: [1.55, 0.50], hides: [] }],
+    ['jukebox',   'Jukebox front',  { box: [1.55, 0.50], hides: [] }],
+    ['gymlocker', 'Locker door',    { box: [1.55, 0.55], hides: [] }],
+    ['pizzapan',  'Pizza pan',      { box: [1.45, 0.40], hides: [] }],
+    ['sash',      'Sash window',    { box: [1.50, 0.50], hides: [] }],
+    ['crate',     'Crate lid',      { box: [1.50, 0.45], hides: [] }],
+    ['boiler',    'Boiler plate',   { box: [1.50, 0.45], hides: [] }],
+    ['turnstile', 'Turnstile',      { box: [1.55, 0.50], hides: [] }],
+    ['score',     'Scoreboard',     { box: [1.55, 0.45], hides: [] }],
+  ];
+  const CHARM_ALL = [
+    ['salt',    'Pinch of salt',  { box: [1.60, 0.12], hides: [], one: 'handR' }],
+    ['token',   'Subway token',   { box: [1.60, 0.12], hides: [], one: 'handR' }],
+    ['dice',    'Dice pair',      { box: [1.70, 0.12], hides: [], one: 'handR' }],
+    ['padlock', 'Padlock',        { box: [1.60, 0.12], hides: [], one: 'handR' }],
+    ['lighter', 'Lighter',        { box: [1.60, 0.12], hides: [], one: 'handR' }],
+    ['pager',   'Pager',          { box: [1.65, 0.12], hides: [], one: 'handR' }],
+    ['sneaker', 'Sneaker',        { box: [1.70, 0.12], hides: [], one: 'handR' }],
+    ['boombox', 'Boombox',        { box: [1.75, 0.12], hides: [], one: 'handR' }],
+    ['plane',   'Paper plane',    { box: [1.70, 0.12], hides: [], one: 'handR' }],
+    ['tooth',   'Gold tooth',     { box: [1.55, 0.12], hides: [], one: 'handR' }],
+    ['crown',   'Crown pendant',  { box: [1.65, 0.12], hides: [], one: 'handR' }],
+    ['hydrant', 'Mini hydrant',   { box: [1.60, 0.12], hides: [], one: 'handR' }],
+    ['knuck',   'Brass knuckle',  { box: [1.70, 0.12], hides: [], one: 'handR' }],
+    ['bull',    'Bull figurine',  { box: [1.65, 0.12], hides: [], one: 'handR' }],
+  ];
+  const HANDS_META = {}; for (const [k, , m] of HANDS_ALL) HANDS_META[k] = m;
+  const BACK_META = {}; for (const [k, , m] of BACK_ALL) BACK_META[k] = m;
+  const GUARD_META = {}; for (const [k, , m] of GUARD_ALL) GUARD_META[k] = m;
+  const CHARM_META = {}; for (const [k, , m] of CHARM_ALL) CHARM_META[k] = m;
+  // EDITED BY THE HARNESS ONLY. Empty means nothing is offered yet, which is the correct state for a
+  // slot that has not been measured: the creator shows no row and a saved look migrates to 'none'.
+  const HAND_FIT = {
+    boxing: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    chrome: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    driver: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'topg', 'clanker', 'giga', 'ronin', 'tyrant', 'shroom', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'ginga', 'fro', 'hoodie', 'slam', 'mystic', 'volt', 'bogdanoff', 'fartcoin', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    gaunt: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    latex: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    mitts: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'clanker', 'giga', 'ronin', 'tyrant', 'shroom', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'volt', 'bogdanoff', 'fartcoin', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    moto: ['doge', 'shib', 'pepe', 'wif', 'floki', 'cheems', 'cashcat', 'wojak', 'clanker', 'giga', 'ronin', 'tyrant', 'shroom', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'fro', 'bling', 'techno', 'hoodie', 'mystic', 'bogdanoff', 'fartcoin', 'bear', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    rings: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    tape: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ember', 'volt', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    watch: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'clanker', 'giga', 'ronin', 'tyrant', 'shroom', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ember', 'volt', 'bogdanoff', 'fartcoin', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    work: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+  };
+  const BACK_FIT = {
+    cape: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster',
+            'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju',
+            'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno',
+            'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin',
+            'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    katana: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster',
+              'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju',
+              'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno',
+              'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin',
+              'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    pack: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'topg',
+            'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen',
+            'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic',
+            'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin',
+            'gigachad', 'popcat', 'moodeng'],
+    wings: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster',
+             'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju',
+             'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno',
+             'hoodie', 'slam', 'mystic', 'ape', 'volt', 'wolverinu', 'fartcoin', 'bull', 'bear', 'whale',
+             'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+  };
+  // WRITTEN BY `SLOTS=guard,charm node dev/gearcheck.mjs`, NEVER BY HAND. Empty is the correct
+  // state for a slot that has not been measured yet: nothing is offered, and the locker says so in
+  // words rather than putting an unmeasured piece on a fighter.
+  const GUARD_FIT = {
+    boiler: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    bullion: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'moodeng'],
+    cardoor: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    cellar: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'moodeng'],
+    crate: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'moodeng'],
+    desk: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'moodeng'],
+    dish: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'moodeng'],
+    dumpster: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    firedoor: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    grill: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    gymlocker: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'moodeng'],
+    hubcap: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    jukebox: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    manhole: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'moodeng'],
+    oildrum: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    pallet: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'moodeng'],
+    pizzapan: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    plank: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'moodeng'],
+    plyboard: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    riot: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    sash: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    score: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'moodeng'],
+    screens: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    sign: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    stopsign: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    table: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'moodeng'],
+    ticker: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    turnstile: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    vault: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'moodeng'],
+    wheelrim: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'moodeng'],
+  };
+  const CHARM_FIT = {
+    boombox: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    bull: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    crown: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    dice: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    hydrant: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    knuck: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    lighter: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    padlock: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    pager: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    plane: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    salt: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    sneaker: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    token: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+    tooth: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'topg', 'trump', 'clanker', 'giga', 'ronin', 'tyrant', 'gwei', 'shroom', 'kaiju', 'mochi', 'omen', 'wisp', 'spark', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt', 'wolverinu', 'bogdanoff', 'fartcoin', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett', 'moodeng'],
+  };
+  let GEAR_GATE = true;
+  const handFits = (kind, base) => kind === 'none' || (!GEAR_GATE && !!HANDS_META[kind]) || ((HAND_FIT[kind] || []).indexOf(base) >= 0);
+  const backFits = (kind, base) => kind === 'none' || (!GEAR_GATE && !!BACK_META[kind]) || ((BACK_FIT[kind] || []).indexOf(base) >= 0);
+  const guardFits = (kind, base) => kind === 'none' || (!GEAR_GATE && !!GUARD_META[kind]) || ((GUARD_FIT[kind] || []).indexOf(base) >= 0);
+  const charmFits = (kind, base) => kind === 'none' || (!GEAR_GATE && !!CHARM_META[kind]) || ((CHARM_FIT[kind] || []).indexOf(base) >= 0);
+  const HANDS = [['none', 'None']].concat(HANDS_ALL.map(([k, label]) => [k, label]));
+  const BACKS = [['none', 'None']].concat(BACK_ALL.map(([k, label]) => [k, label]));
+  const GUARDS = [['none', 'None']].concat(GUARD_ALL.map(([k, label]) => [k, label]));
+  const CHARMS = [['none', 'None']].concat(CHARM_ALL.map(([k, label]) => [k, label]));
+  const handsFor = base => [['none', 'None']].concat(HANDS_ALL.filter(([k]) => handFits(k, base)).map(([k, label]) => [k, label]));
+  const backsFor = base => [['none', 'None']].concat(BACK_ALL.filter(([k]) => backFits(k, base)).map(([k, label]) => [k, label]));
+  const guardsFor = base => [['none', 'None']].concat(GUARD_ALL.filter(([k]) => guardFits(k, base)).map(([k, label]) => [k, label]));
+  const charmsFor = base => [['none', 'None']].concat(CHARM_ALL.filter(([k]) => charmFits(k, base)).map(([k, label]) => [k, label]));
+  // ---------------------------------------------------------------- gating a kind added later
+  // A slot that already shipped keeps the rule it shipped under, and anything ADDED to it afterwards
+  // is gated per body until the harness has measured it. That is the only way to add to a live slot
+  // without either taking an existing piece away or putting an unmeasured one on a fighter. The two
+  // tables below are WRITTEN BY `SLOTS=eyes,neck node dev/gearcheck.mjs`, never by hand.
+  // Every kind in both slots is gated now, not just the ones added on 10/15. Until there was a table
+  // the shipped five pairs of glasses were offered to everybody, which is why `EYES_UNFIT` existed:
+  // two bodies that failed EVERY style had to be special-cased by hand. With a measured table per
+  // kind that list is just the rows nobody is in, and the five bodies a given style actually fails on
+  // stop seeing that style instead of the whole roster losing it.
+  const EYES_GATED = ['rayban', 'aviator', 'mafia', 'goggles', 'shades', 'shutter', 'monocle', 'patch'];
+  const NECK_GATED = ['gold', 'ice', 'bowtie', 'scarf', 'tags'];
+  const EYES_FIT = {
+    aviator: ['doge', 'shib', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak',
+               'topg', 'trump', 'clanker', 'giga', 'tyrant', 'gwei', 'kaiju', 'mochi', 'wisp', 'spark',
+               'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape',
+               'ember', 'volt', 'wolverinu', 'bogdanoff', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat',
+               'brett', 'moodeng'],
+    goggles: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster',
+               'wojak', 'topg', 'trump', 'clanker', 'giga', 'tyrant', 'gwei', 'mochi', 'spark', 'turbo',
+               'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember',
+               'volt', 'wolverinu', 'bogdanoff', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett',
+               'moodeng'],
+    mafia: ['doge', 'shib', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak', 'trump',
+             'clanker', 'giga', 'tyrant', 'gwei', 'kaiju', 'mochi', 'wisp', 'spark', 'turbo', 'chop',
+             'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt',
+             'wolverinu', 'bogdanoff', 'bull', 'bear', 'whale', 'sin', 'popcat', 'brett', 'moodeng'],
+    monocle: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster',
+               'wojak', 'topg', 'trump', 'clanker', 'giga', 'tyrant', 'gwei', 'mochi', 'wisp', 'spark', 'chop',
+               'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'volt',
+               'wolverinu', 'bogdanoff', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett',
+               'moodeng'],
+    patch: ['doge', 'shib', 'pengu', 'floki', 'cheems', 'lobster', 'wojak', 'trump', 'tyrant', 'mochi',
+             'spark', 'turbo', 'ginga', 'sifu', 'fro', 'techno', 'hoodie', 'ape', 'bogdanoff', 'bull',
+             'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett'],
+    rayban: ['doge', 'shib', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak',
+              'topg', 'trump', 'clanker', 'giga', 'tyrant', 'gwei', 'kaiju', 'mochi', 'wisp', 'spark',
+              'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape',
+              'ember', 'volt', 'wolverinu', 'bogdanoff', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat',
+              'brett', 'moodeng'],
+    shades: ['doge', 'shib', 'pepe', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'lobster', 'wojak',
+              'topg', 'trump', 'clanker', 'giga', 'tyrant', 'gwei', 'kaiju', 'mochi', 'wisp', 'spark',
+              'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie', 'slam', 'mystic', 'ape',
+              'ember', 'volt', 'wolverinu', 'bogdanoff', 'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat',
+              'brett', 'moodeng'],
+    shutter: ['doge', 'shib', 'pepe', 'wif', 'pengu', 'floki', 'cashcat', 'lobster', 'wojak', 'topg', 'trump',
+               'clanker', 'giga', 'tyrant', 'gwei', 'kaiju', 'mochi', 'wisp', 'spark', 'turbo', 'ginga',
+               'sifu', 'fro', 'techno', 'hoodie', 'slam', 'mystic', 'ape', 'ember', 'wolverinu', 'bogdanoff',
+               'bull', 'bear', 'whale', 'sin', 'gigachad', 'popcat', 'brett'],
+  };
+  const NECK_FIT = {
+    bowtie: ['doge', 'shib', 'bonk', 'wif', 'floki', 'cashcat', 'wojak', 'trump', 'clanker', 'giga',
+              'tyrant', 'mochi', 'wisp', 'chop', 'ginga', 'fro', 'bling', 'slam', 'wolverinu', 'bogdanoff',
+              'bull', 'popcat', 'brett', 'moodeng'],
+    gold: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cashcat', 'wojak', 'trump', 'clanker',
+            'giga', 'mochi', 'wisp', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'slam', 'wolverinu',
+            'bogdanoff', 'bull', 'sin', 'popcat', 'brett', 'moodeng'],
+    ice: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cashcat', 'wojak', 'trump', 'clanker',
+           'giga', 'mochi', 'wisp', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'slam', 'wolverinu',
+           'bogdanoff', 'bull', 'sin', 'popcat', 'brett', 'moodeng'],
+    scarf: ['shib', 'bonk', 'wif', 'pengu', 'floki', 'cashcat', 'wojak', 'topg', 'trump', 'clanker', 'giga',
+             'tyrant', 'mochi', 'wisp', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling', 'techno', 'hoodie',
+             'slam', 'ape', 'ember', 'bogdanoff', 'bull', 'whale', 'sin', 'popcat', 'brett', 'moodeng'],
+    tags: ['doge', 'shib', 'pepe', 'bonk', 'wif', 'pengu', 'floki', 'cheems', 'cashcat', 'wojak', 'trump',
+            'clanker', 'giga', 'tyrant', 'mochi', 'wisp', 'turbo', 'chop', 'ginga', 'sifu', 'fro', 'bling',
+            'slam', 'ember', 'wolverinu', 'bogdanoff', 'bull', 'sin', 'popcat', 'brett', 'moodeng'],
+  };
+  const lateFits = (gated, table) => (kind, base) =>
+    kind === 'none' || !GEAR_GATE || gated.indexOf(kind) < 0 || ((table[kind] || []).indexOf(base) >= 0);
+  const eyeFits = lateFits(EYES_GATED, EYES_FIT);
+  const neckFits = lateFits(NECK_GATED, NECK_FIT);
+  const eyesFor = base => EYES_UNFIT.indexOf(base) >= 0 ? [['none', 'None']] : EYES.filter(([k]) => eyeFits(k, base));
+  const neckFor = base => NECK.filter(([k]) => neckFits(k, base));
   // ---- MATERIALS, 9/26 --------------------------------------------------------------------------
   // Duane: "can u also step up the character edit section. thats always been the WEAKEST worst quality
   // complete bullshit from the game every time... like check other games and copy what they do."
@@ -138,8 +593,8 @@
   const CSS_TINT = { crimson: 'sepia(1) saturate(5) hue-rotate(-45deg)', ember: 'sepia(1) saturate(4) hue-rotate(-15deg)', gold: 'sepia(1) saturate(3) hue-rotate(5deg)',
     toxic: 'sepia(1) saturate(4) hue-rotate(60deg)', cyan: 'sepia(1) saturate(4) hue-rotate(150deg)', cobalt: 'sepia(1) saturate(5) hue-rotate(185deg)',
     violet: 'sepia(1) saturate(4) hue-rotate(225deg)', pink: 'sepia(1) saturate(4) hue-rotate(275deg)', shadow: 'brightness(.45) saturate(.6)', ghost: 'grayscale(1) brightness(1.4)' };
-  const GROUPS = [['tint', TINTS], ['skin', SKIN], ['finish', FINISH], ['pattern', PATTERN], ['patcol', PATCOL], ['hair', HAIR], ['haircol', HAIRCOL], ['hat', HATS], ['hatcol', HATCOL], ['eyes', EYES], ['neck', NECK], ['shoes', SHOES], ['aura', AURA]];
-  const DEF = { v: 1, base: 'doge', tint: 'orig', skin: 'orig', finish: 'orig', pattern: 'none', patcol: 'auto', hair: 'none', haircol: 'black', hat: 'none', hatcol: 'auto', eyes: 'shades', neck: 'gold', shoes: 'none', aura: 'none', name: 'Rookie', title: 'Street Legend' };
+  const GROUPS = [['tint', TINTS], ['skin', SKIN], ['finish', FINISH], ['pattern', PATTERN], ['patcol', PATCOL], ['hair', HAIR], ['haircol', HAIRCOL], ['hat', HATS], ['hatcol', HATCOL], ['eyes', EYES], ['neck', NECK], ['shoes', SHOES], ['hands', HANDS], ['back', BACKS], ['guard', GUARDS], ['charm', CHARMS], ['aura', AURA]];
+  const DEF = { v: 1, base: 'doge', tint: 'orig', skin: 'orig', finish: 'orig', pattern: 'none', patcol: 'auto', hair: 'none', haircol: 'black', hat: 'none', hatcol: 'auto', eyes: 'shades', neck: 'gold', shoes: 'none', hands: 'none', back: 'none', guard: 'none', charm: 'none', aura: 'none', name: 'Rookie', title: 'Street Legend' };
   const cleanTxt = s => String(s || '').replace(/[^\w .\-]/g, '').replace(/\s+/g, ' ').trim();
   const cleanHandle = s => String(s == null ? '' : s).replace(/^\s*@+/, '').replace(/[^A-Za-z0-9_]/g, '').slice(0, 15);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
@@ -150,11 +605,19 @@
     const o = Object.assign({}, DEF, lk && typeof lk === 'object' ? lk : {});
     if (typeof CHAR_BY_ID === 'undefined' || !CHAR_BY_ID[o.base]) o.base = DEF.base;
     for (const [k, list] of GROUPS) if (!list.some(x => x[0] === o[k])) o[k] = DEF[k];
+    // the Dota rule, enforced on the way in as well as in the picker: a hat that was never measured on
+    // THIS body is not a hat on this body. Migrates silently, exactly like a retired kind.
+    if (!hatFits(o.hat, o.base)) o.hat = 'none';
+    if (!handFits(o.hands, o.base)) o.hands = 'none';
+    if (!backFits(o.back, o.base)) o.back = 'none';
+    if (!guardFits(o.guard, o.base)) o.guard = 'none';
+    if (!charmFits(o.charm, o.base)) o.charm = 'none';
+    if (!eyeFits(o.eyes, o.base)) o.eyes = 'none';
+    if (!neckFits(o.neck, o.base)) o.neck = 'none';
     o.name = cleanTxt(o.name).slice(0, 16) || DEF.name;
     o.title = cleanTxt(o.title).slice(0, 22);
-    o.x = cleanHandle(o.x);
     o.v = 1;
-    return { v: o.v, base: o.base, tint: o.tint, skin: o.skin, finish: o.finish, pattern: o.pattern, patcol: o.patcol, hair: o.hair, haircol: o.haircol, hat: o.hat, hatcol: o.hatcol, eyes: o.eyes, neck: o.neck, shoes: o.shoes, aura: o.aura, name: o.name, title: o.title, x: o.x };
+    return { v: o.v, base: o.base, tint: o.tint, skin: o.skin, finish: o.finish, pattern: o.pattern, patcol: o.patcol, hair: o.hair, haircol: o.haircol, hat: o.hat, hatcol: o.hatcol, eyes: o.eyes, neck: o.neck, shoes: o.shoes, hands: o.hands, back: o.back, guard: o.guard, charm: o.charm, aura: o.aura, name: o.name, title: o.title };
   }
 
   // ---------------------------------------------------------------- keeping the fighter, whatever happens
@@ -639,7 +1102,13 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
     const V = () => new T.Vector3();
     const bone = n => root.getObjectByName(n);
     const B = { head: bone('Head') || bone('head'), neck: bone('neck') || bone('Neck'), spine: bone('Spine02') || bone('Spine'),
-      footL: bone('LeftFoot'), footR: bone('RightFoot'), toeL: bone('LeftToeBase'), toeR: bone('RightToeBase') };
+      footL: bone('LeftFoot'), footR: bone('RightFoot'), toeL: bone('LeftToeBase'), toeR: bone('RightToeBase'),
+      // hands, forearms and the chest, for the hands + back slots (added 2026-10-15). The rig is
+      // Mixamo-named and the full list is in 90_v3_core.mjs:DOGE -- 24 bones, no finger bones, so a
+      // hand's own geometry is the only thing that can say how big a glove is.
+      handL: bone('LeftHand'), handR: bone('RightHand'), foreL: bone('LeftForeArm'), foreR: bone('RightForeArm'),
+      chest: bone('Spine') || bone('Spine01') || bone('Spine02'), hips: bone('Hips'),
+      shL: bone('LeftShoulder'), shR: bone('RightShoulder') };
     if (!B.head) return null;
     const headEnd = bone('head_end') || bone('HeadTop_End'), headFront = bone('headfront');
     const invHead = new T.Matrix4().copy(B.head.matrixWorld).invert();
@@ -816,6 +1285,154 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
         right: fRight, up: fUp, front: fFront });
     }
 
+    // ---- a dense per-bone sample, for the small parts
+    // The body sample above is decimated to ~7000 points, which is right for a head or a torso and
+    // far too coarse for a hand: on several bodies it lands under a dozen points on one, and a
+    // bounding box off a dozen points is a guess with a number next to it. Reading which bone owns a
+    // vertex is cheap; transforming it is not, so the filter runs FIRST and only the vertices that
+    // belong to the part are transformed. Nothing here touches the decimated sample -- the head,
+    // neck and foot numbers (and therefore every measurement in HAT_FIT) are left exactly as they
+    // were measured.
+    function denseFor(names, inv) {
+      const out = [];
+      if (!mesh || !mesh.geometry || !mesh.geometry.attributes.position) return out;
+      const pos = mesh.geometry.attributes.position, si = mesh.geometry.attributes.skinIndex, sw = mesh.geometry.attributes.skinWeight;
+      const bones = (mesh.skeleton && mesh.skeleton.bones) || [];
+      if (!si || !sw || !bones.length) return out;
+      const v2 = V();
+      for (let i = 0; i < pos.count; i++) {
+        let bi = -1, bw2 = -1;
+        for (let k = 0; k < 4; k++) { const w = sw.getComponent(i, k); if (w > bw2) { bw2 = w; bi = si.getComponent(i, k); } }
+        const bn = bones[bi];
+        if (!bn || !names[bn.name]) continue;
+        mesh.getVertexPosition(i, v2); mesh.localToWorld(v2);
+        out.push(v2.clone().applyMatrix4(inv));
+      }
+      return out;
+    }
+    // the thinnest direction perpendicular to `axis`, scanned over a half turn. A hand is flat and a
+    // torso is not a cylinder, so the minimum extent across the part IS the palm normal / the
+    // front-back axis. It is measured per body, which is the whole point.
+    function thinAxis(pts, axis) {
+      let e1 = V().set(1, 0, 0);
+      if (Math.abs(e1.dot(axis)) > 0.9) e1.set(0, 1, 0);
+      e1.addScaledVector(axis, -e1.dot(axis));
+      if (e1.lengthSq() < 1e-12) { e1.set(0, 0, 1); e1.addScaledVector(axis, -e1.dot(axis)); }
+      e1.normalize();
+      const e2 = V().crossVectors(axis, e1).normalize();
+      let best = null, bestSpan = Infinity;
+      const STEPS = 36, d = V();
+      for (let s = 0; s < STEPS; s++) {
+        const a = Math.PI * s / STEPS;
+        d.copy(e1).multiplyScalar(Math.cos(a)).addScaledVector(e2, Math.sin(a));
+        let lo = Infinity, hi = -Infinity;
+        for (const p of pts) { const t = p.dot(d); if (t < lo) lo = t; if (t > hi) hi = t; }
+        const span = hi - lo;
+        if (span < bestSpan) { bestSpan = span; best = d.clone(); }
+      }
+      return { dir: best || e1, span: isFinite(bestSpan) ? bestSpan : 0 };
+    }
+
+    // ---- hands, each in its own hand-bone space
+    // This rig STOPS at `*Hand`: there are no finger bones, so the skeleton cannot say which way the
+    // fingers point or which way the palm faces, and both have to be measured.
+    //   * `front` is the limb axis, forearm -> hand, continued through the hand. It is the one
+    //     direction the rig defines, and it is the direction a glove runs along.
+    //   * `up` is the PALM NORMAL, taken as the thinnest direction across the hand (`thinAxis`). A
+    //     hand is flat, a paw is flat, a mitten is flat: the minimum extent is always across the
+    //     palm. Assuming an axis instead is what would put a watch through the back of a wrist.
+    //   * the sign of `up` points AWAY from the hips, which on a hanging arm is the back of the
+    //     hand. Only the watch face cares; everything else in the slot is a band or a sleeve and is
+    //     symmetric about the palm plane on purpose.
+    const hipsW = B.hips ? B.hips.getWorldPosition(V()) : null;
+    const hands = [];
+    for (const [key, hb, ab] of [['handL', B.handL, B.foreL], ['handR', B.handR, B.foreR]]) {
+      if (!hb) continue;
+      const ho = hb.getWorldPosition(V()), ao = ab ? ab.getWorldPosition(V()) : null;
+      const invH = new T.Matrix4().copy(hb.matrixWorld).invert();
+      const qH = hb.getWorldQuaternion(new T.Quaternion()).invert();
+      const wFwd = ao ? V().copy(ho).sub(ao) : wDir(front);
+      if (wFwd.lengthSq() < 1e-9) wFwd.copy(wDir(front));
+      wFwd.normalize();
+      const hFront = wFwd.clone().applyQuaternion(qH).normalize();
+      const hv2 = denseFor({ [hb.name]: 1 }, invH);
+      if (hv2.length < 24) continue;                       // too little geometry to measure: no gear
+      const th = thinAxis(hv2, hFront);
+      const hUp = th.dir.clone();
+      // point it away from the body, so +up is the back of the hand rather than the palm
+      if (hipsW) {
+        const outw = V().copy(ho).sub(hipsW).applyQuaternion(qH);
+        outw.addScaledVector(hFront, -outw.dot(hFront));
+        if (outw.lengthSq() > 1e-12 && hUp.dot(outw) < 0) hUp.negate();
+      }
+      const hRight = V().crossVectors(hUp, hFront).normalize();
+      hFront.crossVectors(hRight, hUp).normalize();
+      let zMin = Infinity, zMax = -Infinity, xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+      for (const p of hv2) {
+        const x = p.dot(hRight), y = p.dot(hUp), z = p.dot(hFront);
+        if (z < zMin) zMin = z; if (z > zMax) zMax = z;
+        if (x < xMin) xMin = x; if (x > xMax) xMax = x;
+        if (y < yMin) yMin = y; if (y > yMax) yMax = y;
+      }
+      const len = Math.max(zMax - zMin, 1e-5);
+      hands.push({ key, b: hb, n: hv2.length, len,
+        halfW: Math.max((xMax - xMin) / 2, len * 0.14), halfT: Math.max((yMax - yMin) / 2, len * 0.09),
+        cx: (xMin + xMax) / 2, cy: (yMin + yMax) / 2, cz: (zMin + zMax) / 2, wristZ: zMin, tipZ: zMax,
+        right: hRight, up: hUp, front: hFront });
+    }
+
+    // ---- the back, in the chest bone's space
+    // `Spine` is the chest: the shoulders and the neck both hang off it, so it is the bone a pack, a
+    // cape or a slung blade should follow. `up` is the chest -> neck line (the rig's own definition
+    // of which way the torso points), `front` is the face direction carried down from the head, and
+    // `backZ` is the MEASURED rear surface at mid-chest, not an offset from the bone. A pack hung off
+    // the bone origin sits inside the ribcage on a round body and a foot behind a thin one.
+    let back = null;
+    if (B.chest) {
+      const cb = B.chest;
+      const invC = new T.Matrix4().copy(cb.matrixWorld).invert();
+      const qC = cb.getWorldQuaternion(new T.Quaternion()).invert();
+      const neckInC = (B.neck || B.head).getWorldPosition(V()).applyMatrix4(invC);
+      const cUp = neckInC.lengthSq() > 1e-12 ? neckInC.clone().normalize() : wDir(up).applyQuaternion(qC).normalize();
+      const cFront = wDir(front).applyQuaternion(qC);
+      cFront.addScaledVector(cUp, -cFront.dot(cUp));
+      if (cFront.lengthSq() < 1e-12) cFront.set(0, 0, 1);
+      cFront.normalize();
+      const cRight = V().crossVectors(cUp, cFront).normalize();
+      cFront.crossVectors(cRight, cUp).normalize();
+      const names = { [cb.name]: 1 };
+      for (const b2 of [B.shL, B.shR, bone('Spine01'), bone('Spine02')]) if (b2) names[b2.name] = 1;
+      const cv = denseFor(names, invC);
+      // the torso segment length in CHEST units -- every bone on this rig carries its own scale, so
+      // this may not be anything like `H`, and mixing the two is what dropped the bow tie on the chest
+      const tH = Math.max(neckInC.length() || 0, 1e-5);
+      if (cv.length >= 40) {
+        let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity, zMin = Infinity, zMax = -Infinity;
+        for (const p of cv) {
+          const x = p.dot(cRight), y = p.dot(cUp), z = p.dot(cFront);
+          if (x < xMin) xMin = x; if (x > xMax) xMax = x;
+          if (y < yMin) yMin = y; if (y > yMax) yMax = y;
+          if (z < zMin) zMin = z; if (z > zMax) zMax = z;
+        }
+        // the rear surface measured ACROSS THE MIDDLE of the back only: the shoulder caps and the
+        // small of the back both sit further in, and letting them into the number pushes a pack out
+        const midY = (yMin + yMax) / 2, bandY = Math.max((yMax - yMin) * 0.3, tH * 0.12);
+        let rear = Infinity, rearW = 0;
+        for (const p of cv) {
+          const y = p.dot(cUp); if (Math.abs(y - midY) > bandY) continue;
+          const x = p.dot(cRight); if (Math.abs(x) > (xMax - xMin) * 0.3) continue;
+          const z = p.dot(cFront); if (z < rear) rear = z;
+          if (Math.abs(x) > rearW) rearW = Math.abs(x);
+        }
+        if (!isFinite(rear)) rear = zMin;
+        back = { b: cb, n: cv.length, tH,
+          halfW: Math.max((xMax - xMin) / 2, tH * 0.2), halfD: Math.max((zMax - zMin) / 2, tH * 0.12),
+          h: Math.max(yMax - yMin, tH * 0.4), midY, topY: yMax, botY: yMin, backZ: rear, frontZ: zMax,
+          coreW: Math.max(rearW, tH * 0.16),
+          right: cRight, up: cUp, front: cFront };
+      }
+    }
+
     // whole body, in the model's own space, for the aura
     let minY = Infinity, maxY = -Infinity, bw = 0;
     for (const w of WV) { const p = v1.copy(w).applyMatrix4(invRoot); if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; const r = Math.hypot(p.x, p.z); if (r > bw) bw = r; }
@@ -829,7 +1446,7 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
     const span = Math.max(capY - eyeY, H * 0.26);
     const M = {
       B, root, id, H, S, hw, hd, ew, fz, capY, eyeY, faceUp, minY, bw: bw || S * 0.3, maxW, sideW, sideD, span,
-      P, NP, faceZAt, nl, nw, nd, nH, chestZ, dropY, feet, made: [],
+      P, NP, faceZAt, nl, nw, nd, nH, chestZ, dropY, feet, hands, back, made: [],
       cx: 0, zc: 0, neckY: 0, nzc: 0,
       // where a hat sits: k = 0 is the eye line, k = 1 the crown
       hatY: k => capY - span * (1 - k),
@@ -846,6 +1463,13 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
       },
     };
     for (const f of feet) M.ax[f.key] = { b: f.b, q: basis(f.right, f.up, f.front), right: f.right, up: f.up, front: f.front };
+    // THE ATTACHMENT REGISTRY. Every wearable names one of these and nothing attaches to the model
+    // root: `head`, `neck`, `footL`, `footR`, `handL`, `handR`, `back`, and `root` for the aura
+    // only, which is a volume around the whole body rather than a thing worn on it. Each entry is a
+    // bone plus a frame measured on THIS body, so a piece built in one of them follows animation for
+    // free -- it is parented to the bone, not re-positioned per frame.
+    for (const h of hands) M.ax[h.key] = { b: h.b, q: basis(h.right, h.up, h.front), right: h.right, up: h.up, front: h.front };
+    if (back) M.ax.back = { b: back.b, q: basis(back.right, back.up, back.front), right: back.right, up: back.up, front: back.front };
     return M;
   }
 
@@ -873,8 +1497,13 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
     g.quaternion.copy(ax.q);
     g.position.copy(ax.right.clone().multiplyScalar(x)).addScaledVector(ax.up, y).addScaledVector(ax.front, z);
     ax.b.add(g);
-    const slot = g.userData.cfSlot, foot = g.userData.cfFoot;
-    g.traverse(o => { o.userData.cfGear = true; if (slot && !o.userData.cfSlot) o.userData.cfSlot = slot; if (foot && !o.userData.cfFoot) o.userData.cfFoot = foot; });
+    const slot = g.userData.cfSlot, foot = g.userData.cfFoot, hand = g.userData.cfHand;
+    // `cfHand` is propagated here as of 2026-10-16. buildHands has set it on the GROUP since the slot
+    // shipped and nothing ever carried it down to the meshes, so `gearPoints` read '' for every piece
+    // and dev/gearprobe2.js silently fell back to its proximity match. That fallback works for a glove,
+    // which wraps the hand; it cannot work for a charm, which hangs BELOW it on a chain, and the first
+    // charm run scored "handR: nothing built" 672 times because of this one missing word.
+    g.traverse(o => { o.userData.cfGear = true; if (slot && !o.userData.cfSlot) o.userData.cfSlot = slot; if (foot && !o.userData.cfFoot) o.userData.cfFoot = foot; if (hand && !o.userData.cfHand) o.userData.cfHand = hand; });
     M.made.push(g);
     return g;
   }
@@ -944,7 +1573,13 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
     const rAt = (y, ang) => {
       let r = 0;
       for (let d = -1; d <= 1; d++) r = Math.max(r, P.rad(y, ang + d * step));
-      return Math.min(Math.max(r, Rmax * 0.28), Rmax * 1.22) + pad;
+      // CLEARANCE, 10/14. A hat is not shrink-wrapped to the skin, and this profile and the one
+      // dev/gearprobe2.js builds for itself are two independent estimates of the same fur: a shell laid
+      // exactly on the measured surface reads as "the skull pokes through the hat" wherever the two
+      // disagree by a few percent, which across 46 heads is everywhere (doge 40% of cells, pepe 36%).
+      // The clearance is proportional to the HEAD rather than to a fixed slice of H, so it scales with
+      // the body instead of being generous on a big skull and invisible on a small one.
+      return Math.min(Math.max(r, Rmax * 0.28), Rmax * 1.38) + Rmax * 0.065 + pad;
     };
     const rings = [];
     for (let j = 0; j <= NJ; j++) {
@@ -1178,6 +1813,93 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
         tail.position.set(-rx * (0.46 + k * 0.1), -H * 0.2, -rB * (1.0 + k * 0.08)); tail.rotation.set(-0.2, 0, 0.35 + k * 0.2);
       }
       mount(M, 'head', g, 0, yb, 0);
+    } else if (kind === 'visor') {
+      // A SUN VISOR: a band at the brow and a brim, no crown. Added 10/15 because the locker sells
+      // `g_visor` and there was no mesh behind it -- the only `visor` in this file was the tech visor
+      // in buildEyes, which is a different object worn in a different slot.
+      const yb = M.hatY(0.26), col = main(0x1f9ad8), rx = M.fit(yb, M.capY).rx;
+      const foam = mat(T, { color: col, roughness: 0.84 });
+      part(T, g, skullBand(T, M, yb, yb + H * 0.17, H * 0.022, yb), foam, null, 'band');
+      part(T, g, skullBand(T, M, yb + H * 0.14, yb + H * 0.19, H * 0.03, yb), mat(T, { color: shade(T, col, 0.62), roughness: 0.8 }), null, 'band');
+      const br = part(T, g, arcPlate(T, rx * 0.76, rx * 1.14, Math.PI / 2 - Math.PI * 0.47, Math.PI / 2 + Math.PI * 0.47, H * 0.028), mat(T, { color: shade(T, col, 0.82), roughness: 0.66 }), null, 'brim');
+      br.scale.z = 1.72; br.position.y = H * 0.04; br.rotation.x = 0.16;
+      mount(M, 'head', g, 0, yb, 0);
+    } else if (kind === 'fedora') {
+      const yb = M.hatY(0.3), col = main(0x6b4526), f = M.fit(yb, M.capY), rx = f.rx, rz = f.rz;
+      const felt = mat(T, { color: col, roughness: 0.94 });
+      part(T, g, skullShell(T, M, yb, H * 0.02, { domeH: 0.48 }), felt, null, 'crown');
+      // the two side dents are what separates a fedora from a bowler, and they are the only part of
+      // the shape that is not just a shorter top hat
+      for (const s of [-1, 1]) {
+        const dent = part(T, g, new T.SphereGeometry(1, 16, 12), mat(T, { color: shade(T, col, 0.7), roughness: 0.95 }), null, 'fold');
+        dent.scale.set(rx * 0.26, H * 0.11, rz * 0.6);
+        dent.position.set(s * rx * 0.58, (M.capY - yb) + rx * 0.26, 0);
+      }
+      part(T, g, skullBand(T, M, yb + H * 0.02, yb + H * 0.12, H * 0.03, yb), mat(T, { color: 0x14161c, roughness: 0.72 }), null, 'band');
+      const brimM = new T.MeshStandardMaterial({ color: col, roughness: 0.94, side: T.DoubleSide });
+      const br = part(T, g, arcPlate(T, rx * 1.0, rx * 1.62, 0, Math.PI * 2, H * 0.026), brimM, null, 'brim');
+      br.position.y = H * 0.014; br.scale.z = rz / rx;
+      mount(M, 'head', g, 0, yb, 0);
+    } else if (kind === 'cans') {
+      // HEADPHONES. The band is an arc over the crown and the cups sit at the sides, so both are
+      // sized from the skull at the height they actually touch rather than from one radius.
+      const y = M.hatY(0.3), f = M.fit(y - H * 0.14, y + H * 0.14), rx = f.rx, rz = f.rz;
+      const col = main(0x1b1d26);
+      const shell = mat(T, { color: col, roughness: 0.44, metalness: 0.2 });
+      const pad = mat(T, { color: 0x0b0d12, roughness: 0.95 });
+      const accent = mat(T, { color: 0xff6a2a, roughness: 0.5 });
+      const rise = Math.max(M.capY - y, H * 0.12) + H * 0.1;
+      const band = part(T, g, new T.TorusGeometry(1, 0.038, 9, 30, Math.PI), shell, null, 'band');
+      band.scale.set(rx * 1.04, rise, rx * 0.14);
+      const pads = part(T, g, new T.TorusGeometry(1, 0.05, 9, 26, Math.PI * 0.5), pad, null, 'band');
+      pads.scale.set(rx * 0.99, rise * 0.97, rx * 0.11); pads.rotation.z = Math.PI * 0.25;
+      for (const s of [-1, 1]) {
+        const cup = part(T, g, new T.CylinderGeometry(rz * 0.52, rz * 0.56, rx * 0.26, 24), shell, null, 'crown');
+        cup.rotation.z = Math.PI / 2; cup.position.set(s * rx * 1.02, 0, 0);
+        const ring = part(T, g, new T.TorusGeometry(rz * 0.5, rz * 0.12, 9, 24), pad, null, 'cuff');
+        ring.rotation.y = Math.PI / 2; ring.position.set(s * rx * 0.92, 0, 0);
+        const gl = part(T, g, new T.TorusGeometry(rz * 0.34, rz * 0.04, 6, 24), accent, null, 'stud');
+        gl.rotation.y = Math.PI / 2; gl.position.set(s * rx * 1.16, 0, 0);
+      }
+      mount(M, 'head', g, 0, y, 0);
+    } else if (kind === 'pilot') {
+      const yb = M.hatY(0.08), col = main(0x5a3a22), f = M.fit(yb, M.capY), rx = f.rx, rz = f.rz;
+      const leather = mat(T, { color: col, roughness: 0.8 });
+      part(T, g, skullShell(T, M, yb, H * 0.022, { domeH: 0.82 }), leather, null, 'crown');
+      for (const s of [-1, 1]) {
+        const fl = part(T, g, new T.SphereGeometry(1, 14, 10), mat(T, { color: shade(T, col, 0.82), roughness: 0.82 }), null, 'fold');
+        fl.scale.set(rx * 0.26, H * 0.2, rz * 0.4);
+        fl.position.set(s * rx * 0.9, -H * 0.08, 0);
+      }
+      // the goggles are PUSHED UP on the brow, which is how a pilot cap is worn and also keeps them
+      // off the eye line, where the eyes slot has its own piece
+      part(T, g, skullBand(T, M, yb + H * 0.02, yb + H * 0.17, H * 0.048, yb), mat(T, { color: 0x14161c, roughness: 0.62 }), null, 'band');
+      const fz = Math.max(M.P.f(yb + H * 0.09), rz) * 0.96;
+      for (const s of [-1, 1]) {
+        const lens = part(T, g, new T.CylinderGeometry(rx * 0.3, rx * 0.3, H * 0.045, 22), mat(T, { color: 0xb08a3a, metalness: 1, roughness: 0.26, envMapIntensity: 1.7 }), null, 'stud');
+        lens.rotation.x = Math.PI / 2; lens.position.set(s * rx * 0.44, H * 0.09, fz);
+        const gl = part(T, g, new T.CylinderGeometry(rx * 0.22, rx * 0.22, H * 0.05, 22), mat(T, { color: 0x2a3340, roughness: 0.12, metalness: 0.4 }), null, 'stud');
+        gl.rotation.x = Math.PI / 2; gl.position.set(s * rx * 0.44, H * 0.09, fz + H * 0.006);
+      }
+      mount(M, 'head', g, 0, yb, 0);
+    } else if (kind === 'wreath') {
+      // a laurel ring that follows the skull's own per-azimuth radius, so it is a ring round THIS
+      // head rather than a circle that happens to be near it
+      const yb = M.hatY(0.62), f = M.fit(yb, M.capY), rx = f.rx, rz = f.rz;
+      const leafM = mat(T, { color: 0xd9b43a, metalness: 1, roughness: 0.3, envMapIntensity: 1.9 });
+      const leafD = mat(T, { color: 0x9a7a1c, metalness: 1, roughness: 0.42, envMapIntensity: 1.5 });
+      const ring = ellipseRing(T, g, leafD, rx * 1.01, rz * 1.01, rx * 0.032, 'band');
+      const N = 24;
+      for (let i = 0; i < N; i++) {
+        const a = -Math.PI + (i + 0.5) / N * Math.PI * 2;
+        const r = Math.min(Math.max(M.P.rad(yb, a), rx * 0.6), rx * 1.35) * 1.02;
+        const leaf = part(T, g, slab(T, rx * 0.17, rx * 0.4, rx * 0.085, rx * 0.035), i % 2 ? leafM : leafD, null, 'rib');
+        leaf.position.set(Math.sin(a) * r, H * 0.035 + (i % 2) * H * 0.018, Math.cos(a) * r);
+        leaf.rotation.y = a;
+        leaf.rotation.x = -0.5 - (i % 2) * 0.22;
+        leaf.rotation.z = (i % 2 ? 1 : -1) * 0.3;
+      }
+      mount(M, 'head', g, 0, yb, 0);
     } else if (kind === 'halo') {
       const r = M.hw * 0.9;
       const gm = glowMat(T, custom ? '#' + custom.getHexString() : 0xffd36a, 3.2, { metalness: 0.4 });
@@ -1240,12 +1962,20 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
   function eyeArms(T, M, g, x0, z0, m, r, tag) {
     const V3v = (a, b, c) => new T.Vector3(a, b, c);
     const xw = Math.min(x0, M.sideW * 0.98);          // never outside the head at this height
-    const back = Math.max(M.sideD * 0.85, M.H * 0.18);
+    // WHERE A TEMPLE ARM ENDS IS A PLACE, NOT A DISTANCE, 10/15. This used to travel a fixed
+    // `max(sideD * 0.85, H * 0.18)` BACK FROM THE FACE, so on any head whose face stands well
+    // forward -- a muzzle, a beak, a snout -- the arm started further forward and therefore ended
+    // further forward, and never got behind the ear. It is the single biggest fault in this slot:
+    // "arms do not reach back over the ears" was 16 to 26 failures on every one of the five shipped
+    // styles, across a roster where each of them is supposed to be clean.
+    // A real temple arm ends BEHIND the ear, which is behind the middle of the skull, so the end is
+    // an absolute depth in head space and the arm is however long it needs to be to reach it.
+    const endZ = -Math.max(M.sideD, M.hd * 0.8) * 0.62;
     const rr = r * 1.45;
     for (const sx of [-1, 1]) {
       const a = V3v(sx * x0, 0, z0);
-      const b = V3v(sx * xw, M.H * 0.01, z0 - back * 0.45);
-      const c = V3v(sx * xw * 0.94, -M.H * 0.035, z0 - back);
+      const b = V3v(sx * xw, M.H * 0.01, z0 + (endZ - z0) * 0.45);
+      const c = V3v(sx * xw * 0.94, -M.H * 0.035, endZ);
       strut(T, g, a, b, rr, m, tag || 'arm', 6);
       strut(T, g, b, c, rr, m, tag || 'arm', 6);
     }
@@ -1310,7 +2040,11 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
         sl.position.set(0, plh * (0.72 - i * 0.29), z); sl.rotation.x = -0.22;
       }
       const back = part(T, g, slab(T, plw * 1.9, plh * 1.9, plh * 0.3, th * 0.3), mat(T, { color: 0x08080c, roughness: 0.5 }), null, 'backing'); back.position.set(0, 0, z - th * 0.55); back.castShadow = false;
-      eyeArms(T, M, g, plw * 0.96, z - w * 0.02, frame, w * 0.026);
+      // z0 is where the temple arm LEAVES THE FACE, so it has to be the face depth out at the arm's
+      // own x, not the average across the lenses. With zAvg() the arms started at the most protruding
+      // part of the face and ran back from there, so on 25 of 48 bodies they never reached behind the
+      // ears -- which is exactly the failure that got this piece cut on 9/21.
+      eyeArms(T, M, g, plw * 0.96, zAt(plw * 0.96), frame, w * 0.026);
     } else if (kind === 'goggles') {
       const rubber = mat(T, { color: 0x14161d, roughness: 0.9 });
       const strapM = mat(T, { color: 0xe8203c, roughness: 0.8 });
@@ -1360,6 +2094,31 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
       v.position.z = z - R; v.castShadow = false;
       const rim = part(T, g, new T.TorusGeometry(R, w * 0.03, 8, 44, Math.PI * 0.84), mat(T, { color: 0xdfe3ec, metalness: 1, roughness: 0.25 }), null, 'rim');
       rim.rotation.set(Math.PI / 2, 0, Math.PI * 0.08); rim.position.set(0, w * 0.2, z - R);
+    } else if (kind === 'patch') {
+      // An eyepatch covers ONE eye, so it is the one piece in this slot that is meant to be
+      // asymmetric. The strap runs round the head at the eye line using the same arm geometry the
+      // glasses use, so it reaches back over the ears instead of floating beside the face.
+      const leather = mat(T, { color: 0x12131a, roughness: 0.74 });
+      const strapM = mat(T, { color: 0x0c0d12, roughness: 0.8 });
+      const sx = -1;                                   // left eye as the model faces you
+      const z = zAt(sx * ex);
+      const cup = part(T, g, new T.SphereGeometry(1, 20, 14), leather, null, 'lens');
+      cup.scale.set(lw * 1.15, lh * 1.5, lw * 0.5);
+      cup.position.set(sx * ex, 0, z - lw * 0.1);
+      const rim = part(T, g, new T.TorusGeometry(1, lw * 0.07, 8, 26), mat(T, { color: 0x3a3f4a, roughness: 0.42, metalness: 0.6 }), null, 'rim');
+      rim.scale.set(lw * 1.12, lh * 1.46, 1);
+      rim.position.set(sx * ex, 0, z);
+      // the strap: one run forward-to-back on each side of the head, meeting at the patch
+      const V3v = (a, b, c) => new T.Vector3(a, b, c);
+      const back = Math.max(M.sideD * 0.85, H * 0.18);
+      const xw = Math.min(ex + lw, M.sideW * 0.98);
+      // the strap leaves the face AT THE SIDE, so its base depth is the face depth out there -- the
+      // same correction the shutter arms needed, for the same reason
+      const zs = zAt(xw);
+      strut(T, g, V3v(sx * ex, lh * 1.1, z), V3v(sx * xw, lh * 1.25, zs - back * 0.5), lw * 0.07, strapM, 'strap', 6);
+      strut(T, g, V3v(sx * xw, lh * 1.25, zs - back * 0.5), V3v(-sx * xw * 0.9, lh * 0.55, zs - back), lw * 0.07, strapM, 'strap', 6);
+      strut(T, g, V3v(sx * ex, -lh * 1.1, z), V3v(sx * xw, -lh * 0.9, zs - back * 0.5), lw * 0.07, strapM, 'strap', 6);
+      strut(T, g, V3v(sx * xw, -lh * 0.9, zs - back * 0.5), V3v(-sx * xw * 0.9, -lh * 0.2, zs - back), lw * 0.07, strapM, 'strap', 6);
     } else if (kind === 'laser') {
       const L = M.S * 0.9;
       for (const sx of [-1, 1]) {
@@ -1521,7 +2280,10 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
       // bar that cut straight across the chest and both arms and read as a rendering glitch. All
       // three axes have to be scaled together for the band to stay round.
       wrap.rotation.x = Math.PI / 2 - 0.1;
-      wrap.scale.set(rx * 1.08, rz * 1.08, rx * 1.08);
+      // A scarf is a bulky wrap, not a chain, and at 1.08 it measured INSIDE the neck on 14 bodies:
+      // the probe's neck radius is the hypotenuse across an elliptical neck, so a ring sized on the
+      // half-width alone sits under it at the corners. Sized as what it is instead.
+      wrap.scale.set(rx * 1.18, rz * 1.18, rx * 1.18);
       wrap.position.y = ringY + H * 0.02;
       const knot = part(T, g, new T.SphereGeometry(rx * 0.34, 14, 10), red, null, 'knot'); knot.position.set(rx * 0.34, ringY - H * 0.03, front * 0.94); knot.scale.set(1, 0.9, 0.85);
       // The tail was a rx*0.5 x H*0.72 x rx*0.1 slab -- half the fighter's height, a tenth as thick,
@@ -1536,6 +2298,25 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
       tip.scale.set(1, 1, 0.55);
       tip.position.set(rx * 0.58, ringY - H * 0.46, Math.max(M.chestZ, front) * 0.86);
       tip.rotation.set(0.30, 0, 0.34);
+    } else if (kind === 'tags') {
+      // Dog tags: a ball chain on the same measured path the gold chain uses (so it hangs where a
+      // chain hangs on THIS neck) with two stamped plates on the drop.
+      const steel = mat(T, { color: 0xb8c0cc, metalness: 1, roughness: 0.3, envMapIntensity: 1.7 });
+      const steelD = mat(T, { color: 0x79828f, metalness: 1, roughness: 0.42, envMapIntensity: 1.3 });
+      const N = 46, br = Math.max(rx * 0.082, H * 0.013);
+      for (let i = 0; i < N; i++) {
+        const bead = part(T, g, new T.SphereGeometry(br, 7, 6), i % 2 ? steel : steelD, null, 'link');
+        // 1.05 outward: the first version put the beads exactly on the chain path with a bead half
+        // the size of a chain link, and the result measured inside the neck on 23 of 48 bodies
+        const p = path(i / N * Math.PI * 2);
+        bead.position.set(p.x * 1.05, p.y, p.z * 1.05);
+      }
+      const low = path(0);                               // the front of the loop, at its lowest point
+      for (let i = 0; i < 2; i++) {
+        const tag = part(T, g, slab(T, rx * 0.34, rx * 0.52, rx * 0.14, br * 1.1), i ? steelD : steel, null, 'pendant');
+        tag.position.set(rx * (i ? 0.1 : -0.06), low.y - rx * 0.34 - i * rx * 0.07, low.z + br * (i ? -0.9 : 0.9));
+        tag.rotation.set(0.1, i ? -0.18 : 0.14, i ? 0.08 : -0.05);
+      }
     } else if (kind === 'bowtie') {
       const red = mat(T, { color: 0xd22a42, roughness: 0.42 }), dark = mat(T, { color: 0x9e1b30, roughness: 0.5 });
       const z = Math.max(M.NP.f(tieY), M.nd) * 1.02;
@@ -1610,6 +2391,380 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
       if (isKick) { const gm = glowMat(T, 0xffd36a, 1.3, { metalness: 0.6, roughness: 0.2 }); const gl = part(T, g, new T.TorusGeometry(Wd * 1.02, Wd * 0.045, 6, 26), gm.m, gm.want, 'glow'); gl.rotation.x = Math.PI / 2; gl.scale.y = (L * 0.53) / Math.max(Wd, 1e-6); gl.position.set(cx, y0 + sole * 0.55, cz); }
       mount(M, f.key, g, 0, 0, 0);
     }
+  }
+
+  // ---------------------------------------------------------------- hands
+  // Everything here is in HAND-bone units, measured per hand in `measure()`:
+  //   x = across the palm (`halfW`), y = the back of the hand (`halfT`), z = wrist -> fingertips
+  //   (`wristZ` .. `tipZ`, `len`).
+  // Nothing uses M.H: a hand bone's units are not head-bone units, and mixing them is the same bug
+  // that put the bow tie on the chest. Every piece is sized off THIS hand's own numbers and carries
+  // clearance, the same lesson skullShell learned -- a sleeve laid exactly on the measured surface
+  // reads as a poke the moment the probe's profile disagrees by a vertex.
+  const HAND_PAD = 0.075;              // fraction of the cross-section carried as air
+  function buildHands(T, M, kind) {
+    for (const h of M.hands || []) {
+      // A WATCH GOES ON ONE WRIST. Everything else in this slot is a pair -- wraps, gloves, rings and
+      // gauntlets all come in twos -- but the first render put a gold watch on both wrists of every
+      // fighter, which reads as a mistake rather than as a flex. Nothing measured it: it is only
+      // visible by looking at the contact sheet.
+      if (kind === 'watch' && h.key !== 'handR') continue;
+      const g = gearGroup(T, 'hands'); g.userData.cfHand = h.key;
+      const L = h.len, rx0 = h.halfW, ry0 = h.halfT;
+      const pad = k => [rx0 * (1 + HAND_PAD) * (k || 1), ry0 * (1 + HAND_PAD) * (k || 1)];
+      // an elliptical sleeve between two heights along the hand, sized on the measured cross-section.
+      // OPEN-ENDED by default: a capped tube puts a solid disc across the hand, and the hand comes
+      // straight back out through it.
+      const sleeve = (z0, z1, k, m, tag, capped, seg) => {
+        const [rx, ry] = pad(k), len = Math.abs(z1 - z0) || L * 0.02;
+        const c = part(T, g, new T.CylinderGeometry(1, 1, 1, seg || 22, 1, !capped), m, null, tag);
+        c.rotation.x = Math.PI / 2;                         // the cylinder's own +Y becomes +Z
+        c.scale.set(rx, len, ry);
+        c.position.set(h.cx, h.cy, (z0 + z1) / 2);
+        return c;
+      };
+      const band = (z, k, tube, m, tag) => {
+        const [rx, ry] = pad(k);
+        const t = part(T, g, new T.TorusGeometry(1, Math.max(tube, 1e-5), 8, 24), m, null, tag);
+        t.scale.set(rx, ry, 1);
+        t.position.set(h.cx, h.cy, z);
+        return t;
+      };
+      const cloth = mat(T, { color: 0xe6e2d6, roughness: 0.92 });
+      const clothD = mat(T, { color: 0xbdb7a6, roughness: 0.95 });
+      const leather = mat(T, { color: 0x24262e, roughness: 0.72 });
+      const leatherD = mat(T, { color: 0x15161c, roughness: 0.8 });
+      const steel = mat(T, { color: 0x8d97a6, metalness: 1, roughness: 0.34, envMapIntensity: 1.5 });
+      const steelD = mat(T, { color: 0x4a5160, metalness: 1, roughness: 0.46, envMapIntensity: 1.2 });
+      const goldM = mat(T, { color: 0xffc83d, metalness: 1, roughness: 0.18, envMapIntensity: 2.0 });
+      const goldD = mat(T, { color: 0xd8a126, metalness: 1, roughness: 0.28, envMapIntensity: 1.7 });
+
+      if (kind === 'tape') {
+        // boxer's wraps: overlapping cloth bands over the wrist and the palm, fingers left bare
+        sleeve(h.wristZ - L * 0.1, h.wristZ + L * 0.34, 1.0, cloth, 'wrap');
+        sleeve(h.wristZ + L * 0.3, h.wristZ + L * 0.62, 1.03, clothD, 'wrap');
+        for (let i = 0; i < 3; i++) band(h.wristZ + L * (0.02 + i * 0.14), 1.04, ry0 * 0.1, i % 2 ? clothD : cloth, 'band');
+        // one diagonal strap across the back of the hand, so it reads as wrapped and not as a tube
+        const st = part(T, g, slab(T, rx0 * 0.5, L * 0.5, rx0 * 0.2, ry0 * 0.12), clothD, null, 'strap');
+        st.position.set(h.cx, h.cy + ry0 * 1.02, h.wristZ + L * 0.42);
+        st.rotation.set(-Math.PI / 2, 0, 0.5);
+      } else if (kind === 'mitts') {
+        // fingerless gloves: a leather sleeve that stops at the knuckles
+        sleeve(h.wristZ - L * 0.06, h.wristZ + L * 0.66, 1.0, leather, 'glove');
+        band(h.wristZ - L * 0.04, 1.06, ry0 * 0.14, leatherD, 'cuff');
+        band(h.wristZ + L * 0.64, 1.04, ry0 * 0.1, leatherD, 'hem');
+        const kn = part(T, g, slab(T, rx0 * 1.5, L * 0.2, rx0 * 0.3, ry0 * 0.14), leatherD, null, 'knuckle');
+        kn.position.set(h.cx, h.cy + ry0 * 1.0, h.wristZ + L * 0.56);
+        kn.rotation.x = -Math.PI / 2;
+        const bk = part(T, g, new T.BoxGeometry(rx0 * 0.34, ry0 * 0.22, ry0 * 0.22), steelD, null, 'buckle');
+        bk.position.set(h.cx + rx0 * 0.6, h.cy + ry0 * 1.04, h.wristZ + L * 0.02);
+      } else if (kind === 'rings') {
+        // Knuckle rings, and the first version of them was wrong in a way the probe caught: it put
+        // each ring around a FINGER, and this rig has no finger bones -- every body wears a closed
+        // paw or fist, so there is no finger to encircle and 14-18% of every ring measured inside the
+        // hand. They sit ON the knuckle line instead, at the measured top surface, which is what a
+        // knuckle ring looks like on a closed fist anyway.
+        const r = Math.max(ry0 * 0.34, L * 0.03), tube = r * 0.32;
+        const z = h.wristZ + L * 0.64, y = h.cy + ry0 * (1 + HAND_PAD) - r * 0.25;
+        for (let i = 0; i < 4; i++) {
+          const x = h.cx + (i - 1.5) * (rx0 * 2 * 0.38);
+          const ring = part(T, g, new T.TorusGeometry(r, tube, 9, 20), i === 1 ? goldM : goldD, null, 'ring');
+          ring.position.set(x, y, z);
+          ring.rotation.x = Math.PI / 2;                   // the band lies flat on the knuckle
+          if (i === 1) {
+            const st = part(T, g, new T.BoxGeometry(r * 1.4, r * 0.55, r * 1.1), goldM, null, 'sovereign');
+            st.position.set(x, y + r * 0.4, z);
+          }
+        }
+      } else if (kind === 'watch') {
+        // the band is a closed ring around the wrist; the FACE needs a side, and +up is the back of
+        // the hand because `measure()` orients the palm normal away from the hips
+        const z = h.wristZ + L * 0.1;
+        band(z, 1.04, ry0 * 0.13, goldD, 'band');
+        const [rx, ry] = pad(1.04);
+        const case_ = part(T, g, new T.CylinderGeometry(ry * 0.62, ry * 0.62, ry * 0.26, 24), goldM, null, 'case');
+        case_.position.set(h.cx, h.cy + ry * 1.02, z);
+        const dial = part(T, g, new T.CylinderGeometry(ry * 0.48, ry * 0.48, ry * 0.3, 24), mat(T, { color: 0x0b1018, roughness: 0.25, metalness: 0.3 }), null, 'dial');
+        dial.position.set(h.cx, h.cy + ry * 1.07, z);
+        // A cylinder's own axis is +Y, and +Y here IS the back of the hand, so the dial already faces
+        // out of it with no rotation. Turning the case is what would stand a watch on its edge.
+        const gm = glowMat(T, 0xffe9a8, 0.9, { metalness: 0.5, roughness: 0.2 });
+        const gl = part(T, g, new T.TorusGeometry(ry * 0.56, ry * 0.04, 6, 22), gm.m, gm.want, 'glow');
+        gl.position.set(h.cx, h.cy + ry * 1.12, z);
+        gl.rotation.x = Math.PI / 2;
+      } else if (kind === 'gaunt') {
+        // armoured gauntlet: it runs BACK into the forearm, which is the one piece in this slot that
+        // is allowed to leave the hand -- the forearm is the parent bone, so it follows anyway
+        sleeve(h.wristZ - L * 0.62, h.wristZ + L * 0.58, 1.02, leatherD, 'liner');
+        const [rx, ry] = pad(1.14);
+        for (let i = 0; i < 4; i++) {
+          const z0 = h.wristZ - L * (0.58 - i * 0.3);
+          const pl = part(T, g, new T.CylinderGeometry(1, 1, 1, 20, 1, true), i % 2 ? steel : steelD, null, 'plate');
+          pl.rotation.x = Math.PI / 2;
+          pl.scale.set(rx * (1 + i * 0.02), L * 0.26, ry * (1 + i * 0.02));
+          pl.position.set(h.cx, h.cy, z0 + L * 0.13);
+        }
+        const cuff = part(T, g, new T.CylinderGeometry(1, 1, 1, 20, 1, true), steel, null, 'cuff');
+        cuff.rotation.x = Math.PI / 2; cuff.scale.set(rx * 1.22, L * 0.16, ry * 1.22);
+        cuff.position.set(h.cx, h.cy, h.wristZ - L * 0.62);
+        const kn = part(T, g, slab(T, rx * 1.5, L * 0.26, rx * 0.34, ry * 0.2), steel, null, 'knuckle');
+        kn.position.set(h.cx, h.cy + ry * 0.96, h.wristZ + L * 0.46);
+        kn.rotation.x = -Math.PI / 2;
+        for (let i = 0; i < 3; i++) {
+          const sp = part(T, g, new T.ConeGeometry(ry * 0.14, ry * 0.4, 8), steel, null, 'spike');
+          sp.position.set(h.cx + (i - 1) * rx * 0.62, h.cy + ry * 1.12, h.wristZ + L * 0.46);
+        }
+      } else if (kind === 'driver') {
+        // driving gloves: a short leather sleeve, knuckle vents and a strap over the wrist
+        sleeve(h.wristZ - L * 0.04, h.wristZ + L * 0.6, 1.0, mat(T, { color: 0x3a2a22, roughness: 0.55 }), 'glove');
+        band(h.wristZ - L * 0.02, 1.07, ry0 * 0.12, mat(T, { color: 0x241a14, roughness: 0.6 }), 'cuff');
+        for (let i = 0; i < 3; i++) {
+          const v = part(T, g, new T.CylinderGeometry(ry0 * 0.11, ry0 * 0.11, ry0 * 0.1, 10), mat(T, { color: 0x120e0b, roughness: 0.8 }), null, 'vent');
+          v.position.set(h.cx + (i - 1) * rx0 * 0.52, h.cy + ry0 * 1.0, h.wristZ + L * 0.44);
+          v.rotation.x = Math.PI / 2;
+        }
+        const st2 = part(T, g, slab(T, rx0 * 1.5, L * 0.12, rx0 * 0.2, ry0 * 0.1), mat(T, { color: 0x241a14, roughness: 0.6 }), null, 'strap');
+        st2.position.set(h.cx, h.cy + ry0 * 1.04, h.wristZ + L * 0.06);
+        st2.rotation.x = -Math.PI / 2;
+      } else if (kind === 'moto') {
+        // moto gloves: an armoured knuckle plate, which is the whole silhouette
+        sleeve(h.wristZ - L * 0.08, h.wristZ + L * 0.62, 1.0, leather, 'glove');
+        band(h.wristZ - L * 0.06, 1.1, ry0 * 0.16, leatherD, 'cuff');
+        const plate = part(T, g, slab(T, rx0 * 1.7, L * 0.3, rx0 * 0.3, ry0 * 0.26), steelD, null, 'knuckle');
+        plate.position.set(h.cx, h.cy + ry0 * 1.1, h.wristZ + L * 0.5);
+        plate.rotation.x = -Math.PI / 2;
+        for (let i = 0; i < 4; i++) {
+          const kn2 = part(T, g, new T.SphereGeometry(ry0 * 0.17, 10, 8), steel, null, 'stud');
+          kn2.position.set(h.cx + (i - 1.5) * rx0 * 0.44, h.cy + ry0 * 1.26, h.wristZ + L * 0.5);
+          kn2.scale.set(1, 0.6, 1);
+        }
+      } else if (kind === 'work') {
+        // heavy work gloves: a thick body and a tall flared cuff up the forearm
+        sleeve(h.wristZ - L * 0.3, h.wristZ + L * 0.64, 1.1, mat(T, { color: 0xc8a05a, roughness: 0.9 }), 'glove');
+        sleeve(h.wristZ - L * 0.46, h.wristZ - L * 0.22, 1.28, mat(T, { color: 0xb08a44, roughness: 0.92 }), 'cuff');
+        for (let i = 0; i < 2; i++) band(h.wristZ + L * (0.12 + i * 0.22), 1.13, ry0 * 0.08, mat(T, { color: 0x8a6a30, roughness: 0.9 }), 'seam');
+        const pad = part(T, g, slab(T, rx0 * 1.5, L * 0.34, rx0 * 0.3, ry0 * 0.2), mat(T, { color: 0x8a6a30, roughness: 0.9 }), null, 'pad');
+        pad.position.set(h.cx, h.cy - ry0 * 1.04, h.wristZ + L * 0.34);
+        pad.rotation.x = -Math.PI / 2;
+      } else if (kind === 'latex') {
+        // surgical: thin, glossy, and it runs a long way up the forearm
+        sleeve(h.wristZ - L * 0.55, h.wristZ + L * 0.66, 0.98, mat(T, { color: 0x3fc8b0, roughness: 0.22, metalness: 0.05 }), 'glove');
+        band(h.wristZ - L * 0.52, 1.03, ry0 * 0.07, mat(T, { color: 0x2f9e8a, roughness: 0.3 }), 'hem');
+      } else if (kind === 'boxing') {
+        // full boxing gloves: one big rounded mitt and a wrapped wrist, no finger detail at all
+        const mitt = part(T, g, new T.SphereGeometry(1, 18, 14), mat(T, { color: 0xc0231f, roughness: 0.52 }), null, 'glove');
+        mitt.scale.set(rx0 * 1.5, ry0 * 1.7, L * 0.42);
+        mitt.position.set(h.cx, h.cy + ry0 * 0.1, h.wristZ + L * 0.42);
+        const thumb = part(T, g, new T.SphereGeometry(1, 12, 10), mat(T, { color: 0xa81c19, roughness: 0.55 }), null, 'thumb');
+        thumb.scale.set(rx0 * 0.52, ry0 * 0.6, L * 0.2);
+        thumb.position.set(h.cx - rx0 * 1.1, h.cy - ry0 * 0.3, h.wristZ + L * 0.3);
+        sleeve(h.wristZ - L * 0.28, h.wristZ + L * 0.06, 1.12, mat(T, { color: 0xe6e2d6, roughness: 0.9 }), 'wrap');
+        band(h.wristZ - L * 0.24, 1.16, ry0 * 0.09, mat(T, { color: 0xbdb7a6, roughness: 0.92 }), 'band');
+      } else if (kind === 'chrome') {
+        // a chrome gauntlet: segmented plates up the forearm, mirror finish
+        const chr = mat(T, { color: 0xdfe6ef, metalness: 1, roughness: 0.1, envMapIntensity: 2.4 });
+        const chrD = mat(T, { color: 0x8d97a6, metalness: 1, roughness: 0.22, envMapIntensity: 1.8 });
+        sleeve(h.wristZ + L * 0.1, h.wristZ + L * 0.66, 1.04, chr, 'glove');
+        for (let i = 0; i < 4; i++) {
+          const seg = part(T, g, new T.CylinderGeometry(1, 1, L * 0.16, 20, 1, true), i % 2 ? chrD : chr, null, 'plate');
+          seg.rotation.x = Math.PI / 2;
+          seg.scale.set(rx0 * (1.16 - i * 0.03), L * 0.16, ry0 * (1.16 - i * 0.03));
+          seg.position.set(h.cx, h.cy, h.wristZ - L * (0.06 + i * 0.17));
+        }
+        const ridge = part(T, g, slab(T, rx0 * 0.4, L * 0.7, rx0 * 0.12, ry0 * 0.16), chrD, null, 'ridge');
+        ridge.position.set(h.cx, h.cy + ry0 * 1.1, h.wristZ + L * 0.3);
+        ridge.rotation.x = -Math.PI / 2;
+      } else { continue; }
+      mount(M, h.key, g, 0, 0, 0);
+    }
+  }
+
+  // ---------------------------------------------------------------- back
+  // CHEST-bone units, measured in `measure()`: x across the shoulders (`halfW`), y chest -> neck
+  // (`botY`..`topY`, `h`), z toward the face. The rear SURFACE is `backZ`, measured across the middle
+  // of the back only -- the shoulder caps and the small of the back both sit further in, and letting
+  // them into that number is what would hang a pack a hand's width off the body.
+  function buildBack(T, M, kind) {
+    const b = M.back; if (!b) return;
+    const g = gearGroup(T, 'back');
+    const W = b.coreW, Hh = b.h, D = b.halfD, zb = b.backZ, yMid = b.midY;
+    const canvas = mat(T, { color: 0x2b2f38, roughness: 0.88 });
+    const canvasD = mat(T, { color: 0x1a1d24, roughness: 0.9 });
+    const strapM = mat(T, { color: 0x14161c, roughness: 0.8 });
+    const steel = mat(T, { color: 0x9aa4b2, metalness: 1, roughness: 0.3, envMapIntensity: 1.6 });
+    const steelD = mat(T, { color: 0x3f4654, metalness: 1, roughness: 0.45, envMapIntensity: 1.2 });
+    // two shoulder straps, from the top of the piece, over the shoulder line, down the chest. They
+    // are what makes a pack look worn instead of stuck on.
+    const straps = (yTop, m) => {
+      for (const s of [-1, 1]) {
+        const st = part(T, g, new T.CylinderGeometry(W * 0.1, W * 0.1, Hh * 0.72, 10), m, null, 'strap');
+        st.position.set(s * W * 0.58, yTop - Hh * 0.2, zb + D * 0.55);
+        st.rotation.x = -0.34;
+      }
+      for (const s of [-1, 1]) {
+        const sh = part(T, g, new T.TorusGeometry(D * 0.78, W * 0.1, 8, 18, Math.PI * 1.05), m, null, 'strap');
+        sh.position.set(s * W * 0.58, yTop, 0);
+        sh.rotation.set(Math.PI / 2, 0, 0); sh.rotation.y = Math.PI / 2;
+      }
+    };
+    if (kind === 'pack') {
+      // The depth is driven by the torso's own DEPTH and only floored on its width. The first version
+      // was `max(D * 0.8, W * 0.5)`, and on a body with a shallow chest and a broad back (wojak,
+      // techno, fartcoin, brett) the width term won and hung the pack 1.5+ torso depths off the back.
+      // Clamping it to the body's depth is the difference between a pack worn and a pack towed.
+      const pd = Math.min(Math.max(D * 0.72, W * 0.34), D * 1.2);
+      const body = part(T, g, slab(T, W * 1.9, Hh * 0.78, W * 0.3, pd), canvas, null, 'pack');
+      body.position.set(0, yMid, zb - pd * 0.5);
+      const lid = part(T, g, slab(T, W * 1.96, Hh * 0.3, W * 0.3, pd * 0.9), canvasD, null, 'lid');
+      lid.position.set(0, yMid + Hh * 0.28, zb - pd * 0.5);
+      const pocket = part(T, g, slab(T, W * 1.1, Hh * 0.26, W * 0.2, pd * 0.45), canvasD, null, 'pocket');
+      pocket.position.set(0, yMid - Hh * 0.2, zb - pd * 1.02);
+      for (const s of [-1, 1]) {
+        const bk = part(T, g, new T.BoxGeometry(W * 0.22, Hh * 0.1, W * 0.14), steelD, null, 'buckle');
+        bk.position.set(s * W * 0.5, yMid + Hh * 0.12, zb - pd * 1.0);
+      }
+      straps(yMid + Hh * 0.36, strapM);
+    } else if (kind === 'cape') {
+      // a hanging cloth, built as a curved strip so it wraps the shoulders instead of standing off
+      // the back as a flat board. DoubleSide, because you see the inside of a cape constantly.
+      const cm = new T.MeshStandardMaterial({ color: 0x8c1024, roughness: 0.82, side: T.DoubleSide });
+      const lining = new T.MeshStandardMaterial({ color: 0x2b0a12, roughness: 0.86, side: T.DoubleSide });
+      // `clear` is the air between the cloth and the measured back surface. Without it the sheet
+      // starts exactly on the skin and the first frame of animation pushes it through.
+      const clear = Math.max(D * 0.08, W * 0.04);
+      // THE SECOND PIECE THAT PASSED EVERY NUMBER AND LOOKED WRONG. At a wrap of 0.95*PI and a flare
+      // of 1.55 the sheet came out as a flat red BOARD on any broad-backed body (mochi, ape, bear):
+      // the cloth was in the right place, hanging the right distance, and read as plywood, because a
+      // cape is recognisable by its CURVATURE and almost all of this one's was spent going sideways.
+      // More wrap round the body, less sideways flare, and a fold pattern that deepens toward the hem
+      // the way hanging cloth actually does.
+      const sheet = (off) => {
+        const geo = new T.PlaneGeometry(1, 1, 26, 12), pos = geo.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+          const u = pos.getX(i) + 0.5, v = pos.getY(i) + 0.5;     // 0..1 across, 0..1 up
+          // 0.62 PI of wrap, not 1.22: at the wider angle the edges swung so far behind the body that
+          // the sheet closed into a tube and read as a rolled banner. A cape is WIDE and only gently
+          // curved -- the curvature is what stops it being a board, the width is what makes it a cape,
+          // and the first two attempts each had one of those at the cost of the other.
+          const a = (u - 0.5) * Math.PI * 0.62;                   // wrap angle around the body
+          const flare = 1 + (1 - v) * 0.45;                       // wider at the hem
+          const fold = Math.sin(u * Math.PI * 4) * (1 - v) * 0.45 + Math.sin(u * Math.PI * 7.5) * (1 - v) * 0.14;
+          const x = Math.sin(a) * W * 1.7 * flare;
+          const z = zb - clear - off + (Math.cos(a) - 1) * D * 0.9 - (1 - v) * D * 0.28
+            + fold * D * 0.34;                                    // the folds move the cloth in DEPTH
+          const y = b.topY - (1 - v) * Hh * 2.25 + Math.abs(fold) * Hh * 0.05 * (1 - v);
+          pos.setXYZ(i, x, y, z);
+        }
+        geo.computeVertexNormals();
+        return geo;
+      };
+      part(T, g, sheet(clear * 0.5), cm, null, 'cape');
+      part(T, g, sheet(0), lining, null, 'lining');
+      // the collar: a torus arc round the back of the neck, which is what holds it up
+      // tagged `strap`, not `collar`: `collar` is the neck slot's own tag and the probe's soft list is
+      // shared across slots, so borrowing the name would relax the bow tie's test as a side effect
+      const col = part(T, g, new T.TorusGeometry(W * 1.15, W * 0.12, 8, 22, Math.PI * 1.15), canvasD, null, 'strap');
+      col.position.set(0, b.topY, zb + D * 0.25);
+      col.rotation.set(Math.PI / 2, 0, -Math.PI * 0.075);
+      // There were two metal clasps here at z = backZ + halfD/2, which the probe measured as 8% of
+      // the piece BURIED IN THE TORSO -- a quarter of the way into the chest. They are gone rather
+      // than pushed outward until the number clears: a cape is held up by its collar, the collar arc
+      // is already there and already hugs the right surface, so the clasps were decoration sitting
+      // inside a ribcage. Thickening the centre of the collar reads as the fastening instead.
+      // (there was a metal knot here at zb + D * 0.3 as well, and the probe measured it inside the
+      // torso on bonk, kaiju and mystic for the same reason the clasps were: anything placed forward
+      // of the measured rear surface by a fraction of the body's own depth is INSIDE the body. The
+      // collar arc is the fastening.)
+    } else if (kind === 'katana') {
+      // slung across the back on a strap, hilt up over the right shoulder
+      // The length is capped against the back's WIDTH as well as its height. At a flat `Hh * 2.0` a
+      // tall narrow torso wore a blade half again as long as its own back, and the hilt swung so far
+      // out that the piece measured 0.8+ of the back width off centre on nine bodies. A slung blade is
+      // meant to be diagonal, not to be longer than the person carrying it.
+      const sheathL = Math.min(Hh * 1.72, W * 4.6), r = Math.max(W * 0.11, D * 0.14);
+      const holder = new T.Group(); holder.userData.cfGear = true;
+      const sh = part(T, holder, new T.CylinderGeometry(r, r * 0.86, sheathL, 14), mat(T, { color: 0x101318, roughness: 0.42 }), null, 'sheath');
+      sh.position.set(0, 0, 0);
+      for (let i = 0; i < 4; i++) {
+        const w = part(T, holder, new T.TorusGeometry(r * 1.06, r * 0.1, 6, 16), mat(T, { color: 0xb08a3a, metalness: 1, roughness: 0.32 }), null, 'wrap');
+        w.position.set(0, sheathL * (0.34 - i * 0.22), 0); w.rotation.x = Math.PI / 2;
+      }
+      const grip = part(T, holder, new T.CylinderGeometry(r * 0.62, r * 0.62, sheathL * 0.3, 12), mat(T, { color: 0x1c1f26, roughness: 0.7 }), null, 'grip');
+      grip.position.set(0, sheathL * 0.63, 0);
+      const guard = part(T, holder, new T.CylinderGeometry(r * 1.5, r * 1.5, r * 0.26, 20), mat(T, { color: 0x30343d, metalness: 0.9, roughness: 0.38 }), null, 'guard');
+      guard.position.set(0, sheathL * 0.49, 0);
+      const cap = part(T, holder, new T.SphereGeometry(r * 0.66, 14, 10), mat(T, { color: 0x30343d, metalness: 0.9, roughness: 0.38 }), null, 'cap');
+      cap.position.set(0, sheathL * 0.78, 0);
+      // the slung diagonal, with the holder shifted back by the hilt's own lean so the piece sits
+      // across the back rather than hanging off one shoulder
+      const lean = 0.42;
+      holder.rotation.z = -lean;
+      holder.position.set(-Math.sin(lean) * sheathL * 0.22, yMid, zb - r * 1.15);
+      g.add(holder);
+      const bandM = mat(T, { color: 0x141720, roughness: 0.84 });
+      const bd = part(T, g, new T.TorusGeometry(Math.max(W * 1.25, D * 1.3), W * 0.095, 8, 26), bandM, null, 'baldric');
+      bd.position.set(0, yMid + Hh * 0.1, zb + D * 0.45);
+      bd.rotation.set(Math.PI / 2, 0, 0); bd.rotation.y = 0.56;
+    } else if (kind === 'wings') {
+      const featherM = mat(T, { color: 0xf2f4fa, roughness: 0.52 });
+      const featherD = mat(T, { color: 0xc9d2e2, roughness: 0.6 });
+      // THE FIRST VERSION OF THESE PASSED EVERY NUMBER AND LOOKED WRONG, which is the exact failure
+      // the acceptance rules warn about. The feathers were fanned through `rotation.z` alone, from
+      // -0.26 to -1.38 radians, so the last ones lay nearly horizontal and the pair read as a white
+      // RUFF round the shoulders rather than as wings -- correct position, correct size, correct
+      // clearance, wrong object. A wing sweeps BACK and up: the span is mostly along -z, the fan
+      // angle stays well short of horizontal, and each feather sits further back than the one before.
+      // Attempt three, and the first two are worth recording because they were both the same mistake.
+      // Fanning the feathers from ONE origin -- whatever the angles -- builds a comb: every feather
+      // radiates from the same point, so the silhouette is a sector of a circle. A wing is not a fan.
+      // It has a LEADING EDGE that sweeps out from the shoulder and back, with feathers hanging off
+      // that edge roughly PARALLEL to each other and shortening toward the tip. So the feathers are
+      // placed ALONG a curve and all point the same way, instead of being rotated about a hub.
+      for (const s of [-1, 1]) {
+        const wing = new T.Group(); wing.userData.cfGear = true;
+        const N = 13;
+        // The leading edge as a direction, so every feather can be built in the WING'S OWN PLANE.
+        // Attempt three placed the feathers correctly and still read as a garden rake, because
+        // `setFromUnitVectors` gives the MINIMAL rotation from +Y to the feather direction -- which
+        // twists each flat feather a different amount about its own length and leaves them standing
+        // edge-on with daylight between them. A feather is a flat thing and which way the flat faces
+        // is the whole silhouette, so the orientation is a full basis: length along the feather,
+        // thickness along the wing's surface normal, width across the two.
+        const edge = new T.Vector3(s * W * 1.5, Hh * 0.53, -D * 0.55).normalize();
+        for (let i = 0; i < N; i++) {
+          const t = i / (N - 1);
+          // the leading edge: out from the shoulder, up, and back
+          const lx = s * W * (0.18 + t * 1.5);
+          const ly = Hh * (0.1 + t * 0.95 - t * t * 0.42);
+          const lz = -D * (0.05 + t * 0.55);
+          // every feather points the same way -- back, down and slightly out -- so they read as a
+          // surface rather than as spokes. The tip ones tilt a little further out.
+          const dir = new T.Vector3(s * (0.16 + t * 0.3), -(0.78 - t * 0.2), -(0.5 + t * 0.26)).normalize();
+          // the feathers OVERLAP: each is wider than the gap to the next, so the wing is a surface
+          // rather than a row of blades with sky between them
+          const len = Hh * (1.25 - t * 0.72), wdt = W * (0.42 - t * 0.16);
+          const f = part(T, wing, slab(T, wdt, len, wdt * 0.42, Math.max(W * 0.028, 1e-4)), i % 2 ? featherM : featherD, null, 'feather');
+          const nrm = new T.Vector3().crossVectors(edge, dir).normalize();
+          // the cross product flips sign on the mirrored side, which inverts the basis and with it
+          // the winding of every feather on that wing. Point it outward on both sides instead.
+          if (nrm.x * s < 0) nrm.negate();
+          const wax = new T.Vector3().crossVectors(dir, nrm).normalize();
+          f.quaternion.setFromRotationMatrix(new T.Matrix4().makeBasis(wax, dir, nrm));
+          f.position.set(lx, ly, lz).addScaledVector(dir, len * 0.42);
+          wing.add(f);
+        }
+        // the arm bone along that same leading edge, which is what the feathers visibly hang from
+        const a0 = new T.Vector3(s * W * 0.18, Hh * 0.1, -D * 0.05);
+        const a1 = new T.Vector3(s * W * 1.68, Hh * 0.63, -D * 0.6);
+        strut(T, wing, a0, a1, W * 0.075, featherD, 'bone', 8);
+        wing.position.set(0, yMid + Hh * 0.18, zb - D * 0.05);
+        g.add(wing);
+      }
+      const yoke = part(T, g, slab(T, W * 1.5, Hh * 0.3, W * 0.3, D * 0.2), steelD, null, 'yoke');
+      yoke.position.set(0, yMid + Hh * 0.16, zb - D * 0.16);
+      straps(yMid + Hh * 0.34, strapM);
+    } else return;
+    mount(M, 'back', g, 0, 0, 0);
   }
 
   // ---------------------------------------------------------------- auras
@@ -1827,13 +2982,645 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
     mount(M, 'root', g, 0, M.minY, 0);
   }
 
+  // ---------------------------------------------------------------- the guard slot (shields)
+  // Duane asked for these by name. The argument for them is the whole visibility rule in one
+  // object: a shield rides on the back when idle and comes up on a block, so it is on screen for
+  // the entire match whether it is being used or not. Gods Unchained has the best shield objects in
+  // the category and a one cent floor, because a card game cosmetic is seen by one person.
+  //
+  // Each one is built from its SILHOUETTE, never as a decorated box: an octagon is an octagon, a
+  // manhole is a disc with ribs, a grate has gaps you can see through. That lesson cost two rebuilds
+  // on the boot ([[store-render-rig-counterstrike]]) and it is the difference between a shield and a
+  // plate with a texture on it. Nothing here carries a combat number; it reskins the existing guard.
+  function buildGuard(T, M, kind) {
+    const b = M.back; if (!b) return;
+    const g = gearGroup(T, 'guard');
+    const W = b.coreW, Hh = b.h, D = b.halfD, zb = b.backZ, yMid = b.midY;
+    // the plate sits just off the measured back surface, slightly to the carrying side
+    // Clamped against the torso's own DEPTH, not only its width. The first run hung four shields
+    // 1.3 to 1.8 torso depths off wojak's back, because that body is broad and shallow: the width
+    // term won and towed the plate behind the fighter. The same mistake the backpack made in July.
+    const clear = Math.min(Math.max(D * 0.09, W * 0.035), D * 0.3);
+    const z = zb - clear;
+    const R = Math.min(W * 1.55, Hh * 0.86);              // the shield's own radius / half-width
+    const steel = mat(T, { color: 0x8d97a6, metalness: 1, roughness: 0.36, envMapIntensity: 1.5 });
+    const steelD = mat(T, { color: 0x454c59, metalness: 1, roughness: 0.52, envMapIntensity: 1.1 });
+    const zinc = mat(T, { color: 0xa8b0b8, metalness: 0.9, roughness: 0.6, envMapIntensity: 1.2 });
+    const iron = mat(T, { color: 0x4a4238, metalness: 0.85, roughness: 0.68, envMapIntensity: 1.0 });
+    const ply = mat(T, { color: 0xb08a52, roughness: 0.92 });
+    const paintR = mat(T, { color: 0xc0231f, roughness: 0.55 });
+    const paintW = mat(T, { color: 0xe8e6e0, roughness: 0.6 });
+    const brass = mat(T, { color: 0xb08430, metalness: 1, roughness: 0.3, envMapIntensity: 1.8 });
+    const gold = mat(T, { color: 0xffc83d, metalness: 1, roughness: 0.18, envMapIntensity: 2.1 });
+    const dark = mat(T, { color: 0x1a1d24, roughness: 0.78 });
+    const marble = mat(T, { color: 0xd8d4c8, roughness: 0.42, metalness: 0.1 });
+    // the one piece of geometry every shield needs: the grip bar on the player's side
+    const grip = (m, len) => {
+      const h = part(T, g, new T.CylinderGeometry(R * 0.07, R * 0.07, len || R * 0.9, 10), m || steelD, null, 'grip');
+      h.position.set(0, yMid, z + R * 0.1);
+      h.rotation.z = Math.PI / 2;
+      return h;
+    };
+    // a flat disc of n sides, lying in the fight plane (so it faces the camera edge-on when worn)
+    const disc = (sides, rad, thick, m, tag) => {
+      const d = part(T, g, new T.CylinderGeometry(rad, rad, thick, sides), m, null, tag || 'plate');
+      d.rotation.x = Math.PI / 2;
+      d.position.set(0, yMid, z - thick * 0.5);
+      return d;
+    };
+    if (kind === 'dumpster') {
+      const p = part(T, g, slab(T, R * 1.9, R * 1.5, R * 0.1, R * 0.12), zinc, null, 'plate');
+      p.position.set(0, yMid, z - R * 0.06);
+      // the dent: a shallow sphere pressed into the face, which is what stops it reading as a panel
+      const dent = part(T, g, new T.SphereGeometry(R * 0.42, 14, 10), zinc, null, 'dent');
+      dent.position.set(-R * 0.22, yMid + R * 0.18, z + R * 0.04); dent.scale.set(1, 1, 0.26);
+      for (let i = -1; i <= 1; i++) {
+        const rib = part(T, g, new T.BoxGeometry(R * 1.86, R * 0.07, R * 0.06), steelD, null, 'rib');
+        rib.position.set(0, yMid + i * R * 0.52, z - R * 0.13);
+      }
+      grip(steelD);
+    } else if (kind === 'plyboard') {
+      const p = part(T, g, slab(T, R * 1.8, R * 1.6, R * 0.06, R * 0.09), ply, null, 'plate');
+      p.position.set(0, yMid, z - R * 0.045);
+      // a spray stripe across it, and a splintered corner so the silhouette is not a clean rectangle
+      const st = part(T, g, new T.BoxGeometry(R * 1.86, R * 0.26, R * 0.012), paintR, null, 'tag');
+      st.position.set(0, yMid - R * 0.1, z - R * 0.1); st.rotation.z = -0.14;
+      for (let i = 0; i < 3; i++) {
+        const sp = part(T, g, new T.ConeGeometry(R * 0.1, R * 0.26, 3), ply, null, 'splinter');
+        sp.position.set(R * (0.72 + i * 0.07), yMid + R * (0.6 - i * 0.18), z - R * 0.045);
+        sp.rotation.z = -1.2 - i * 0.3;
+      }
+      grip(dark);
+    } else if (kind === 'stopsign') {
+      const p = disc(8, R * 0.95, R * 0.07, paintR);
+      p.rotation.y = Math.PI / 8;
+      const ring = part(T, g, new T.TorusGeometry(R * 0.78, R * 0.045, 8, 8), paintW, null, 'ring');
+      ring.position.set(0, yMid, z - R * 0.1); ring.rotation.z = Math.PI / 8;
+      // the pipe it is bolted to: a stop sign on a pole reads instantly at thumbnail size
+      // 2.3 R of pole hung the sign 0.51-0.55 torso heights below the chest on pengu and topg,
+      // past the 0.45 ceiling the piece declares. A sign on a stub of pole still reads as a sign.
+      const pipe = part(T, g, new T.CylinderGeometry(R * 0.09, R * 0.09, R * 1.5, 10), steelD, null, 'pole');
+      pipe.position.set(0, yMid - R * 0.08, z + R * 0.06);
+      grip(steelD, R * 0.7);
+    } else if (kind === 'manhole') {
+      disc(28, R * 0.96, R * 0.12, iron);
+      for (let i = 0; i < 2; i++) {
+        const ring = part(T, g, new T.TorusGeometry(R * (0.82 - i * 0.26), R * 0.04, 8, 26), iron, null, 'ring');
+        ring.position.set(0, yMid, z - R * 0.19);
+      }
+      // raised radial ribs, the detail that makes cast iron read as cast iron
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2;
+        const rb = part(T, g, new T.BoxGeometry(R * 0.5, R * 0.07, R * 0.05), iron, null, 'rib');
+        rb.position.set(Math.cos(a) * R * 0.52, yMid + Math.sin(a) * R * 0.52, z - R * 0.2);
+        rb.rotation.z = a;
+      }
+      grip(steelD, R * 0.8);
+    } else if (kind === 'plank') {
+      // a GRATE: a frame with gaps you can see through, which costs nothing and looks expensive
+      const fr = (w, h, x, y) => { const q = part(T, g, new T.BoxGeometry(w, h, R * 0.1), steelD, null, 'frame'); q.position.set(x, yMid + y, z - R * 0.05); return q; };
+      fr(R * 1.8, R * 0.11, 0, R * 0.78); fr(R * 1.8, R * 0.11, 0, -R * 0.78);
+      fr(R * 0.11, R * 1.67, -R * 0.85, 0); fr(R * 0.11, R * 1.67, R * 0.85, 0);
+      for (let i = 0; i < 7; i++) {
+        const s = part(T, g, new T.BoxGeometry(R * 1.7, R * 0.07, R * 0.07), zinc, null, 'slat');
+        s.position.set(0, yMid - R * 0.62 + i * R * 0.21, z - R * 0.05);
+      }
+      grip(steelD);
+    } else if (kind === 'cardoor') {
+      const p = part(T, g, slab(T, R * 1.55, R * 1.95, R * 0.22, R * 0.14), paintR, null, 'plate');
+      p.position.set(0, yMid, z - R * 0.07);
+      // the window: a dark inset in the top third, half down, with the glass line above it
+      const win = part(T, g, slab(T, R * 1.25, R * 0.56, R * 0.12, R * 0.05), dark, null, 'window');
+      win.position.set(0, yMid + R * 0.56, z - R * 0.15);
+      const sill = part(T, g, new T.BoxGeometry(R * 1.35, R * 0.08, R * 0.16), steelD, null, 'sill');
+      sill.position.set(0, yMid + R * 0.24, z - R * 0.14);
+      const mir = part(T, g, new T.BoxGeometry(R * 0.26, R * 0.18, R * 0.12), steelD, null, 'mirror');
+      mir.position.set(-R * 0.82, yMid + R * 0.3, z - R * 0.12); mir.rotation.z = 0.3;
+      const hand = part(T, g, new T.BoxGeometry(R * 0.4, R * 0.1, R * 0.1), steel, null, 'handle');
+      hand.position.set(R * 0.3, yMid - R * 0.08, z - R * 0.19);
+      grip(dark);
+    } else if (kind === 'riot') {
+      // transparency does all the work here. A clear plate with scratches and a stencil reads as
+      // polycarbonate; the same plate in grey reads as a lunch tray.
+      const glass = new T.MeshStandardMaterial({ color: 0xbcd0dd, metalness: 0.1, roughness: 0.18,
+        transparent: true, opacity: 0.34, envMapIntensity: 2.0, side: T.DoubleSide });
+      const p = part(T, g, slab(T, R * 1.45, R * 2.0, R * 0.3, R * 0.05), glass, null, 'plate');
+      p.position.set(0, yMid, z - R * 0.03);
+      for (let i = 0; i < 4; i++) {
+        const sc = part(T, g, new T.BoxGeometry(R * (0.5 + i * 0.12), R * 0.018, R * 0.012), paintW, null, 'scratch');
+        sc.position.set((i % 2 ? 1 : -1) * R * 0.28, yMid + R * (0.5 - i * 0.34), z - R * 0.07);
+        sc.rotation.z = 0.2 - i * 0.14;
+      }
+      const band = part(T, g, new T.BoxGeometry(R * 1.3, R * 0.2, R * 0.02), dark, null, 'stencil');
+      band.position.set(0, yMid - R * 0.5, z - R * 0.07);
+      grip(dark);
+    } else if (kind === 'table') {
+      disc(30, R * 0.92, R * 0.1, marble);
+      const rim = part(T, g, new T.TorusGeometry(R * 0.92, R * 0.05, 8, 30), steel, null, 'rim');
+      rim.position.set(0, yMid, z - R * 0.05);
+      // one chipped edge, so a round top is not a perfect circle
+      const chip = part(T, g, new T.SphereGeometry(R * 0.16, 10, 8), dark, null, 'chip');
+      chip.position.set(R * 0.86, yMid + R * 0.3, z - R * 0.05); chip.scale.set(1, 1, 0.4);
+      const stem = part(T, g, new T.CylinderGeometry(R * 0.1, R * 0.14, R * 0.7, 12), steel, null, 'stem');
+      stem.position.set(0, yMid - R * 0.1, z + R * 0.22); stem.rotation.x = Math.PI / 2;
+      grip(steelD, R * 0.7);
+    } else if (kind === 'ticker') {
+      const p = part(T, g, slab(T, R * 2.0, R * 1.2, R * 0.08, R * 0.09), dark, null, 'plate');
+      p.position.set(0, yMid, z - R * 0.045);
+      // the split flaps: small bright tiles in rows. They are the whole item, so there are enough of
+      // them to read as a board and few enough to stay cheap.
+      const on = mat(T, { color: 0x27e1ff, emissive: 0x0d6e80, emissiveIntensity: 1, roughness: 0.4 });
+      const up = mat(T, { color: 0x3dff8a, emissive: 0x126b35, emissiveIntensity: 1, roughness: 0.4 });
+      const dn = mat(T, { color: 0xff2a4a, emissive: 0x6b1020, emissiveIntensity: 1, roughness: 0.4 });
+      for (let r0 = 0; r0 < 3; r0++) for (let c = 0; c < 8; c++) {
+        const t2 = part(T, g, new T.BoxGeometry(R * 0.18, R * 0.22, R * 0.03), c % 5 === 0 ? up : c % 7 === 0 ? dn : on, null, 'flap');
+        // proud of the plate, not flush with it: at R*0.13 against a plate whose front face was at
+        // R*0.12 the flaps were invisible and the whole board baked as a black rectangle
+        t2.position.set(-R * 0.78 + c * R * 0.224, yMid + R * (0.33 - r0 * 0.33), z - R * 0.145);
+      }
+      grip(steelD);
+    } else if (kind === 'vault') {
+      disc(30, R * 0.95, R * 0.2, steel);
+      const rim = part(T, g, new T.TorusGeometry(R * 0.9, R * 0.1, 10, 30), steelD, null, 'rim');
+      rim.position.set(0, yMid, z - R * 0.12);
+      // the wheel: a brass torus with spokes. It spins on a guard, which is the thing being bought.
+      const wheel = part(T, g, new T.TorusGeometry(R * 0.42, R * 0.06, 10, 26), brass, null, 'wheel');
+      wheel.position.set(0, yMid, z - R * 0.28);
+      for (let i = 0; i < 4; i++) {
+        const sp = part(T, g, new T.BoxGeometry(R * 0.84, R * 0.07, R * 0.07), brass, null, 'spoke');
+        sp.position.set(0, yMid, z - R * 0.28); sp.rotation.z = i * Math.PI / 4;
+      }
+      const hub = part(T, g, new T.CylinderGeometry(R * 0.12, R * 0.12, R * 0.16, 12), brass, null, 'hub');
+      hub.position.set(0, yMid, z - R * 0.32); hub.rotation.x = Math.PI / 2;
+      grip(steelD, R * 0.75);
+    } else if (kind === 'bullion') {
+      // stacked bars, strapped. Real metal roughness, one warm specular, nothing else.
+      for (let r0 = 0; r0 < 3; r0++) {
+        const n = 3 - r0;
+        for (let i = 0; i < n; i++) {
+          const bar = part(T, g, slab(T, R * 0.56, R * 0.3, R * 0.06, R * 0.14), gold, null, 'bar');
+          bar.position.set((i - (n - 1) / 2) * R * 0.6, yMid - R * 0.55 + r0 * R * 0.36, z - R * (0.08 + r0 * 0.02));
+          bar.rotation.z = (i - (n - 1) / 2) * 0.03;
+        }
+      }
+      for (const s of [-1, 1]) {
+        const strap = part(T, g, new T.BoxGeometry(R * 0.08, R * 1.3, R * 0.5), dark, null, 'strap');
+        strap.position.set(s * R * 0.42, yMid - R * 0.1, z - R * 0.14);
+      }
+      grip(steelD, R * 0.8);
+    } else if (kind === 'desk') {
+      // a section of trading floor: a dark panel, two phone blocks and a handset still swinging
+      const p = part(T, g, slab(T, R * 2.0, R * 1.3, R * 0.1, R * 0.16), dark, null, 'plate');
+      p.position.set(0, yMid, z - R * 0.08);
+      const edge = part(T, g, new T.BoxGeometry(R * 2.06, R * 0.12, R * 0.22), brass, null, 'edge');
+      edge.position.set(0, yMid + R * 0.64, z - R * 0.1);
+      for (const s of [-1, 1]) {
+        const ph = part(T, g, slab(T, R * 0.4, R * 0.26, R * 0.06, R * 0.1), steelD, null, 'phone');
+        ph.position.set(s * R * 0.62, yMid - R * 0.18, z - R * 0.17);
+        const keys = part(T, g, new T.BoxGeometry(R * 0.26, R * 0.14, R * 0.04), mat(T, { color: 0x2b3340, roughness: 0.6 }), null, 'keys');
+        keys.position.set(s * R * 0.62, yMid - R * 0.18, z - R * 0.21);
+      }
+      const hs = part(T, g, new T.CapsuleGeometry ? new T.CapsuleGeometry(R * 0.07, R * 0.3, 4, 8) : new T.CylinderGeometry(R * 0.07, R * 0.07, R * 0.4, 8), dark, null, 'handset');
+      hs.position.set(R * 0.9, yMid - R * 0.44, z - R * 0.18); hs.rotation.z = 0.5;
+      const cord = part(T, g, new T.TorusGeometry(R * 0.16, R * 0.02, 6, 16, Math.PI * 1.4), dark, null, 'cord');
+      cord.position.set(R * 0.8, yMid - R * 0.28, z - R * 0.18); cord.rotation.y = Math.PI / 2;
+      grip(brass);
+    } else if (kind === 'wheelrim') {
+      // an alloy wheel: a tyre lip, a dished face and five spokes out to a rim
+      const tyre = part(T, g, new T.TorusGeometry(R * 0.92, R * 0.17, 12, 34), dark, null, 'tyre');
+      tyre.position.set(0, yMid, z - R * 0.04);
+      disc(26, R * 0.78, R * 0.1, steel);
+      for (let i = 0; i < 5; i++) {
+        const a2 = (i / 5) * Math.PI * 2;
+        const sp = part(T, g, slab(T, R * 0.19, R * 0.62, R * 0.06, R * 0.08), steel, null, 'spoke');
+        sp.position.set(Math.cos(a2) * R * 0.36, yMid + Math.sin(a2) * R * 0.36, z - R * 0.12);
+        sp.rotation.z = a2 - Math.PI / 2;
+      }
+      const hub = part(T, g, new T.CylinderGeometry(R * 0.2, R * 0.2, R * 0.14, 14), steelD, null, 'hub');
+      hub.position.set(0, yMid, z - R * 0.16); hub.rotation.x = Math.PI / 2;
+      for (let i = 0; i < 5; i++) {
+        const a2 = (i / 5) * Math.PI * 2 + 0.6;
+        const nut = part(T, g, new T.CylinderGeometry(R * 0.045, R * 0.045, R * 0.06, 6), brass, null, 'nut');
+        nut.position.set(Math.cos(a2) * R * 0.13, yMid + Math.sin(a2) * R * 0.13, z - R * 0.21);
+        nut.rotation.x = Math.PI / 2;
+      }
+      grip(steelD, R * 0.8);
+    } else if (kind === 'oildrum') {
+      // a drum lid: a shallow disc with a rolled rim and a bung off centre
+      disc(30, R * 0.9, R * 0.14, mat(T, { color: 0x2f6a4a, metalness: 0.85, roughness: 0.55, envMapIntensity: 1.2 }));
+      const roll = part(T, g, new T.TorusGeometry(R * 0.9, R * 0.08, 10, 32), steelD, null, 'rim');
+      roll.position.set(0, yMid, z - R * 0.08);
+      for (let i = 0; i < 2; i++) {
+        const ring = part(T, g, new T.TorusGeometry(R * (0.6 - i * 0.22), R * 0.035, 8, 28), steelD, null, 'ring');
+        ring.position.set(0, yMid, z - R * 0.15);
+      }
+      const bung = part(T, g, new T.CylinderGeometry(R * 0.13, R * 0.13, R * 0.1, 12), brass, null, 'bung');
+      bung.position.set(R * 0.42, yMid + R * 0.3, z - R * 0.18); bung.rotation.x = Math.PI / 2;
+      grip(steelD, R * 0.8);
+    } else if (kind === 'firedoor') {
+      // a tall steel door: a push bar across it and a small wired window near the top
+      const p = part(T, g, slab(T, R * 1.5, R * 2.05, R * 0.14, R * 0.14), mat(T, { color: 0x9c3a2a, roughness: 0.6, metalness: 0.5 }), null, 'plate');
+      p.position.set(0, yMid, z - R * 0.07);
+      const win = part(T, g, slab(T, R * 0.72, R * 0.5, R * 0.08, R * 0.04), dark, null, 'window');
+      win.position.set(0, yMid + R * 0.74, z - R * 0.15);
+      for (let i = 0; i < 4; i++) {
+        const wire = part(T, g, new T.BoxGeometry(R * 0.72, R * 0.015, R * 0.015), steelD, null, 'wire');
+        wire.position.set(0, yMid + R * (0.58 + i * 0.1), z - R * 0.17);
+      }
+      const bar = part(T, g, new T.CylinderGeometry(R * 0.07, R * 0.07, R * 1.26, 10), steel, null, 'pushbar');
+      bar.position.set(0, yMid - R * 0.18, z - R * 0.2); bar.rotation.z = Math.PI / 2;
+      for (const sx of [-1, 1]) {
+        const br = part(T, g, new T.BoxGeometry(R * 0.08, R * 0.1, R * 0.2), steelD, null, 'bracket');
+        br.position.set(sx * R * 0.52, yMid - R * 0.18, z - R * 0.16);
+      }
+      grip(dark);
+    } else if (kind === 'grill') {
+      // a round grate: parallel bars with gaps you can see through, inside a hoop
+      const hoop = part(T, g, new T.TorusGeometry(R * 0.88, R * 0.06, 10, 34), steelD, null, 'hoop');
+      hoop.position.set(0, yMid, z - R * 0.06);
+      for (let i = -5; i <= 5; i++) {
+        const t2 = Math.abs(i) / 5.5;
+        const half = Math.sqrt(Math.max(0, 1 - t2 * t2)) * R * 0.86;
+        const barG = part(T, g, new T.CylinderGeometry(R * 0.035, R * 0.035, half * 2, 8), zinc, null, 'bar');
+        barG.position.set(0, yMid + i * R * 0.155, z - R * 0.06);
+        barG.rotation.z = Math.PI / 2;
+      }
+      const handle = part(T, g, new T.TorusGeometry(R * 0.16, R * 0.04, 8, 16, Math.PI), steel, null, 'handle');
+      handle.position.set(0, yMid + R * 0.9, z - R * 0.06);
+      grip(steelD, R * 0.75);
+    } else if (kind === 'sign') {
+      // a street sign on a post: the most readable silhouette on the shelf at thumbnail size
+      const blade = part(T, g, slab(T, R * 1.9, R * 0.52, R * 0.05, R * 0.06), mat(T, { color: 0x1f6b43, roughness: 0.45, metalness: 0.4 }), null, 'plate');
+      blade.position.set(0, yMid + R * 0.35, z - R * 0.03);
+      const edge = part(T, g, slab(T, R * 1.78, R * 0.4, R * 0.04, R * 0.012), paintW, null, 'edge');
+      edge.position.set(0, yMid + R * 0.35, z - R * 0.08);
+      for (let i = 0; i < 5; i++) {
+        const ch = part(T, g, new T.BoxGeometry(R * 0.14, R * 0.2, R * 0.012), paintW, null, 'letter');
+        ch.position.set(-R * 0.56 + i * R * 0.28, yMid + R * 0.35, z - R * 0.09);
+      }
+      const post = part(T, g, new T.CylinderGeometry(R * 0.075, R * 0.075, R * 1.8, 10), steelD, null, 'post');
+      post.position.set(0, yMid - R * 0.3, z - R * 0.02);
+      grip(steelD, R * 0.7);
+    } else if (kind === 'dish') {
+      // a parabola: built as a ring of segments so it is a DISH and not a flat plate
+      const shell = new T.SphereGeometry(R * 1.05, 26, 14, 0, Math.PI * 2, 0, Math.PI * 0.42);
+      const d2 = part(T, g, shell, mat(T, { color: 0xd8d4c8, roughness: 0.5, metalness: 0.35 }), null, 'dish');
+      d2.position.set(0, yMid, z + R * 0.3); d2.rotation.x = -Math.PI / 2;
+      const lip = part(T, g, new T.TorusGeometry(R * 0.86, R * 0.04, 8, 32), steelD, null, 'lip');
+      lip.position.set(0, yMid, z - R * 0.28);
+      const arm = part(T, g, new T.CylinderGeometry(R * 0.035, R * 0.035, R * 0.8, 8), steelD, null, 'arm');
+      arm.position.set(0, yMid - R * 0.1, z - R * 0.5); arm.rotation.x = 0.4;
+      const horn = part(T, g, new T.ConeGeometry(R * 0.11, R * 0.2, 12), steel, null, 'horn');
+      horn.position.set(0, yMid + R * 0.22, z - R * 0.66); horn.rotation.x = -Math.PI / 2;
+      grip(steelD, R * 0.75);
+    } else if (kind === 'pallet') {
+      // slats with gaps, which is the whole look, plus three bearers behind them
+      for (let i = 0; i < 5; i++) {
+        const sl = part(T, g, slab(T, R * 1.8, R * 0.26, R * 0.03, R * 0.07), ply, null, 'slat');
+        sl.position.set(0, yMid - R * 0.72 + i * R * 0.36, z - R * 0.04);
+      }
+      for (let i = -1; i <= 1; i++) {
+        const bearer = part(T, g, new T.BoxGeometry(R * 0.2, R * 1.8, R * 0.14), mat(T, { color: 0x8a6a42, roughness: 0.92 }), null, 'bearer');
+        bearer.position.set(i * R * 0.74, yMid, z + R * 0.06);
+      }
+      for (let i = 0; i < 6; i++) {
+        const nail = part(T, g, new T.CylinderGeometry(R * 0.022, R * 0.022, R * 0.05, 6), steelD, null, 'nail');
+        nail.position.set((i % 2 ? 1 : -1) * R * 0.74, yMid - R * 0.6 + Math.floor(i / 2) * R * 0.6, z - R * 0.1);
+        nail.rotation.x = Math.PI / 2;
+      }
+      grip(dark);
+    } else if (kind === 'screens') {
+      // a wall of monitors, every one of them lit. The Floor's top piece.
+      const frame2 = part(T, g, slab(T, R * 1.95, R * 1.45, R * 0.06, R * 0.1), dark, null, 'frame');
+      frame2.position.set(0, yMid, z - R * 0.05);
+      const tints = ['#3dff8a', '#ff2a4a', '#27e1ff', '#ffc83a'];
+      for (let r0 = 0; r0 < 3; r0++) for (let c = 0; c < 4; c++) {
+        const col = tints[(r0 * 4 + c) % tints.length];
+        const m2 = mat(T, { color: 0x05070b, emissive: new T.Color(col).multiplyScalar(0.5), emissiveIntensity: 1, roughness: 0.35, metalness: 0.2 });
+        const sc = part(T, g, slab(T, R * 0.42, R * 0.4, R * 0.03, R * 0.03), m2, null, 'screen');
+        sc.position.set(-R * 0.69 + c * R * 0.46, yMid + R * (0.45 - r0 * 0.45), z - R * 0.12);
+      }
+      const bez = part(T, g, new T.TorusGeometry(R * 1.0, R * 0.05, 8, 4), brass, null, 'bezel');
+      bez.position.set(0, yMid, z - R * 0.05); bez.rotation.z = Math.PI / 4;
+      grip(brass);
+    } else if (kind === 'hubcap') {
+      // a domed chrome cap with vanes: all specular, no texture
+      const chrome2 = mat(T, { color: 0xdfe6ef, metalness: 1, roughness: 0.09, envMapIntensity: 2.6 });
+      const dome = part(T, g, new T.SphereGeometry(R * 0.9, 26, 14, 0, Math.PI * 2, 0, Math.PI * 0.4), chrome2, null, 'dome');
+      dome.position.set(0, yMid, z + R * 0.18); dome.rotation.x = -Math.PI / 2;
+      const lip2 = part(T, g, new T.TorusGeometry(R * 0.88, R * 0.07, 10, 32), steel, null, 'lip');
+      lip2.position.set(0, yMid, z - R * 0.08);
+      for (let i = 0; i < 8; i++) {
+        const a3 = (i / 8) * Math.PI * 2;
+        const vane = part(T, g, slab(T, R * 0.12, R * 0.5, R * 0.05, R * 0.05), steelD, null, 'vane');
+        vane.position.set(Math.cos(a3) * R * 0.45, yMid + Math.sin(a3) * R * 0.45, z - R * 0.16);
+        vane.rotation.z = a3;
+      }
+      grip(steelD, R * 0.8);
+    } else if (kind === 'cellar') {
+      // two angled leaves, which is the only shield here that is not one flat face
+      for (const sx of [-1, 1]) {
+        const leaf = part(T, g, slab(T, R * 0.92, R * 1.8, R * 0.1, R * 0.12), mat(T, { color: 0x4a5a44, roughness: 0.7, metalness: 0.45 }), null, 'leaf');
+        leaf.position.set(sx * R * 0.48, yMid, z - R * 0.06 - Math.abs(sx) * R * 0.04);
+        leaf.rotation.y = sx * 0.22;
+      }
+      const hinge = part(T, g, new T.CylinderGeometry(R * 0.06, R * 0.06, R * 1.8, 8), steelD, null, 'hinge');
+      hinge.position.set(0, yMid, z - R * 0.14);
+      for (const sx of [-1, 1]) {
+        const hd = part(T, g, new T.TorusGeometry(R * 0.14, R * 0.045, 8, 16, Math.PI), steel, null, 'handle');
+        hd.position.set(sx * R * 0.6, yMid - R * 0.4, z - R * 0.16);
+      }
+      grip(dark);
+    } else if (kind === 'jukebox') {
+      // an arched lit front: the arch is the silhouette
+      const body2 = part(T, g, slab(T, R * 1.5, R * 1.5, R * 0.3, R * 0.14), mat(T, { color: 0x6a2420, roughness: 0.4, metalness: 0.3 }), null, 'plate');
+      body2.position.set(0, yMid - R * 0.2, z - R * 0.07);
+      const arch = part(T, g, new T.CylinderGeometry(R * 0.76, R * 0.76, R * 0.26, 24, 1, false, 0, Math.PI), mat(T, { color: 0x6a2420, roughness: 0.4, metalness: 0.3 }), null, 'arch');
+      arch.position.set(0, yMid + R * 0.55, z - R * 0.07); arch.rotation.x = Math.PI / 2;
+      const glow2 = mat(T, { color: 0x1a0d16, emissive: new T.Color(0xff5fa8).multiplyScalar(0.55), emissiveIntensity: 1, roughness: 0.3 });
+      const win2 = part(T, g, new T.CylinderGeometry(R * 0.6, R * 0.6, R * 0.1, 24, 1, false, 0, Math.PI), glow2, null, 'light');
+      win2.position.set(0, yMid + R * 0.55, z - R * 0.2); win2.rotation.x = Math.PI / 2;
+      for (let i = 0; i < 5; i++) {
+        const key2 = part(T, g, new T.BoxGeometry(R * 0.2, R * 0.12, R * 0.06), brass, null, 'key');
+        key2.position.set(-R * 0.5 + i * R * 0.25, yMid - R * 0.5, z - R * 0.2);
+      }
+      grip(brass);
+    } else if (kind === 'gymlocker') {
+      // a tall vented door with a padlock on it
+      const p2 = part(T, g, slab(T, R * 1.2, R * 2.05, R * 0.08, R * 0.12), mat(T, { color: 0x2a5f8a, roughness: 0.52, metalness: 0.5 }), null, 'plate');
+      p2.position.set(0, yMid, z - R * 0.06);
+      for (let i = 0; i < 6; i++) {
+        const sl2 = part(T, g, new T.BoxGeometry(R * 0.86, R * 0.05, R * 0.1), steelD, null, 'vent');
+        sl2.position.set(0, yMid + R * (0.86 - i * 0.12), z - R * 0.13);
+        sl2.rotation.x = 0.4;
+      }
+      const hdl = part(T, g, slab(T, R * 0.16, R * 0.5, R * 0.05, R * 0.08), steel, null, 'handle');
+      hdl.position.set(R * 0.42, yMid - R * 0.15, z - R * 0.15);
+      const lock = part(T, g, slab(T, R * 0.2, R * 0.24, R * 0.06, R * 0.08), brass, null, 'lock');
+      lock.position.set(R * 0.42, yMid - R * 0.55, z - R * 0.17);
+      const sh2 = part(T, g, new T.TorusGeometry(R * 0.1, R * 0.03, 8, 14, Math.PI), steel, null, 'shackle');
+      sh2.position.set(R * 0.42, yMid - R * 0.42, z - R * 0.17);
+      grip(dark);
+    } else if (kind === 'pizzapan') {
+      // a shallow pan: a disc, a rolled edge and burnt-on rings
+      disc(30, R * 0.92, R * 0.07, mat(T, { color: 0x8d8275, metalness: 0.9, roughness: 0.62 }));
+      const edge2 = part(T, g, new T.TorusGeometry(R * 0.92, R * 0.06, 10, 32), mat(T, { color: 0x6a6054, metalness: 0.9, roughness: 0.7 }), null, 'rim');
+      edge2.position.set(0, yMid, z - R * 0.05);
+      for (let i = 0; i < 3; i++) {
+        const ring2 = part(T, g, new T.TorusGeometry(R * (0.7 - i * 0.22), R * 0.025, 8, 28), mat(T, { color: 0x4a3a2a, roughness: 0.9 }), null, 'burn');
+        ring2.position.set(0, yMid, z - R * 0.1);
+      }
+      grip(steelD, R * 0.8);
+    } else if (kind === 'sash') {
+      // a window: six panes of glass in a frame, and you can see through all of them
+      const glass2 = new T.MeshStandardMaterial({ color: 0xaecbdd, metalness: 0.1, roughness: 0.12,
+        transparent: true, opacity: 0.3, envMapIntensity: 2.2, side: T.DoubleSide });
+      for (let r0 = 0; r0 < 3; r0++) for (let c = 0; c < 2; c++) {
+        const pane = part(T, g, slab(T, R * 0.62, R * 0.52, R * 0.04, R * 0.02), glass2, null, 'pane');
+        pane.position.set(-R * 0.36 + c * R * 0.72, yMid + R * (0.62 - r0 * 0.62), z - R * 0.06);
+      }
+      const fr3 = (w, h, x, y) => { const q = part(T, g, new T.BoxGeometry(w, h, R * 0.12), mat(T, { color: 0xd8d2c4, roughness: 0.75 }), null, 'frame'); q.position.set(x, yMid + y, z - R * 0.05); };
+      fr3(R * 1.6, R * 0.1, 0, R * 0.95); fr3(R * 1.6, R * 0.1, 0, -R * 0.95);
+      fr3(R * 1.6, R * 0.08, 0, R * 0.31); fr3(R * 1.6, R * 0.08, 0, -R * 0.31);
+      fr3(R * 0.1, R * 2.0, -R * 0.78, 0); fr3(R * 0.1, R * 2.0, R * 0.78, 0); fr3(R * 0.08, R * 2.0, 0, 0);
+      grip(dark);
+    } else if (kind === 'crate') {
+      // a crate lid: planks with a stencilled band across them
+      for (let i = 0; i < 4; i++) {
+        const pl = part(T, g, slab(T, R * 1.8, R * 0.4, R * 0.03, R * 0.08), ply, null, 'plank');
+        pl.position.set(0, yMid - R * 0.66 + i * R * 0.44, z - R * 0.04);
+      }
+      for (const sx of [-1, 1]) {
+        const batten = part(T, g, new T.BoxGeometry(R * 0.16, R * 1.8, R * 0.1), mat(T, { color: 0x8a6a42, roughness: 0.9 }), null, 'batten');
+        batten.position.set(sx * R * 0.74, yMid, z - R * 0.1);
+      }
+      const stencil = part(T, g, new T.BoxGeometry(R * 1.1, R * 0.26, R * 0.012), dark, null, 'stencil');
+      stencil.position.set(0, yMid + R * 0.1, z - R * 0.1);
+      grip(dark);
+    } else if (kind === 'boiler') {
+      // a riveted plate with a pressure gauge, which is the one detail that makes it read
+      const p3 = part(T, g, slab(T, R * 1.7, R * 1.5, R * 0.2, R * 0.14), mat(T, { color: 0x7a5a3a, metalness: 0.95, roughness: 0.52, envMapIntensity: 1.5 }), null, 'plate');
+      p3.position.set(0, yMid, z - R * 0.07);
+      for (let i = 0; i < 16; i++) {
+        const a3 = (i / 16) * Math.PI * 2;
+        const riv = part(T, g, new T.SphereGeometry(R * 0.05, 8, 6), brass, null, 'rivet');
+        riv.position.set(Math.cos(a3) * R * 0.74, yMid + Math.sin(a3) * R * 0.64, z - R * 0.15);
+      }
+      const gauge = part(T, g, new T.CylinderGeometry(R * 0.26, R * 0.26, R * 0.08, 20), mat(T, { color: 0xe8e2d4, roughness: 0.4 }), null, 'gauge');
+      gauge.position.set(R * 0.3, yMid + R * 0.2, z - R * 0.19); gauge.rotation.x = Math.PI / 2;
+      const needle = part(T, g, new T.BoxGeometry(R * 0.02, R * 0.2, R * 0.02), mat(T, { color: 0xd02a2a, roughness: 0.5 }), null, 'needle');
+      needle.position.set(R * 0.3, yMid + R * 0.28, z - R * 0.23); needle.rotation.z = 0.7;
+      grip(brass);
+    } else if (kind === 'turnstile') {
+      // three arms off a hub: the only shield on the shelf that is mostly empty space
+      const hub2 = part(T, g, new T.CylinderGeometry(R * 0.3, R * 0.3, R * 0.34, 16), steel, null, 'hub');
+      hub2.position.set(0, yMid + R * 0.2, z - R * 0.1); hub2.rotation.x = Math.PI / 2;
+      for (let i = 0; i < 3; i++) {
+        const a3 = (i / 3) * Math.PI * 2 + 0.4;
+        // 1.7 R of arm meant one arm always pointed straight down and hung past the chest on ten
+        // bodies. Shorter arms on a raised hub keep the three-spoke silhouette and stay in the box.
+        const arm2 = part(T, g, new T.CylinderGeometry(R * 0.08, R * 0.08, R * 1.15, 10), steel, null, 'arm');
+        arm2.position.set(Math.cos(a3) * R * 0.6, yMid + R * 0.2 + Math.sin(a3) * R * 0.6, z - R * 0.1);
+        arm2.rotation.z = a3 + Math.PI / 2;
+        const cap2 = part(T, g, new T.SphereGeometry(R * 0.1, 10, 8), steelD, null, 'cap');
+        cap2.position.set(Math.cos(a3) * R * 1.15, yMid + R * 0.2 + Math.sin(a3) * R * 1.15, z - R * 0.1);
+      }
+      grip(steelD, R * 0.7);
+    } else if (kind === 'score') {
+      // a scoreboard: two big lit digits and a row of lamps
+      const p4 = part(T, g, slab(T, R * 1.95, R * 1.3, R * 0.08, R * 0.12), dark, null, 'plate');
+      p4.position.set(0, yMid, z - R * 0.06);
+      const lamp = (hex, x, y, w, h) => {
+        const m2 = mat(T, { color: 0x05070b, emissive: new T.Color(hex).multiplyScalar(0.6), emissiveIntensity: 1, roughness: 0.3 });
+        const q = part(T, g, new T.BoxGeometry(w, h, R * 0.03), m2, null, 'seg');
+        q.position.set(x, yMid + y, z - R * 0.13);
+      };
+      // two seven-segment-ish digits
+      for (const sx of [-1, 1]) {
+        const x0 = sx * R * 0.5;
+        lamp('#ff2a4a', x0, R * 0.46, R * 0.44, R * 0.07);
+        lamp('#ff2a4a', x0, R * 0.06, R * 0.44, R * 0.07);
+        lamp('#ff2a4a', x0, -R * 0.34, R * 0.44, R * 0.07);
+        lamp('#ff2a4a', x0 - R * 0.23, R * 0.26, R * 0.07, R * 0.34);
+        lamp('#ff2a4a', x0 + R * 0.23, R * 0.26, R * 0.07, R * 0.34);
+        lamp('#ff2a4a', x0 - R * 0.23, -R * 0.14, R * 0.07, R * 0.34);
+        lamp('#ff2a4a', x0 + R * 0.23, -R * 0.14, R * 0.07, R * 0.34);
+      }
+      for (let i = 0; i < 7; i++) lamp(i % 2 ? '#ffc83a' : '#3dff8a', -R * 0.72 + i * R * 0.24, -R * 0.56, R * 0.1, R * 0.1);
+      grip(steelD);
+    } else { return; }
+    // THE LINE THAT MAKES IT EXIST. A gear group is built in local space and is an orphan until
+    // `mount()` parents it to the measured attachment frame -- the first run of this slot scored
+    // 0/1248 with "nothing built" on every body for exactly this reason, because the group was
+    // fully modelled and never attached to anything.
+    mount(M, 'back', g, 0, 0, 0);
+  }
+
+  // ---------------------------------------------------------------- the charm slot
+  // 2 to 4 cm of geometry on a short chain, hung off the hand. In CS2 these run from $0.12 to $106,
+  // they are the newest category in that game and they sell to the player who will never spend
+  // $14.99. One hand only, like the watch: a charm on both hands reads as a bug, not a flex.
+  function buildCharm(T, M, kind) {
+    for (const h of M.hands || []) {
+      if (h.key !== 'handR') continue;
+      const g = gearGroup(T, 'charm'); g.userData.cfHand = h.key;
+      const L = h.len, rx0 = h.halfW, ry0 = h.halfT;
+      // 0.9 made the object a speck hanging off a chain that was longer than it was. The span rule
+      // measures the OBJECT, and at 1.25 every piece still clears its ceiling by a wide margin.
+      const S0 = Math.min(rx0, ry0) * 1.25;               // the charm's own size, off the hand
+      const steel = mat(T, { color: 0x9aa4b2, metalness: 1, roughness: 0.3, envMapIntensity: 1.6 });
+      const steelD = mat(T, { color: 0x4a5160, metalness: 1, roughness: 0.46, envMapIntensity: 1.2 });
+      const gold = mat(T, { color: 0xffc83d, metalness: 1, roughness: 0.18, envMapIntensity: 2.1 });
+      const brass = mat(T, { color: 0xb08430, metalness: 1, roughness: 0.3, envMapIntensity: 1.8 });
+      const dark = mat(T, { color: 0x1a1d24, roughness: 0.75 });
+      const red = mat(T, { color: 0xc0231f, roughness: 0.5 });
+      const white = mat(T, { color: 0xe8e6e0, roughness: 0.62 });
+      const paper = mat(T, { color: 0xcfd6c2, roughness: 0.9 });
+      // Where it hangs from: clear of the hand, below and outboard of it. The first run buried 28%
+      // to 57% of the charm INSIDE the paw on floki and three others -- the drop was measured off
+      // the hand's thickness (`halfT`), which on a flat paw is small, while the thing it has to
+      // clear is the paw's WIDTH. Clearing the larger of the two is what fixed it.
+      const clearH = Math.max(ry0, rx0 * 0.7);
+      const ax = h.cx + rx0 * 0.34, ay = h.cy - clearH * 1.75, az = h.wristZ + L * 0.2;
+      // the chain: three small links, which is what makes it read as hung rather than glued on
+      for (let i = 0; i < 3; i++) {
+        const lk2 = part(T, g, new T.TorusGeometry(S0 * 0.17, S0 * 0.05, 6, 12), steelD, null, 'link');
+        lk2.position.set(ax, ay + S0 * (0.55 - i * 0.32), az);
+        lk2.rotation.y = i % 2 ? Math.PI / 2 : 0;
+      }
+      const y0 = ay - S0 * 0.55;
+      const put = (mesh) => { mesh.position.set(ax, y0 - S0 * 0.3, az); return mesh; };
+      if (kind === 'salt') {
+        put(part(T, g, slab(T, S0 * 0.5, S0 * 0.62, S0 * 0.1, S0 * 0.14), white, null, 'sachet'));
+        const seam = part(T, g, new T.BoxGeometry(S0 * 0.56, S0 * 0.08, S0 * 0.16), paper, null, 'seam');
+        seam.position.set(ax, y0 + S0 * 0.02, az);
+      } else if (kind === 'token') {
+        const d = put(part(T, g, new T.CylinderGeometry(S0 * 0.38, S0 * 0.38, S0 * 0.08, 18), brass, null, 'token'));
+        d.rotation.x = Math.PI / 2;
+        const hole = part(T, g, new T.CylinderGeometry(S0 * 0.11, S0 * 0.11, S0 * 0.12, 10), dark, null, 'hole');
+        hole.position.set(ax, y0 - S0 * 0.3, az); hole.rotation.x = Math.PI / 2;
+      } else if (kind === 'dice') {
+        for (let i = 0; i < 2; i++) {
+          const d = part(T, g, slab(T, S0 * 0.3, S0 * 0.3, S0 * 0.08, S0 * 0.3), red, null, 'die');
+          d.position.set(ax + (i ? S0 * 0.34 : -S0 * 0.06), y0 - S0 * (i ? 0.46 : 0.26), az);
+          d.rotation.set(0.4 * i, 0.3, 0.5 * i);
+        }
+      } else if (kind === 'padlock') {
+        put(part(T, g, slab(T, S0 * 0.44, S0 * 0.5, S0 * 0.1, S0 * 0.16), brass, null, 'body'));
+        const sh = part(T, g, new T.TorusGeometry(S0 * 0.2, S0 * 0.06, 8, 16, Math.PI), steel, null, 'shackle');
+        sh.position.set(ax, y0 + S0 * 0.02, az);
+      } else if (kind === 'lighter') {
+        put(part(T, g, slab(T, S0 * 0.3, S0 * 0.56, S0 * 0.06, S0 * 0.14), steel, null, 'body'));
+        const lid = part(T, g, new T.BoxGeometry(S0 * 0.32, S0 * 0.16, S0 * 0.3), steelD, null, 'lid');
+        lid.position.set(ax, y0 + S0 * 0.02, az); lid.rotation.z = 0.25;
+      } else if (kind === 'pager') {
+        put(part(T, g, slab(T, S0 * 0.46, S0 * 0.34, S0 * 0.06, S0 * 0.14), dark, null, 'body'));
+        const scr = part(T, g, new T.BoxGeometry(S0 * 0.3, S0 * 0.14, S0 * 0.04), mat(T, { color: 0x3dff8a, emissive: 0x0f5c2c, emissiveIntensity: 1, roughness: 0.4 }), null, 'screen');
+        scr.position.set(ax, y0 - S0 * 0.22, az - S0 * 0.16);
+      } else if (kind === 'sneaker') {
+        // a shoe is a PROFILE, not a box. The same lesson as the boot in the store rig.
+        const sole = part(T, g, slab(T, S0 * 0.56, S0 * 0.16, S0 * 0.08, S0 * 0.18), white, null, 'sole');
+        sole.position.set(ax, y0 - S0 * 0.52, az);
+        const up2 = part(T, g, slab(T, S0 * 0.42, S0 * 0.26, S0 * 0.1, S0 * 0.18), red, null, 'upper');
+        up2.position.set(ax - S0 * 0.04, y0 - S0 * 0.32, az);
+        for (let i = 0; i < 3; i++) {
+          const lace = part(T, g, new T.BoxGeometry(S0 * 0.22, S0 * 0.03, S0 * 0.2), white, null, 'lace');
+          lace.position.set(ax - S0 * 0.1, y0 - S0 * (0.24 + i * 0.07), az);
+        }
+      } else if (kind === 'boombox') {
+        put(part(T, g, slab(T, S0 * 0.62, S0 * 0.38, S0 * 0.06, S0 * 0.18), dark, null, 'body'));
+        for (const s of [-1, 1]) {
+          const sp = part(T, g, new T.CylinderGeometry(S0 * 0.12, S0 * 0.12, S0 * 0.06, 12), steelD, null, 'speaker');
+          sp.position.set(ax + s * S0 * 0.19, y0 - S0 * 0.3, az - S0 * 0.19); sp.rotation.x = Math.PI / 2;
+        }
+        const hand2 = part(T, g, new T.TorusGeometry(S0 * 0.16, S0 * 0.03, 6, 14, Math.PI), steel, null, 'handle');
+        hand2.position.set(ax, y0 - S0 * 0.12, az);
+      } else if (kind === 'plane') {
+        // a folded note: two angled planes, so the silhouette is a dart and not a card
+        for (const s of [-1, 1]) {
+          const wing = part(T, g, new T.ConeGeometry(S0 * 0.26, S0 * 0.62, 3), paper, null, 'wing');
+          wing.position.set(ax + s * S0 * 0.12, y0 - S0 * 0.34, az);
+          wing.rotation.set(Math.PI / 2, 0, s * 0.3);
+        }
+      } else if (kind === 'tooth') {
+        const t2 = put(part(T, g, slab(T, S0 * 0.3, S0 * 0.34, S0 * 0.1, S0 * 0.2), gold, null, 'tooth'));
+        for (const s of [-1, 1]) {
+          const root = part(T, g, new T.ConeGeometry(S0 * 0.07, S0 * 0.2, 8), gold, null, 'root');
+          root.position.set(ax + s * S0 * 0.1, y0 - S0 * 0.52, az); root.rotation.x = Math.PI;
+        }
+      } else if (kind === 'crown') {
+        const band = part(T, g, new T.CylinderGeometry(S0 * 0.3, S0 * 0.3, S0 * 0.16, 14, 1, true), gold, null, 'band');
+        band.position.set(ax, y0 - S0 * 0.34, az);
+        for (let i = 0; i < 5; i++) {
+          const a = (i / 5) * Math.PI * 2;
+          const pt = part(T, g, new T.ConeGeometry(S0 * 0.07, S0 * 0.2, 6), gold, null, 'point');
+          pt.position.set(ax + Math.cos(a) * S0 * 0.28, y0 - S0 * 0.18, az + Math.sin(a) * S0 * 0.28);
+        }
+      } else if (kind === 'hydrant') {
+        put(part(T, g, new T.CylinderGeometry(S0 * 0.22, S0 * 0.26, S0 * 0.5, 12), red, null, 'body'));
+        const cap = part(T, g, new T.SphereGeometry(S0 * 0.2, 12, 8), red, null, 'cap');
+        cap.position.set(ax, y0 - S0 * 0.06, az);
+        for (const s of [-1, 1]) {
+          const noz = part(T, g, new T.CylinderGeometry(S0 * 0.08, S0 * 0.08, S0 * 0.16, 8), brass, null, 'nozzle');
+          noz.position.set(ax + s * S0 * 0.24, y0 - S0 * 0.3, az); noz.rotation.z = Math.PI / 2;
+        }
+      } else if (kind === 'knuck') {
+        const bar = part(T, g, slab(T, S0 * 0.52, S0 * 0.2, S0 * 0.08, S0 * 0.12), brass, null, 'bar');
+        bar.position.set(ax, y0 - S0 * 0.26, az);
+        for (let i = 0; i < 4; i++) {
+          const ring = part(T, g, new T.TorusGeometry(S0 * 0.11, S0 * 0.035, 6, 14), brass, null, 'hole');
+          ring.position.set(ax - S0 * 0.19 + i * S0 * 0.127, y0 - S0 * 0.42, az);
+          ring.rotation.x = Math.PI / 2;
+        }
+      } else if (kind === 'bull') {
+        // solid bronze, the one worth having. Body, head, two horns, four stub legs.
+        const body = part(T, g, slab(T, S0 * 0.44, S0 * 0.24, S0 * 0.1, S0 * 0.2), brass, null, 'body');
+        body.position.set(ax, y0 - S0 * 0.3, az);
+        const head = part(T, g, slab(T, S0 * 0.2, S0 * 0.18, S0 * 0.08, S0 * 0.18), brass, null, 'head');
+        head.position.set(ax + S0 * 0.28, y0 - S0 * 0.22, az);
+        for (const s of [-1, 1]) {
+          const horn = part(T, g, new T.ConeGeometry(S0 * 0.04, S0 * 0.16, 6), gold, null, 'horn');
+          horn.position.set(ax + S0 * 0.34, y0 - S0 * 0.1, az + s * S0 * 0.08);
+          horn.rotation.z = -s * 0.5;
+        }
+        for (let i = 0; i < 4; i++) {
+          const leg = part(T, g, new T.CylinderGeometry(S0 * 0.04, S0 * 0.04, S0 * 0.18, 6), brass, null, 'leg');
+          leg.position.set(ax - S0 * 0.12 + (i % 2) * S0 * 0.3, y0 - S0 * 0.5, az + (i < 2 ? -1 : 1) * S0 * 0.07);
+        }
+      } else { continue; }
+      mount(M, h.key, g, 0, 0, 0);
+    }
+  }
+
   function buildGear(T, M, lk) {
-    M.hairOn = lk.hair !== 'none';
-    if (lk.hair !== 'none') buildHair(T, M, lk.hair, lk.haircol);
+    // The TF2 rule: the hat declares what it switches off, the renderer obeys it. Without this a cap
+    // and a head of hair are two meshes competing for the same skull, which is the clipping everyone
+    // has always noticed and nobody can fix by moving either piece.
+    // The hide list is a UNION over every piece being worn, not just the hat's, so a conflict between
+    // two slots is one line of data in the item rather than a special case in here. Today only the
+    // hats declare anything (they switch off the hair): the six locker slots are mutually exclusive,
+    // so two pieces competing for the same geometry is not reachable inside a slot.
+    const hid = [];
+    for (const m of [HAT_META[lk.hat], HANDS_META[lk.hands], BACK_META[lk.back]]) {
+      if (m && m.hides) for (const h of m.hides) if (hid.indexOf(h) < 0) hid.push(h);
+    }
+    const hairOn = lk.hair !== 'none' && hid.indexOf('hair') < 0;
+    M.hairOn = hairOn;
+    M.hid = hid;
+    if (hairOn) buildHair(T, M, lk.hair, lk.haircol);
     if (lk.hat !== 'none') buildHat(T, M, lk.hat, lk.hatcol);
     if (lk.eyes !== 'none' && EYES_UNFIT.indexOf(M.id || lk.base) < 0) buildEyes(T, M, lk.eyes);
     if (lk.neck !== 'none') buildNeck(T, M, lk.neck);
     if (lk.shoes !== 'none') buildShoes(T, M, lk.shoes);
+    // Hands and back, added 2026-10-15. Both are no-ops when the body published no frame for them --
+    // `M.hands` is empty and `M.back` is null when there was not enough geometry to measure, and
+    // nothing is built rather than something being placed on a guess.
+    if (lk.hands !== 'none') buildHands(T, M, lk.hands);
+    if (lk.back !== 'none') buildBack(T, M, lk.back);
+    // Guard and charm, added 2026-10-16. Same contract as the two above: a no-op when the body
+    // published no frame to hang them on, rather than a guess placed on nothing.
+    if (lk.guard && lk.guard !== 'none') buildGuard(T, M, lk.guard);
+    if (lk.charm && lk.charm !== 'none') buildCharm(T, M, lk.charm);
     if (lk.aura !== 'none') buildAura(T, M, lk.aura);
     return M.made;
   }
@@ -1859,23 +3646,77 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
     fromCode(s) { const o = b64.dec(s); return o ? this.set(o) : null; },
     sanitize,
     lookFor,
+    // THE ONE FUNCTION THAT ANSWERS "can this body wear this piece". The locker (89_econ.js) asks it
+    // before it offers an item, before it equips one and before it renders one, so there is exactly
+    // one copy of the Dota rule in the codebase and it is the measured table.
+    fitsBody(slot, kind, base) {
+      const f = { hat: hatFits, eyes: eyeFits, neck: neckFits, hands: handFits, back: backFits, guard: guardFits, charm: charmFits }[slot];
+      if (!f) return true;                       // shoes and auras are not gated: they fit every body
+      return !!f(kind, base);
+    },
+    // Everything the locker is wearing, merged over the saved fighter. The locker wins where both set
+    // a slot, because the locker piece is an owned instance with a serial on it and the creator's is
+    // a free choice. Anything the body was not measured for is already gone by here.
+    withLocker(lk, base) {
+      const b = base || (lk && lk.base) || DEF.base;
+      let add = null;
+      try { add = typeof Econ !== 'undefined' && Econ.lockerLook ? Econ.lockerLook(b) : null; } catch (e) { add = null; }
+      return sanitize(Object.assign({}, lk || saved || DEF, add || {}, { base: b }));
+    },
     thumb, thumbFor, hudArt, hudTag, dressHero,
-    apply(id, root, T, f) { const lk = lookFor(f); if (lk && lk.base === id) applyLook(lk, root, T, id); },
+    // The locker rides along here, so a piece you opened and put on shows up in a match, in the
+    // preview and on the roster tile without any of those three knowing the locker exists.
+    apply(id, root, T, f) {
+      const lk = lookFor(f);
+      if (lk && lk.base === id) applyLook(window.CustomLook.withLocker(lk, id), root, T, id);
+    },
     applyLook,
     open: () => openCreator(),
     _pv: () => PV,   // dev inspection
     // dev/gearcheck.mjs drives these: the SAME measure + build path the match and the preview use,
     // minus the body recolour, so a harness can fit one piece at a time and take it off again.
     _dev: {
-      lists: { HATS, EYES, HAIR, HAIRCOL, NECK, SHOES, AURA, TINTS, FINISH },
+      lists: { HATS, EYES, HAIR, HAIRCOL, NECK, SHOES, HANDS, BACKS, GUARDS, CHARMS, AURA, TINTS, FINISH },
       // bodies a slot is deliberately suppressed on, so a measuring harness can tell "nothing was built
       // on purpose" apart from "the piece failed to land" — they look identical from outside
       unfit: { eyes: EYES_UNFIT.slice() },
+      // the size box and the hide list each hat declares, so the harness enforces the item's own
+      // numbers rather than a second copy of them (the Roblox rule and the TF2 rule, in one place)
+      hatMeta: HAT_META,
+      hatFit: HAT_FIT,
+      hatsFor,
+      // the same two tables for the slots added 10/15, in the same shape, so one harness covers all three
+      meta: { hat: HAT_META, hands: HANDS_META, back: BACK_META, guard: GUARD_META, charm: CHARM_META },
+      fit2: { hat: HAT_FIT, hands: HAND_FIT, back: BACK_FIT, eyes: EYES_FIT, neck: NECK_FIT, guard: GUARD_FIT, charm: CHARM_FIT },
+      listFor: { hat: hatsFor, hands: handsFor, back: backsFor, eyes: eyesFor, neck: neckFor, guard: guardsFor, charm: charmsFor },
+      gated: { eyes: EYES_GATED.slice(), neck: NECK_GATED.slice() },
+      // Off, the gate stops filtering: every kind can be fitted and measured on every body, which is the
+      // only way a new piece can ever earn a row in HAT_FIT. dev/gearcheck.mjs calls this; the page never does.
+      gate(on) { HAT_GATE = !!on; GEAR_GATE = !!on; },
       measure,
       // dev/skinref probe: what colour did the coat detector actually land on? Without this the only
       // way to tell a bad reference from a bad shader mask is to guess.
       skinRef(root, T, id) { const c = skinReference(root, T, id); return c ? { r: +c.r.toFixed(3), g: +c.g.toFixed(3), b: +c.b.toFixed(3) } : null; },
       fit(root, T, lk, id) { const M = measure(root, T, id || (lk && lk.base)); if (!M) return null; buildGear(T, M, sanitize(Object.assign({ base: id }, lk))); return M; },
+      // THE RIG PROFILE: which attachment points this body actually published and the numbers each
+      // one was measured at. A harness reads this to tell "the body has no frame here, so nothing was
+      // built on purpose" from "the piece failed to land" -- they are identical from outside, and
+      // without it a correct suppression scores as a failure and a green run reads as broken.
+      frames(root, T, id) {
+        const M = measure(root, T, id); if (!M) return null;
+        const r = { id: id || null, headH: M.H, bodyH: M.S, points: Object.keys(M.ax),
+          head: { capY: M.capY, eyeY: M.eyeY, hw: M.hw, hd: M.hd, ew: M.ew },
+          neck: { nH: M.nH, nl: M.nl, nw: M.nw, nd: M.nd },
+          feet: (M.feet || []).map(f => ({ key: f.key, len: f.len, halfW: f.halfW, soleY: f.soleY })),
+          hands: (M.hands || []).map(h => ({ key: h.key, n: h.n, len: h.len, halfW: h.halfW, halfT: h.halfT,
+            wristZ: h.wristZ, tipZ: h.tipZ, cx: h.cx, cy: h.cy })),
+          back: M.back ? { n: M.back.n, tH: M.back.tH, halfW: M.back.halfW, halfD: M.back.halfD, h: M.back.h,
+            coreW: M.back.coreW, backZ: M.back.backZ, frontZ: M.back.frontZ, topY: M.back.topY, botY: M.back.botY, midY: M.back.midY } : null };
+        // the frames a piece could be attached to on THIS body, which is what gates the two new slots
+        r.canHands = (M.hands || []).length >= 2;
+        r.canBack = !!M.back;
+        return r;
+      },
       strip(M) { for (const g of (M && M.made) || []) if (g.parent) g.parent.remove(g); if (M) M.made = []; },
     },
   };
@@ -1922,6 +3763,24 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
     font-family:var(--display);font-style:italic;font-weight:900;font-size:24px;letter-spacing:.01em;-webkit-user-select:text;user-select:text;border-radius:0}
   #scCustom .cf-in.sm{font-size:18px;height:40px;font-weight:700}
   #scCustom .cf-in:focus{outline:none;box-shadow:inset 0 0 0 2px var(--cyan)}
+  /* X connect: three states in one box -- not connected, waiting for the code, connected */
+  #scCustom .cf-xbox{display:flex;flex-direction:column;gap:8px}
+  #scCustom .cf-xrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  #scCustom .cf-xrow .cf-at{flex:1;min-width:150px}
+  #scCustom .cf-xbtn{height:40px;padding:0 16px;border:0;cursor:pointer;background:var(--cyan,#2fd4ff);color:#04121a;font-family:var(--display);font-weight:900;font-size:13px;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}
+  #scCustom .cf-xbtn.ghost{background:rgba(255,255,255,.07);color:var(--muted);box-shadow:inset 0 0 0 1px var(--line2)}
+  #scCustom .cf-xbtn:disabled{opacity:.5;cursor:default}
+  #scCustom .cf-xcode{display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(47,212,255,.08);box-shadow:inset 0 0 0 1px rgba(47,212,255,.35)}
+  #scCustom .cf-xcode b{font-family:var(--mono);font-size:16px;letter-spacing:.08em;color:var(--cyan,#2fd4ff);user-select:all}
+  #scCustom .cf-xnote{font-size:12px;line-height:1.5;color:var(--muted)}
+  #scCustom .cf-xnote.bad{color:#ff8a7a}
+  #scCustom .cf-xdot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--cyan,#2fd4ff);margin-right:7px;vertical-align:middle;animation:cfXPulse 1.4s ease-in-out infinite}
+  @keyframes cfXPulse{0%,100%{opacity:.25}50%{opacity:1}}
+  @media (prefers-reduced-motion:reduce){#scCustom .cf-xdot{animation:none;opacity:.8}}
+  #scCustom .cf-xok{display:flex;align-items:center;gap:10px}
+  #scCustom .cf-xok img{width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,.08)}
+  #scCustom .cf-xok b{font-family:var(--mono);font-size:14px;color:var(--cyan,#2fd4ff)}
+  #scCustom .cf-xok .tick{color:#6dff8c;font-weight:900}
   #scCustom .cf-at{display:flex;align-items:center;gap:0}
   #scCustom .cf-at span{height:40px;display:flex;align-items:center;padding:0 10px;background:rgba(255,255,255,.05);box-shadow:inset 0 0 0 1px var(--line2);font-family:var(--display);font-style:italic;font-weight:900;font-size:18px;color:var(--muted)}
   #scCustom .cf-at .cf-in{flex:1}
@@ -1994,8 +3853,8 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
         <div class="cf-grp"><div class="cf-lbl">Name <em>up to 16 letters</em></div><input class="cf-in" id="cfName" maxlength="16" autocomplete="off" spellcheck="false"></div>
         <div class="cf-grp"><div class="cf-lbl">Title</div><input class="cf-in sm" id="cfTitle" maxlength="22" autocomplete="off" spellcheck="false">
           <div class="cf-chips" id="cfTitles">${TITLES.map(t => `<button class="cf-chip" data-t="${esc(t)}">${esc(t)}</button>`).join('')}</div></div>
-        <div class="cf-grp"><div class="cf-lbl">X / Twitter <em>optional, shown under your name</em></div>
-          <div class="cf-at"><span>@</span><input class="cf-in sm" id="cfX" maxlength="15" autocomplete="off" spellcheck="false" placeholder="yourhandle"></div></div>
+        <div class="cf-grp"><div class="cf-lbl">X / Twitter <em>connect it, so the name over your head is really yours</em></div>
+          <div id="cfXBox" class="cf-xbox"></div></div>
         <div class="cf-grp"><div class="cf-lbl">Body <em id="cfBodyNote">moves and stats come from the body</em></div><div class="cf-bodies" id="cfBodies"></div></div>
         <div class="cf-grp"><div class="cf-lbl">Colour</div><div class="cf-sw" data-k="tint">${TINTS.map(([v, l, h]) => `<button class="${v === 'orig' ? 'orig' : ''}" data-v="${v}" id="cf_tint_${v}" title="${l}" aria-label="${l}" style="--c:${h || '#fff'}"></button>`).join('')}</div></div>
         <div class="cf-grp"><div class="cf-lbl">Skin / fur tone</div><div class="cf-sw" data-k="skin">${SKIN.map(([v, l, h]) => `<button class="${v === 'orig' ? 'orig' : ''}" data-v="${v}" id="cf_skin_${v}" title="${l}" aria-label="${l}" style="--c:${h || '#fff'}"></button>`).join('')}</div></div>
@@ -2004,11 +3863,13 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
         <div class="cf-grp" id="cfPatColGrp"><div class="cf-lbl">Material colour</div><div class="cf-sw" data-k="patcol">${PATCOL.map(([v, l, h]) => `<button class="${v === 'auto' ? 'orig' : ''}" data-v="${v}" id="cf_patcol_${v}" title="${l}" aria-label="${l}" style="--c:${h || '#fff'}"></button>`).join('')}</div></div>
         ${HAIR.length > 1 ? `<div class="cf-grp"><div class="cf-lbl">Hair</div>${chips('hair', HAIR)}</div>
         <div class="cf-grp"><div class="cf-lbl">Hair colour</div><div class="cf-sw" data-k="haircol">${HAIRCOL.map(([v, l, h]) => `<button data-v="${v}" id="cf_haircol_${v}" title="${l}" aria-label="${l}" style="--c:${h}"></button>`).join('')}</div></div>` : ''}
-        ${HATS.length > 1 ? `<div class="cf-grp"><div class="cf-lbl">Hat</div>${chips('hat', HATS)}</div>
-        <div class="cf-grp"><div class="cf-lbl">Hat colour</div><div class="cf-sw" data-k="hatcol">${HATCOL.map(([v, l, h]) => `<button class="${v === 'auto' ? 'orig' : ''}" data-v="${v}" id="cf_hatcol_${v}" title="${l}" aria-label="${l}" style="--c:${h || '#fff'}"></button>`).join('')}</div></div>` : ''}
-        <div class="cf-grp"><div class="cf-lbl">Eyes</div>${chips('eyes', EYES)}</div>
-        <div class="cf-grp"><div class="cf-lbl">Neck</div>${chips('neck', NECK)}</div>
+        <div class="cf-grp" id="cfHatGrp"><div class="cf-lbl">Hat <em>only the ones measured on this body</em></div><div id="cfHatChips"></div></div>
+        <div class="cf-grp" id="cfHatColGrp"><div class="cf-lbl">Hat colour</div><div class="cf-sw" data-k="hatcol">${HATCOL.map(([v, l, h]) => `<button class="${v === 'auto' ? 'orig' : ''}" data-v="${v}" id="cf_hatcol_${v}" title="${l}" aria-label="${l}" style="--c:${h || '#fff'}"></button>`).join('')}</div></div>
+        <div class="cf-grp" id="cfEyesGrp"><div class="cf-lbl">Eyes</div><div id="cfEyesChips"></div></div>
+        <div class="cf-grp" id="cfNeckGrp"><div class="cf-lbl">Neck</div><div id="cfNeckChips"></div></div>
         <div class="cf-grp"><div class="cf-lbl">Shoes</div>${chips('shoes', SHOES)}</div>
+        <div class="cf-grp" id="cfHandGrp" hidden><div class="cf-lbl">Hands</div><div id="cfHandChips"></div></div>
+        <div class="cf-grp" id="cfBackGrp" hidden><div class="cf-lbl">Back</div><div id="cfBackChips"></div></div>
         <div class="cf-grp"><div class="cf-lbl">Aura</div>${chips('aura', AURA)}</div>
       </div>
     </div>
@@ -2027,8 +3888,39 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
   let draft = null, backTo = 'scTitle';
   const art = id => 'assets/' + ASSET_ID(id) + '_cut.webp';
 
+  // The hat row is per body, the way Dota only offers a hero the wearables authored for that hero. It is
+  // rebuilt whenever the body changes, so a player can never reach a combination that was not measured.
+  // Both rows disappear on a body with nothing cleared yet, rather than showing an empty shelf.
+  let hatRowFor = null;
+  function paintHats() {
+    const box = $c('cfHatChips'); if (!box) return;
+    const list = hatsFor(draft.base);
+    if (hatRowFor !== draft.base) {
+      hatRowFor = draft.base;
+      box.innerHTML = list.length > 1 ? chips('hat', list) : '';
+    }
+    const has = list.length > 1;
+    { const g = $c('cfHatGrp'); if (g) g.hidden = !has; }
+    { const g = $c('cfHatColGrp'); if (g) g.hidden = !has || draft.hat === 'none'; }
+  }
+  // The hands and back rows follow the same Dota rule and the same two states: a body is offered only
+  // what the harness measured clean on it, and the row disappears rather than showing a lone "None".
+  const gearRowFor = { hands: null, back: null, eyes: null, neck: null };
+  function paintGearRows() {
+    for (const [k, box, grp, lister] of [['hands', 'cfHandChips', 'cfHandGrp', handsFor], ['back', 'cfBackChips', 'cfBackGrp', backsFor],
+      ['eyes', 'cfEyesChips', 'cfEyesGrp', eyesFor], ['neck', 'cfNeckChips', 'cfNeckGrp', neckFor]]) {
+      const el2 = $c(box); if (!el2) continue;
+      const list = lister(draft.base);
+      if (gearRowFor[k] !== draft.base) { gearRowFor[k] = draft.base; el2.innerHTML = list.length > 1 ? chips(k, list) : ''; }
+      const g = $c(grp); if (g) g.hidden = list.length < 2;
+    }
+  }
+
   function paintForm() {
-    $c('cfName').value = draft.name; $c('cfTitle').value = draft.title; $c('cfX').value = draft.x || '';
+    $c('cfName').value = draft.name; $c('cfTitle').value = draft.title;
+    paintX();                         // the handle is the server's, not the draft's
+    paintHats();                      // the hat row belongs to the BODY, so it is rebuilt before the ticks
+    paintGearRows();                  // same for hands and back
     for (const [k] of GROUPS) sec.querySelectorAll(`[data-k="${k}"] [data-v]`).forEach(b => b.classList.toggle('on', b.dataset.v === draft[k]));
     sec.querySelectorAll('#cfTitles .cf-chip').forEach(b => b.classList.toggle('on', b.dataset.t === draft.title));
     sec.querySelectorAll('#cfPresets .cf-chip').forEach(b => {
@@ -2042,7 +3934,8 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
   function paintPlate() {
     $c('cfShowName').textContent = draft.name || 'Rookie';
     $c('cfShowTitle').textContent = draft.title;
-    $c('cfShowX').textContent = draft.x ? '@' + draft.x : '';
+    // the plate shows the CONNECTED handle, never a typed one
+    $c('cfShowX').textContent = XC.state && XC.state.x ? '@' + XC.state.x : '';
     const c = CHAR_BY_ID[draft.base];
     $c('cfShowBase').textContent = c ? 'Body: ' + c.name + (c.title ? ' · ' + c.title : '') : '';
   }
@@ -2054,7 +3947,6 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
       if (!draft) return;
       draft.name = cleanTxt($c('cfName').value).slice(0, 16) || 'Rookie';
       draft.title = cleanTxt($c('cfTitle').value).slice(0, 22);
-      draft.x = cleanHandle($c('cfX').value);
       CustomLook.set(draft);
       const s = $c('cfSaved'); s.textContent = 'Saved'; s.classList.add('on'); clearTimeout(autoSave.t); autoSave.t = setTimeout(() => s.classList.remove('on'), 1200);
     }, 450);
@@ -2066,7 +3958,9 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
       const b = document.createElement('button'); b.className = 'cf-body'; b.dataset.id = c.id; b.id = 'cf_body_' + c.id; b.title = c.name;
       b.innerHTML = `<span>${esc(c.name)}</span>`;
       const im = new Image(); im.onload = () => { b.style.backgroundImage = `url(${im.src})`; }; im.onerror = () => { b.style.backgroundImage = `url(assets/${c.id}.jpg)`; }; im.src = art(c.id);
-      b.addEventListener('click', () => { draft.base = c.id; sfx(); paintForm(); refresh(); autoSave(); });
+      // sanitize on the way out of the body picker too: the new body may not carry the hat the old one
+      // did, and the draft has to agree with the row the player is about to look at.
+      b.addEventListener('click', () => { draft.base = c.id; draft = sanitize(draft); sfx(); paintForm(); refresh(); autoSave(); });
       box.appendChild(b);
     }
   }
@@ -2084,7 +3978,64 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
   });
   $c('cfTitles').addEventListener('click', e => { const b = e.target.closest('[data-t]'); if (!b) return; draft.title = b.dataset.t; sfx(); paintForm(); autoSave(); });
   $c('cfName').addEventListener('input', e => { draft.name = cleanTxt(e.target.value).slice(0, 16); paintPlate(); autoSave(); });
-  $c('cfX').addEventListener('input', e => { const v = cleanHandle(e.target.value); if (e.target.value !== v) e.target.value = v; draft.x = v; paintPlate(); autoSave(); });
+  // ---- X connect ----------------------------------------------------------------
+  // Duane, 2026-10-14: *"it needs to connect. not just anyone type any name"*. The handle is no
+  // longer part of the saved look at all: the server refuses to take it from `look` and only
+  // xverify can set it, so what renders over a fighter's head is always an account that player
+  // proved they hold. This box only drives that exchange.
+  const XC = { state: null, busy: false, msg: '', bad: false };
+  function xSend(m) { try { if (typeof Net !== 'undefined' && Net.send) Net.send(m); } catch (e) { /* offline */ } }
+  function paintX() {
+    const box = $c('cfXBox'); if (!box) return;
+    const st = XC.state;
+    if (!st) {
+      box.innerHTML = '<div class="cf-xnote">Connecting needs you online. Join or host a match once and this turns on.</div>';
+      return;
+    }
+    if (st.x) {
+      box.innerHTML = `<div class="cf-xok">${st.xav ? `<img src="${esc(st.xav)}" alt="">` : ''}<b>@${esc(st.x)}</b><span class="tick">connected</span>`
+        + `<button class="cf-xbtn ghost" id="cfXOff" style="margin-left:auto">Disconnect</button></div>`;
+      $c('cfXOff').onclick = () => { XC.busy = true; XC.msg = ''; xSend({ k: 'xforget' }); paintX(); };
+      return;
+    }
+    if (st.pending) {
+      // The server is polling for them, so there is no "check" button to forget to press: they paste
+      // the code on X and this flips to connected on its own. The button copies the code and opens
+      // the X profile editor, which is the only screen they need.
+      box.innerHTML = `<div class="cf-xcode"><b id="cfXCode">${esc(st.pending.code)}</b><span class="cf-xnote">goes anywhere in @${esc(st.pending.handle)}'s X bio</span></div>`
+        + `<div class="cf-xrow"><button class="cf-xbtn" id="cfXOpen">Copy code &amp; open X</button>`
+        + `<button class="cf-xbtn ghost" id="cfXCancel">Different handle</button></div>`
+        + `<div class="cf-xnote" id="cfXWait"><span class="cf-xdot"></span>Watching @${esc(st.pending.handle)} — save your bio on X and this connects by itself.</div>`
+        + (XC.msg ? `<div class="cf-xnote${XC.bad ? ' bad' : ''}">${esc(XC.msg)}</div>` : '')
+        + '<div class="cf-xnote">Delete the code again straight after. The connection sticks.</div>';
+      $c('cfXOpen').onclick = async () => {
+        const code = st.pending.code;
+        let copied = false;
+        try { await navigator.clipboard.writeText(code); copied = true; } catch (e) { copied = false; }
+        if (!copied) { const r = document.createRange(); r.selectNodeContents($c('cfXCode')); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); }
+        XC.msg = copied ? 'Code copied. Paste it into your bio on X and save.' : 'Copy the code above, then open x.com/settings/profile.';
+        XC.bad = false; paintX();
+        window.open('https://x.com/settings/profile', '_blank', 'noopener');
+      };
+      $c('cfXCancel').onclick = () => { XC.msg = ''; xSend({ k: 'xforget' }); };
+      return;
+    }
+    box.innerHTML = '<div class="cf-xrow"><div class="cf-at"><span>@</span><input class="cf-in sm" id="cfX" maxlength="15" autocomplete="off" spellcheck="false" placeholder="yourhandle"></div>'
+      + '<button class="cf-xbtn" id="cfXStart">Connect</button></div>'
+      + (XC.msg ? `<div class="cf-xnote${XC.bad ? ' bad' : ''}">${esc(XC.msg)}</div>` : '')
+      + '<div class="cf-xnote">You get a code, you put it in your X bio for a moment, and that proves the account is yours. Takes about twenty seconds, once.</div>';
+    const go = () => { const h = cleanHandle($c('cfX').value); if (!h) { XC.msg = 'Type your X handle first.'; XC.bad = true; return paintX(); } XC.msg = ''; xSend({ k: 'xclaim', handle: h }); };
+    $c('cfXStart').onclick = go;
+    $c('cfX').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+  }
+  // the server is the only source of truth for this; the page never guesses it
+  try {
+    if (typeof Net !== 'undefined' && Net.on) Net.on(m => {
+      if (m.k === 'xstate') { XC.state = m; XC.busy = false; if (m.x) { XC.msg = ''; XC.bad = false; } paintX(); paintPlate(); }
+      else if (m.k === 'err' && m.code === 'x') { XC.busy = false; XC.msg = m.msg || 'That did not work.'; XC.bad = true; paintX(); }
+      else if (m.k === 'welcome') { XC.state = { x: (m.profile && m.profile.x) || null, xav: (m.profile && m.profile.xav) || null, pending: null }; paintX(); }
+    });
+  } catch (e) { /* net not loaded in this build */ }
   $c('cfTitle').addEventListener('input', e => { draft.title = cleanTxt(e.target.value).slice(0, 22); sec.querySelectorAll('#cfTitles .cf-chip').forEach(b => b.classList.toggle('on', b.dataset.t === draft.title)); paintPlate(); autoSave(); });
   $c('cfRandom').addEventListener('click', () => {
     const pick = list => list[Math.floor(Math.random() * list.length)][0];
@@ -2097,7 +4048,10 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
       const vary = [['tint', TINTS], ['patcol', PATCOL], ['aura', AURA], ['eyes', EYES], ['neck', NECK], ['shoes', SHOES]];
       for (let i = 0; i < 2 + Math.floor(Math.random() * 2); i++) { const v = vary[Math.floor(Math.random() * vary.length)]; draft[v[0]] = pick(v[1]); }
     } else {
-      for (const [k, list] of GROUPS) draft[k] = pick(list);
+      // Randomise has to obey the per-body tables too, or the one button in the creator that nobody
+      // reads the output of is the one that puts an unmeasured piece on a fighter.
+      const perBody = { hat: hatsFor, hands: handsFor, back: backsFor, eyes: eyesFor, neck: neckFor };
+      for (const [k, list] of GROUPS) draft[k] = pick(perBody[k] ? perBody[k](draft.base) : list);
     }
     if (Math.random() < 0.5) draft.title = TITLES[Math.floor(Math.random() * TITLES.length)];
     sfx(); paintForm(); refresh(); autoSave();
@@ -2105,7 +4059,7 @@ totalEmissiveRadiance += uPatCol * (cfPatG * uPatGlow);`);
   // export / import / restore: a wiped browser is no longer the end of a fighter
   $c('cfExport').addEventListener('click', async () => {
     sfx();
-    draft.name = cleanTxt($c('cfName').value).slice(0, 16) || 'Rookie'; draft.title = cleanTxt($c('cfTitle').value).slice(0, 22); draft.x = cleanHandle($c('cfX').value);
+    draft.name = cleanTxt($c('cfName').value).slice(0, 16) || 'Rookie'; draft.title = cleanTxt($c('cfTitle').value).slice(0, 22);
     const code = b64.enc(sanitize(draft));
     let copied = false;
     try { await navigator.clipboard.writeText(code); copied = true; } catch (e) { /* no clipboard permission */ }

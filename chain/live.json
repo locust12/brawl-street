@@ -1,0 +1,10 @@
+{
+  "escrow": "0x4f69E9698537Faf2DD0cd9365a5f5443D03Bd427",
+  "chainId": 42161,
+  "chainName": "Arbitrum One",
+  "rpc": "https://arb1.arbitrum.io/rpc",
+  "explorer": "https://arbiscan.io",
+  "token": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+  "tokenSymbol": "USDC",
+  "tokenDecimals": 6
+}

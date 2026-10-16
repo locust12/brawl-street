@@ -1,0 +1,26 @@
+{
+  "_note": "NOT ACTIVE. Rename to live.json ONLY after RektArena is deployed on Robinhood Chain and the arena address below is filled in. build.py embeds live.json at build time, so copying this in before the contract exists would point the live game at an address with no code on it.",
+  "_tokens_on_robinhood_chain": {
+    "USDG": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168 — Global Dollar, 6dp, ~700M supply. The real stablecoin on this chain and the only one.",
+    "NOT_USDC": "0x3AE0689f64b8A7683d06a9E358d7346dC5E71E18 calls itself USDC but its name is 'Unstable Coin', it has 18 decimals (real USDC is always 6) and a round 1,000,000,000 supply. It is a meme token. Never allowlist it.",
+    "USDT": "does not exist on this chain"
+  },
+  "_before_going_live": [
+    "deploy RektArena on chain 4663 and put its address in `arena` below",
+    "arena.setToken(0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168, true)",
+    "arena.setCutBps(500)",
+    "rename this file to live.json, run build.py, ship"
+  ],
+
+  "arena": "",
+  "rpc": "https://robinhood-rpc.publicnode.com",
+  "chainId": 4663,
+  "chainName": "Robinhood Chain",
+  "stableSymbol": "USDG",
+  "tokens": {
+    "USDC": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"
+  },
+  "decimals": {
+    "USDC": 6
+  }
+}

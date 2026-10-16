@@ -187,7 +187,7 @@ function drawProj2(ctx, p) {
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = 'rgba(70,48,28,0.75)'; ctx.beginPath(); ctx.ellipse(0, r * 0.45, r * 1.5, r * 0.42, 0, 0, TAU); ctx.fill();
     ctx.fillStyle = 'rgba(120,88,52,0.6)'; ctx.beginPath(); ctx.ellipse(-r * 0.3, r * 0.35, r * 0.7, r * 0.2, 0, 0, TAU); ctx.fill();
-  } else if (k === 'arcbolt') {                       // SPARK's homing bolt: a head with lightning trailing it
+  } else if (k === 'arcbolt' || k === 'voltbolt') {   // SPARK's homing bolt / VOLT's thrown one: a head with lightning trailing it
     const sp = Math.hypot(p.vx, p.vy) || 1, ux = -p.vx / sp * r, uy = -p.vy / sp * r;
     ctx.strokeStyle = c; ctx.lineWidth = 4;
     for (let s2 = 0; s2 < 3; s2++) {
@@ -219,14 +219,37 @@ function drawProj2(ctx, p) {
     for (let i = 0; i < 6; i++) { ctx.fillStyle = i % 2 ? '#3ec46d' : '#ffd45c'; ctx.save(); ctx.rotate(i + p.age * 0.3); ctx.fillRect(-r * 0.5 + i * 4 - 10, -r * 0.2, r * 0.6, r * 0.3); ctx.restore(); }
   } else if (k === 'spore' || k === 'flame') {
     ctx.globalAlpha = k === 'spore' ? 0.55 : Math.max(0.2, 1 - p.age / (p.life + 1)); glow(r * 1.2, 0.2);
+  } else if (k === 'rake') {                          // WOLVERINU's CROSS RAKE: the cut hangs where it was made
+    const fade = Math.min(1, (p.life - p.age) / 16) * Math.min(1, p.age / 3 + 0.4);
+    ctx.globalAlpha = Math.max(0.15, fade);
+    ctx.lineCap = 'round';
+    for (const s of [-1, 1]) {
+      ctx.strokeStyle = c; ctx.lineWidth = r * 0.24;
+      ctx.beginPath(); ctx.moveTo(-r * 0.95, -r * 0.8 * s); ctx.lineTo(r * 0.95, r * 0.8 * s); ctx.stroke();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = r * 0.07; ctx.stroke();
+    }
+    glow(r * 0.9, 0.12);
   } else glow(r * 1.3);   // fireball, jolt, shadow, bubble, supernova, anything new
   ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
 }
 
 // menu portraits: the fighter's key art when loaded, the vector mascot until then
 const PORTRAITS = {};
+// 15 Oct: these go out at LOW priority on purpose. This loop fires one request per fighter — 36 of
+// them, plus the cut-outs the HUD preloads, so ~86 images leave in the first second of the page.
+// An <img> is born at Low priority too, which meant the Store's own renders queued BEHIND all of
+// them and did not come back for twenty seconds: you opened the shop and looked at empty boxes.
+// Nothing on screen needs a portrait until the select screen opens, and that screen redraws itself
+// on each one's onload, so dropping these to the back of the queue costs nothing and lets whatever
+// the player is actually looking at go first.
 function loadPortraits(onload) {
-  for (const c of CHARS) { const im = new Image(); im.onload = () => onload && onload(c.id); im.src = 'assets/' + ASSET_ID(c.id) + '.jpg'; PORTRAITS[c.id] = im; }
+  for (const c of CHARS) {
+    const im = new Image();
+    try { im.fetchPriority = 'low'; } catch (e) { /* older engines ignore it */ }
+    im.onload = () => onload && onload(c.id);
+    im.src = 'assets/' + ASSET_ID(c.id) + '.jpg';
+    PORTRAITS[c.id] = im;
+  }
 }
 function drawArt(ctx, c, x, y, w, h, focus) {
   const im = PORTRAITS[c.id]; if (!im || !im.complete || !im.naturalWidth) return false;

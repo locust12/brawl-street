@@ -1,0 +1,43 @@
+{
+  "_": "CHECKOUT CONFIG. Read by net/lib/pay.js; the store takes payments when PAYMENTS=chain and this file has a treasury. Every address here is a RECEIVE address: no key for any of them is on this server, and the server never signs anything. PAY_TREASURY=0x.. overrides the treasury on every chain without editing this file.",
+  "_treasury": "0x02b321E3B31e4Ca53cee164BEedc314f7345F6d4 is Duane's main wallet, which is where takings land until he names a dedicated one. Change it here or with PAY_TREASURY and restart; quotes already issued keep the old address, which is why a change needs a restart rather than a hot edit.",
+  "accept": 0.97,
+  "pad": {},
+  "chains": {
+    "4663": {
+      "name": "Robinhood Chain",
+      "rpc": "https://rpc.mainnet.chain.robinhood.com",
+      "explorer": "https://robinhoodchain.blockscout.com",
+      "treasury": "0x02b321E3B31e4Ca53cee164BEedc314f7345F6d4",
+      "minConf": 1,
+      "tokens": {
+        "ETH": { "dec": 18, "name": "Ether", "symbol": "ETH", "feed": "ETH" },
+        "WOLV": {
+          "addr": "0x945626601703d126877C33a3d0Def244c833550d",
+          "dec": 18,
+          "symbol": "WOLVERINU",
+          "name": "Wolverinu",
+          "_": "Priced off its own Uniswap v4 pool, so no listing and no API key. The two words below are precomputed because they need keccak twice and never change for a given token: poolId = keccak(abi.encode(0x0, token, fee 0, tickSpacing 200, hook 0xe5e7...e044)) = 0x8fe46999c5956f2651471983e6eb648fe71ca4e5c9a6a66ef23c4132bcb8481e; slot0 = keccak(abi.encode(poolId, uint256(6))). Regenerate for another Pons token with dev/poolslot.py.",
+          "price": {
+            "kind": "v4",
+            "pm": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+            "slot0": "0xc57d798f08946f2d67b7879e954dfbc27ffdc9a6c44df758b066380fdf60aab0"
+          }
+        }
+      }
+    },
+    "42161": {
+      "name": "Arbitrum One",
+      "rpc": "https://arb1.arbitrum.io/rpc",
+      "explorer": "https://arbiscan.io",
+      "treasury": "0x02b321E3B31e4Ca53cee164BEedc314f7345F6d4",
+      "minConf": 1,
+      "_": "The same chain the 1v1 escrow and the arena are already deployed on (BrawlEscrowToken 0x4f69E969..., RektArena 0x470032Fb...), with the real Circle USDC and the real Tether, and cents of gas per transfer.",
+      "tokens": {
+        "ETH": { "dec": 18, "name": "Ether", "symbol": "ETH", "feed": "ETH" },
+        "USDC": { "addr": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", "dec": 6, "symbol": "USDC", "name": "USD Coin", "peg": 1 },
+        "USDT": { "addr": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", "dec": 6, "symbol": "USDT", "name": "Tether USD₮0", "peg": 1 }
+      }
+    }
+  }
+}

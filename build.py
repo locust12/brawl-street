@@ -63,6 +63,20 @@ ep = os.path.join(root, 'chain', 'live.json')
 if os.path.exists(ep):
     import json
     js = 'const ESCROW_LIVE = ' + json.dumps(json.load(open(ep)), separators=(',', ':')) + ';\n' + js
+# store checkout pins: {chainId: treasury}, baked from net/pay.json for exactly the reason the
+# escrow pin above exists. The checkout gets its address from the game server, so a server that has
+# been tampered with could point every purchase at the attacker's wallet. With these in the page,
+# 8k_pay.js refuses to send to anything else. Rebuild whenever the treasury changes.
+pp = os.path.join(root, 'net', 'pay.json')
+if os.path.exists(pp):
+    import json
+    try:
+        _pay = json.load(open(pp))
+        _pins = {cid: ch['treasury'] for cid, ch in (_pay.get('chains') or {}).items() if ch.get('treasury')}
+        if _pins:
+            js = 'const STORE_PINS = ' + json.dumps(_pins, separators=(',', ':')) + ';\n' + js
+    except Exception as e:
+        print('WARNING: net/pay.json is unreadable, the checkout will ship with no pinned treasury:', e)
 mjs = '\n'.join(open(p).read() for p in sorted(glob.glob(os.path.join(src, '*.mjs'))))
 open(os.path.join(root, 'game.js'), 'w').write(js)
 open(os.path.join(root, 'game3d.mjs'), 'w').write(mjs)
@@ -113,3 +127,34 @@ if _bad:
     print('WARNING: shipped fighter models with NO skinned rig (they get procedural motion at load, see 99_v3_finish.mjs; they need a real rig): ' + ', '.join(_bad))
     if os.environ.get('STRICT_RIGS') == '1':
         raise SystemExit('STRICT_RIGS=1: refusing to build with unrigged fighter models')
+
+# ---- shop art drift (15 Oct) -------------------------------------------------------------------
+# A cosmetic whose id is not in `COSM` in src/8e_itemart.js fails ItemArt.has(), falls through to the
+# live Cosm.swatch fallback, and renders on the shop card as a picture of the FIGHTER. That is how 28
+# cosmetics ended up as 28 identical pictures of the doge without anything erroring. The catalogue,
+# the baked files and that list have to move together, so the build says when they have not.
+#   fix: node dev/cosmbake.mjs && python3 dev/itemforge/towebp.py, then re-sync COSM from assets/cosm
+def _shop_art_drift():
+    import json as _j
+    art = os.path.join(root, 'src', '8e_itemart.js')
+    econ = os.path.join(root, 'src', '89_econ.js')
+    if not (os.path.exists(art) and os.path.exists(econ)): return
+    a = open(art).read()
+    m = re.search(r"const COSM = new Set\(\[(.*?)\]\);", a, re.S)
+    declared = set(re.findall(r"'([^']+)'", m.group(1))) if m else set()
+    cm = re.search(r'cosmetics: \[(.*?)\n  \],', open(econ).read(), re.S)
+    cat = re.findall(r"\{ id: '([a-z0-9_]+)'", cm.group(1)) if cm else []
+    onfile = {os.path.basename(p)[:-5] for p in glob.glob(os.path.join(root, 'assets', 'cosm', '*.webp'))}
+    no_art = [c for c in cat if c not in onfile]
+    undeclared = [c for c in cat if c in onfile and c not in declared]
+    if no_art:
+        print('WARNING: %d cosmetic(s) have NO baked art and will render as the fighter: %s'
+              % (len(no_art), ', '.join(no_art[:12])))
+    if undeclared:
+        print('WARNING: %d cosmetic(s) are baked but missing from COSM in src/8e_itemart.js, so the '
+              'shop cannot load them: %s' % (len(undeclared), ', '.join(undeclared[:12])))
+try:
+    import re, glob
+    _shop_art_drift()
+except Exception as _e:
+    print('shop art check skipped:', _e)

@@ -225,9 +225,42 @@
     const el = typeof aim === 'number' ? aim : Math.atan2(u * g[1], g[0]);
     return [f.face * Math.cos(el), Math.sin(el)];
   }
+  // ---- 4b. CARRYING a shop weapon ----------------------------------------------------------
+  // 15 Oct, Duane: *"some of the weapons are off and he's not gripping them right"*. He was looking
+  // at the right thing. The prop sits on the hand BONE, and in the idle guard that bone is up at the
+  // chin, so a shotgun lay across the fighter's muzzle, the fire axe ran down through his forearm
+  // and the manhole cover sat on his face. Moving the prop off the hand would only break the grip;
+  // what was missing is the ARM. A carried weapon now aims the arm the way the weapon points, and
+  // `pzAimPose` braces the off hand onto it, which is the two-handed grip the guns already had.
+  // `armK` per weapon decides how far: a rifle goes right out, a bat only lifts to the shoulder.
+  // WHICH HAND. The props rode the right hand, which in this side-on view is usually the FAR hand:
+  // the torso drew over the top of the weapon and the near fist stayed up in its guard in front of
+  // it, so the axe looked like it was floating past the chest with nobody holding it. The weapon
+  // goes in whichever hand is nearest the camera, and that arm is the one that gets posed.
+  const pzCarryHand = new WeakMap();
+  V3.carryHand = f => pzCarryHand.get(f) || 'R';
+  function pzCarryDir(av) {
+    const f = av.f, B = av.bones;
+    if (typeof FORGE_HOLD === 'undefined' || !f.item) { pzCarryHand.delete(f); return null; }
+    const sp = FORGE_HOLD[f.item.kind];
+    if (!sp || sp.limb || !sp.armK) { pzCarryHand.delete(f); return null; }   // worn, not carried
+    if (f.state === 'move' || f.state === 'hammer' || f.state === 'final' || f.hitstun > 0) return null;
+    let near = 'R';
+    if (B.RightHand && B.LeftHand) {
+      B.RightHand.getWorldPosition(pzA); B.LeftHand.getWorldPosition(pzB);
+      near = pzA.z >= pzB.z ? 'R' : 'L';
+    }
+    pzCarryHand.set(f, near);
+    return [f.face * Math.cos(sp.c), Math.sin(sp.c), sp.armK, near];
+  }
   function pzAimPose(av, aim, k) {
     const f = av.f, B = av.bones;
-    if (!B.RightArm || !B.RightForeArm || !B.RightHand) return;
+    // `aim[3]` picks the holding side (the carry pose above). A gun aim never sets it and keeps the
+    // right hand, which is what every gun pose in the game was built against.
+    const H = aim[3] === 'L' ? 'Left' : 'Right', O = aim[3] === 'L' ? 'Right' : 'Left';
+    const mainArm = B[H + 'Arm'], mainFore = B[H + 'ForeArm'], mainHand = B[H + 'Hand'];
+    const offArm = B[O + 'Arm'], offFore = B[O + 'ForeArm'], offHand = B[O + 'Hand'];
+    if (!mainArm || !mainFore || !mainHand) return;
     const lat = pzLateral(av);
     const el = Math.atan2(aim[1], Math.abs(aim[0]) || 1e-6);
     // recoil: the muzzle climbs for a couple of frames after anything leaves the barrel
@@ -241,27 +274,29 @@
     if (rec > 0) { pzQR.setFromAxisAngle(lat, -rec * 0.34 * k); pzD.applyQuaternion(pzQR); }
     // a gun is aimed with the arm OUT: straighten the elbow toward the upper arm's line first, so the
     // alignment below points the whole arm down the barrel instead of a forearm tucked at the chest
-    if (pzIsGun(f) && B.RightArm) {
-      B.RightForeArm.getWorldPosition(pzB); B.RightArm.getWorldPosition(pzP); pzA.subVectors(pzB, pzP);
-      B.RightHand.getWorldPosition(pzC); pzC.sub(pzB);
+    // straightening the elbow is for a GUN being aimed; a carried weapon keeps its natural bend
+    if ((pzIsGun(f) || aim[3]) && mainArm) {
+      mainFore.getWorldPosition(pzB); mainArm.getWorldPosition(pzP); pzA.subVectors(pzB, pzP);
+      mainHand.getWorldPosition(pzC); pzC.sub(pzB);
       if (pzA.lengthSq() > 1e-8 && pzC.lengthSq() > 1e-8) {
-        pzQA.setFromUnitVectors(pzC.normalize(), pzA.normalize()); pzQ1.identity(); pzQA.slerp(pzQ1, 1 - 0.8 * k);
-        pzApply(B.RightForeArm, pzQA);
+        pzQA.setFromUnitVectors(pzC.normalize(), pzA.normalize()); pzQ1.identity();
+        pzQA.slerp(pzQ1, 1 - (aim[3] ? 0.5 : 0.8) * k);
+        pzApply(mainFore, pzQA);
       }
     }
-    B.RightHand.getWorldPosition(pzA); B.RightForeArm.getWorldPosition(pzB);
+    mainHand.getWorldPosition(pzA); mainFore.getWorldPosition(pzB);
     pzC.subVectors(pzA, pzB); if (pzC.lengthSq() < 1e-8) return;
     pzQA.setFromUnitVectors(pzC.normalize(), pzD);
     if (k < 0.999) { pzQ1.identity(); pzQA.slerp(pzQ1, 1 - k); }
-    pzApply(B.RightArm, pzQA);
+    pzApply(mainArm, pzQA);
     // the off hand braces the weapon
-    if (B.LeftArm && B.LeftForeArm && B.LeftHand) {
-      B.LeftHand.getWorldPosition(pzA); B.LeftForeArm.getWorldPosition(pzB);
+    if (offArm && offFore && offHand) {
+      offHand.getWorldPosition(pzA); offFore.getWorldPosition(pzB);
       pzC.subVectors(pzA, pzB);
       if (pzC.lengthSq() > 1e-8) {
         pzQA.setFromUnitVectors(pzC.normalize(), pzD);
         pzQ1.identity(); pzQA.slerp(pzQ1, 1 - 0.55 * k);
-        pzApply(B.LeftArm, pzQA);
+        pzApply(offArm, pzQA);
       }
     }
     pzAimOf.set(f, [pzD.x, pzD.y]);
@@ -635,10 +670,13 @@
     // hammer windmill, and the big mallet swings
     if (f.state === 'hammer') pzHammer(av);
     else if (f.state === 'move' && f.move && f.move.def.fx === 'mallet') pzMallet(av);
-    // gun aim
+    // gun aim, then the carry pose for anything else held out of the shop
     const aim = pzAimDir(f);
-    S.aim += ((aim ? 1 : 0) - S.aim) * (aim ? 0.55 : 0.3);
+    const carry = aim ? null : pzCarryDir(av);
+    const want = aim || carry;
+    S.aim += ((want ? 1 : 0) - S.aim) * (want ? 0.55 : 0.3);
     if (aim && S.aim > 0.02) pzAimPose(av, aim, Math.min(1, S.aim));
+    else if (carry && S.aim > 0.02) pzAimPose(av, carry, Math.min(1, S.aim) * carry[2]);
     else pzAimOf.delete(f);
     // strikes reach their hitboxes (last: it bends the bones the clip, gait and crouch left)
     if (!V3.noStrike) { try { pzStrike(av); } catch (e) { V3.fxErr(e, '97_v3_pose:622'); /* a pose layer must never take the frame down */ } }

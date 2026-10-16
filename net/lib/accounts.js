@@ -73,6 +73,11 @@ class Accounts {
   has(th) { const id = this.tok.get(th); return !!(id && this.acc.has(id)); }
   size() { return this.acc.size; }
   byId(id) { return this.acc.get(id) || null; }
+  // which account, if any, has already connected this X user id. The id is the numeric one, not the
+  // handle, because a handle can be renamed and reused by somebody else.
+  byXid(xid) { const s = String(xid); for (const a of this.acc.values()) if (a.xid && String(a.xid) === s) return a; return null; }
+  // by the connected handle, case-insensitively, for telling a player early that it is taken
+  byHandle(h) { const s = String(h || '').toLowerCase(); if (!s) return null; for (const a of this.acc.values()) if (a.x && a.x.toLowerCase() === s) return a; return null; }
   byFriendCode(c) { const id = this.fc.get(String(c || '').toUpperCase()); return id ? this.acc.get(id) : null; }
   findByName(name) { const n = String(name || '').trim().toLowerCase(); if (!n) return []; const out = []; for (const a of this.acc.values()) if ((a.name || '').toLowerCase() === n) out.push(a); return out; }
 
@@ -92,6 +97,26 @@ class Accounts {
     this.rec.set(sha('recovery:' + c), a.id); a.recAt = Date.now(); this.touch();
     return c;
   }
+  // ---- sign in with a verified X account -------------------------------------------------------
+  // THE POINT OF THIS, and it is the whole reason the vault is sellable: a purchase lives on the
+  // ACCOUNT, and until now an account lived only on the device token in one browser's storage. Clear
+  // the storage, open the game on a phone, or lose the laptop, and a paid stage was gone -- the
+  // recovery code was the only way back and nobody writes those down.
+  //
+  // A verified X identity is the proof. `lib/xverify.js` already proves somebody holds @handle (the
+  // code in the bio); if that X id is on an existing account, this points the new device at it
+  // instead of refusing the connect. Same proof, opposite outcome: it used to say "that X account is
+  // already connected to another player", which is true and useless when the other player is you.
+  adoptX(th, acct) {
+    if (!acct || !this.acc.has(acct.id)) return null;
+    const prev = this.tok.get(th);
+    if (prev === acct.id) return acct;
+    this.tok.set(th, acct.id); this.touch();
+    return acct;
+  }
+  // the account this device token points at right now, WITHOUT minting one (get() would create it)
+  idFor(th) { return this.tok.get(th) || null; }
+
   // link this device token to the account the code belongs to
   recover(th, c) {
     const norm = String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');

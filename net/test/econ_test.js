@@ -29,14 +29,18 @@ t('catalog reads from src/89_econ.js', () => {
     'every weapon needs id/kind/name/price/blurb/how/counter');
   const tiers = { 15: 0, mid: 0, 100: 0 };
   for (const w of C.CAT.weapons) { if (w.tier === 15) tiers[15]++; else if (w.tier === 100) tiers[100]++; else tiers.mid++; }
-  assert.ok(tiers[15] >= 4, '$15 shelf');
+  // the cheap shelf shrank to 2 on 15 Oct when Rebar, Steel Toes and Chain Whip were cut
+  assert.ok(tiers[15] >= 2, '$15 shelf, got ' + tiers[15]);
   assert.ok(tiers.mid >= 12, 'the $20-50 shelf should have at least 12, got ' + tiers.mid);
   assert.ok(tiers[100] >= 2, '$100 shelf');
 });
-t('every weapon price is in one of the tiers Duane asked for', () => {
+// Repriced 2026-10-14: Duane asked for the shelf to be "not too expensive". The old ladder was
+// $15 / $20-50 / $100, which is a lot for a browser game, so it is now five steps that line up one
+// to one with the four store rarities (legendary covers the top two).
+t('every weapon price is on the agreed ladder', () => {
+  const OK = [199, 399, 699, 999, 1499];
   for (const w of C.CAT.weapons) {
-    const d = w.price / 100;
-    assert.ok(d === 15 || (d >= 20 && d <= 50) || d === 100, w.id + ' is $' + d);
+    assert.ok(OK.includes(w.price), w.id + ' is $' + (w.price / 100).toFixed(2) + ', not on the ladder');
   }
 });
 t('cosmetics have no gameplay fields', () => {
@@ -46,24 +50,24 @@ t('cosmetics have no gameplay fields', () => {
 console.log('entitlements');
 t('a fresh account owns nothing but its level grants', () => {
   assert.deepStrictEqual(econ.owned(A.id).sort(), C.levelGrants(1).slice().sort());
-  assert.strictEqual(econ.owns(A.id, 'strike'), false);
+  assert.strictEqual(econ.owns(A.id, 'fireaxe'), false);
 });
 t('levels grant the cheap shelf for free', () => {
   econ.row(A.id).xp = C.xpForLevel(10);
   const own = econ.owned(A.id);
   for (const w of C.CAT.weapons.filter(x => x.unlock != null && x.unlock <= 10)) assert.ok(own.includes(w.id), 'level 10 should include ' + w.id);
-  assert.ok(!own.includes('strike'), 'the $50 airstrike is never a level grant');
+  assert.ok(!own.includes('fireaxe'), 'the $50 airstrike is never a level grant');
 });
-t('grant adds an item, a bundle expands', () => {
-  econ.grant(B.id, ['strike'], 'test');
-  assert.ok(econ.owns(B.id, 'strike'));
-  econ.grant(B.id, ['bnd_starter'], 'test');
-  for (const id of C.BY.get('bnd_starter').grants) assert.ok(econ.owns(B.id, id), 'bundle should grant ' + id);
+t('grant adds an item', () => {
+  econ.grant(B.id, ['fireaxe'], 'test');
+  assert.ok(econ.owns(B.id, 'fireaxe'));
+  econ.grant(B.id, ['wreck'], 'test');
+  assert.ok(econ.owns(B.id, 'wreck'));
 });
 t('a client cannot equip or load out what it does not own', () => {
-  const st = econ.set(A.id, { loadout: ['strike', 'holy', 'peel'], equip: { aura: 'aur_rain', plate: 'plt_found' } });
-  assert.ok(!st.loadout.includes('strike'), 'strike is not owned');
-  assert.ok(st.loadout.includes('peel'), 'peel is a level-2 grant');
+  const st = econ.set(A.id, { loadout: ['fireaxe', 'wreck', 'medkit'], equip: { aura: 'aur_rain', plate: 'plt_found' } });
+  assert.ok(!st.loadout.includes('fireaxe'), 'strike is not owned');
+  assert.ok(st.loadout.includes('medkit'), 'medkit is a level-2 grant');
   assert.deepStrictEqual(st.equip, {}, 'no cosmetics owned yet');
 });
 t('a cosmetic can only go in its own slot', () => {
@@ -74,8 +78,8 @@ t('a cosmetic can only go in its own slot', () => {
   assert.strictEqual(st2.equip.aura, 'aur_rain');
 });
 t('the loadout is capped at three', () => {
-  econ.grant(A.id, ['peel', 'prod', 'girder', 'bouncer', 'zip'], 'test');
-  const st = econ.set(A.id, { loadout: ['peel', 'prod', 'girder', 'bouncer', 'zip'] });
+  econ.grant(A.id, ['fireaxe', 'fireaxe', 'pipegun', 'medkit', 'zip'], 'test');
+  const st = econ.set(A.id, { loadout: ['fireaxe', 'fireaxe', 'pipegun', 'medkit', 'zip'] });
   assert.strictEqual(st.loadout.length, 3);
 });
 
@@ -113,17 +117,17 @@ t('loadouts are item KINDS the fight engine knows, not store ids', () => {
 console.log('store (stub)');
 t('buying is refused while payments are off', () => {
   econ.mode = 'off';
-  const r = econ.buy(D.id, { id: 'strike' });
+  const r = econ.buy(D.id, { id: 'fireaxe' });
   assert.strictEqual(r.ok, false);
   assert.strictEqual(r.off, true);
-  assert.strictEqual(econ.owns(D.id, 'strike'), false);
+  assert.strictEqual(econ.owns(D.id, 'fireaxe'), false);
 });
 t('the stub provider grants, and only with PAYMENTS=stub', () => {
   econ.mode = 'stub';
-  const r = econ.buy(D.id, { id: 'strike' });
+  const r = econ.buy(D.id, { id: 'fireaxe' });
   assert.strictEqual(r.ok, true);
-  assert.ok(econ.owns(D.id, 'strike'));
-  assert.strictEqual(econ.buy(D.id, { id: 'strike' }).ok, false, 'no double buy');
+  assert.ok(econ.owns(D.id, 'fireaxe'));
+  assert.strictEqual(econ.buy(D.id, { id: 'fireaxe' }).ok, false, 'no double buy');
   assert.strictEqual(econ.buy(D.id, { id: 'nope' }).ok, false, 'unknown id');
   assert.strictEqual(econ.buy(D.id, { id: 'plt_champ' }).ok, false, 'season prizes are not for sale');
   econ.mode = 'off';
@@ -277,7 +281,7 @@ console.log('persistence');
 t('entitlements survive a restart', () => {
   econ.flush();
   const e2 = new Economy({ dataDir: dir, accounts, log });
-  assert.ok(e2.owns(B.id, 'strike'), 'B still owns the airstrike');
+  assert.ok(e2.owns(B.id, 'fireaxe'), 'B still owns the airstrike');
   assert.strictEqual(e2.row(A.id).rec.w, econ.row(A.id).rec.w);
 });
 t('entitlements are in their own file, not accounts.json', () => {

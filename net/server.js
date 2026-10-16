@@ -44,6 +44,13 @@ const CFG = {
   // than 800 ms count, so an honest client on a bad line never accrues any of it.
   maxLagMs: +process.env.MAX_LAG_MS || 90e3,
   keepReplays: +process.env.KEEP_REPLAYS || 400,
+  // Tournament feed (tools/tournament.js). A bracket runner has to know who won, and there are no
+  // spectators, so finished matches land in a small ring here and are read back over /api/matches.
+  // OFF unless TOURNEY_KEY is set, and then only readable with that key: the leaderboard and the
+  // replays are already public, but a running list of who played whom is not something to hand out
+  // by default. Memory only -- a restart loses it, which is why the runner keeps its own bracket file.
+  tourneyKey: process.env.TOURNEY_KEY || '',
+  tourneyKeep: +process.env.TOURNEY_KEEP || 500,
   realMoney: process.env.REAL_MONEY === '1',
   maxDelay: clampInt(+process.env.MAX_DELAY || 15, 2, 15),   // input delay cap in frames (see NetLockstep.MAX_DELAY)
   quiet: process.env.QUIET === '1',
@@ -57,7 +64,9 @@ let REGIONS = [];
 try { REGIONS = JSON.parse(process.env.REGIONS || '[]'); } catch (e) { REGIONS = []; }
 if (!REGIONS.length && CFG.publicUrl) REGIONS = [{ id: CFG.region, label: CFG.regionLabel, ws: CFG.publicUrl.replace(/^http/, 'ws') + '/ws', http: CFG.publicUrl }];
 const STAKES = [0, 0.01, 0.05, 0.1, 0.25];
-const REAL_STAKES = (process.env.REAL_STAKES || '0.001,0.005,0.01,0.05').split(',').map(Number);
+// Defaults are ETH-sized; a stablecoin escrow wants whole-dollar steps, so set REAL_STAKES when
+// ESCROW_TOKEN is on (e.g. REAL_STAKES=1,5,10,25).
+const REAL_STAKES = (process.env.REAL_STAKES || (process.env.ESCROW_TOKEN ? '1,5,10,25' : '0.001,0.005,0.01,0.05')).split(',').map(Number);
 let STAGES = ['isle', 'moon', 'chart', 'keep', 'roof', 'dojo'];
 const CPU_LEVEL = 7;
 const log = (...a) => { if (!CFG.quiet) console.log(new Date().toISOString().slice(11, 19), ...a); };
@@ -70,6 +79,17 @@ const accounts = new Accounts(CFG.dataDir);
 accounts.pruneTests();
 setInterval(() => { const n = accounts.pruneTests(); if (n) log('pruned', n, 'test accounts'); }, 10 * 60e3).unref();
 const replayDir = path.join(CFG.dataDir, 'replays');
+// Finished matches, newest last, for /api/matches. Bounded by CFG.tourneyKeep; empty when the
+// feed is off, so it costs nothing on a normal day.
+const tourneyFeed = [];
+// Does this request carry the tournament key? Used for /api/matches and to mark the bracket
+// runner's sockets as operator sockets. Length is compared first because timingSafeEqual throws on
+// a mismatch, and false whenever the feature is off, so an unset key never authorises anything.
+function tourneyAuth(given) {
+  if (!CFG.tourneyKey) return false;
+  const a = Buffer.from(String(given || '')), b = Buffer.from(CFG.tourneyKey);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 fs.mkdirSync(replayDir, { recursive: true });
 
 const integrityStore = new integrity.Store(CFG.dataDir);
@@ -79,14 +99,36 @@ setInterval(() => integrityStore.prune(), 10 * 60e3).unref();
 // decision about whether bought weapons may enter a match. See docs/ECONOMY.md.
 // It attaches itself to `accounts` (it wraps leaderboard() to add the monthly board) and keeps its
 // own economy.json, so it never touches accounts.js. Payments are OFF unless PAYMENTS=stub.
+// X handle verification: a name over a fighter's head has to be an account that player proved they
+// control, not a free-text field. X_CLIENT_ID (from developer.x.com, which only Duane can create)
+// additionally turns on the OAuth route; without it the bio-code route works on its own.
+const { XVerify } = require('./lib/xverify');
+const xv = new XVerify({ log, clientId: process.env.X_CLIENT_ID || null });
+setInterval(() => xv.prune(), 5 * 60e3).unref();
+
 const { Economy } = require('./lib/economy');
 const economy = new Economy({ dataDir: CFG.dataDir, accounts, log });
 setInterval(() => economy.flush(), 30e3).unref();
+
+// ---- THE VAULT, enforced here and not only in the page -----------------------------------------
+// Two secret stages and one secret fighter are sold rather than listed (CAT.vault in src/89_econ.js).
+// The page hides what an account does not own, but the page is not the authority: the engine's own
+// stage and fighter lists still carry all 19 and all 36, and they must, because both sides of a
+// lockstep match have to agree on the whole table. So the check lives at the two doors where a
+// PLAYER'S CHOICE enters a room -- the fighter they pick and the stage a host sets.
+const VAULT_CAT = require('./lib/catalog').CAT.vault || [];
+function vaultIdFor(kind, unlocks) { const v = VAULT_CAT.find(x => x.kind === kind && x.unlocks === unlocks); return v ? v.id : null; }
+// `acctId` null (no account yet) means not owned, which is the safe answer
+function vaultOk(acctId, kind, unlocks) { const vid = vaultIdFor(kind, unlocks); return !vid || !!(acctId && economy.owns(acctId, vid)); }
+function vaultName(kind, unlocks) { const v = VAULT_CAT.find(x => x.kind === kind && x.unlocks === unlocks); return v ? v.name : ''; }
 
 let escrow = null;
 if (CFG.realMoney) {
   const { Escrow } = require('./lib/escrow');
   escrow = new Escrow({ rpc: process.env.CHAIN_RPC, chainId: +process.env.CHAIN_ID, address: process.env.ESCROW_ADDRESS,
+    // ESCROW_TOKEN turns on the ERC20 escrow: stakes are that token, never native ETH
+    token: process.env.ESCROW_TOKEN || null, tokenSymbol: process.env.ESCROW_TOKEN_SYMBOL || 'USDC',
+    tokenDecimals: process.env.ESCROW_TOKEN_DECIMALS == null ? 6 : +process.env.ESCROW_TOKEN_DECIMALS,
     operatorKey: process.env.OPERATOR_KEY, chainName: process.env.CHAIN_NAME, explorer: process.env.EXPLORER });
   log('real-money mode ON, escrow', process.env.ESCROW_ADDRESS, 'chain', process.env.CHAIN_ID);
 }
@@ -111,9 +153,11 @@ const cleanName = s => {
 const CODE_ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 // quick-match map pools: [] means "any map". Two players pair when their pools overlap.
 function stageIds(digest) { const E = engine.get(digest) || engine.get(engine.digest); return E ? E.stages.map(x => x.id) : STAGES; }
-function cleanPool(list, digest) {
+function cleanPool(list, digest, acct) {
   if (!Array.isArray(list)) return [];
-  const ok = new Set(stageIds(digest)), out = [];
+  // A quick-match pool is a map REQUEST, so a vault stage somebody does not own comes straight out of
+  // it. Leaving it in would hand them the stage for free the moment the pool was honoured.
+  const ok = new Set(stageIds(digest).filter(id => vaultOk(acct, 'stage', id))), out = [];
   for (const x of list) if (typeof x === 'string' && ok.has(x) && !out.includes(x)) out.push(x);
   return out.length === ok.size ? [] : out;   // everything picked == any
 }
@@ -185,10 +229,17 @@ function makeRoom(c, o) {
     for (const m of victim.members) leaveRoom(m.c, 'The room closed to make space; open a new one.');
     closeRoom(victim);
   }
+  // THE CPU RULE, Duane 2026-10-14: *"if cpu is playing dont make wagering work"*. Money and bots do
+  // not share a match. A wagered room never fills a seat with a CPU, which means a 4-player wager is
+  // four paying humans fighting each other and nothing else. Set here, re-checked in `set`, enforced
+  // again in startMatch and launch, because this is the one rule a tampered client must not get past.
+  const real = !!(o.real && escrow);
   const r = {
     code: newCode(), priv: !!o.priv, quick: !!o.quick, size: o.size === 4 ? 4 : 2, hostId: c.id, stake: o.stake || 0,
-    stage: engine.get(c.digest).stages.some(x => x.id === o.stage) ? o.stage : 'random', stocks: clamp(o.stocks | 0 || 3, 1, 5), items: o.items !== false,
-    cpuFill: o.size === 4 && o.cpuFill !== false, real: !!(o.real && escrow), members: [], state: 'lobby', match: null, digest: c.digest,
+    // a vault stage the host does not own falls back to Random rather than being refused: the room
+    // still opens, which is the right answer for a stale page that still has the card on screen
+    stage: engine.get(c.digest).stages.some(x => x.id === o.stage) && vaultOk(c.acct, 'stage', o.stage) ? o.stage : 'random', stocks: clamp(o.stocks | 0 || 3, 1, 5), items: o.items !== false,
+    cpuFill: o.size === 4 && o.cpuFill !== false && !real, real, members: [], state: 'lobby', match: null, digest: c.digest,
     ranked: o.size !== 4 && !!o.ranked, challenge: o.challenge || null, pool: Array.isArray(o.pool) ? o.pool : [], picked: null,
     created: Date.now(), touched: Date.now(), countdownAt: 0, readyBy: 0, funding: null, fundAt: 0,
     ip: c.ip || null,   // for the per-address room cap only; never logged, never stored, dies with the room
@@ -251,7 +302,15 @@ function closeRoom(r) { rooms.delete(r.code); }
 
 // the map a quick match will be played on: random inside the pool everyone agreed on
 function pickMap(r) {
-  const ids = r.pool.length ? r.pool : stageIds(r.digest);
+  // RANDOM ONLY ROLLS A VAULT STAGE IF EVERY PLAYER IN THE ROOM OWNS IT. An empty pool means "any
+  // map" and the engine's list carries all 19, so a free quick match would otherwise have dropped
+  // people onto a paid stage -- a giveaway, and the opposite of a secret. A host DELIBERATELY
+  // picking one is different and still stands: both players fight on it, which costs the guest
+  // nothing and is the best advertising the stage will ever get.
+  const accs = r.members.map(m => m.c && m.c.acct).filter(Boolean);
+  const everyoneOwns = id => !vaultIdFor('stage', id) || (accs.length > 0 && accs.every(a => vaultOk(a, 'stage', id)));
+  let ids = (r.pool.length ? r.pool : stageIds(r.digest)).filter(everyoneOwns);
+  if (!ids.length) ids = stageIds(r.digest).filter(id => !vaultIdFor('stage', id));   // never roll an empty list
   r.picked = ids[rint(ids.length)];
   return r.picked;
 }
@@ -277,7 +336,16 @@ function maybeStart(r) {
 function startMatch(r) {
   if (matches.size >= CFG.maxMatches) { for (const m of r.members) err(m.c, 'The server is at capacity. Try again in a minute.'); return; }
   r.countdownAt = 0; r.readyBy = 0; r.fundAt = 0;
-  if (r.real) return beginFunding(r);
+  if (r.real) {
+    // Every seat human, every seat present. The FFA countdown and the host's Start button both land
+    // here with as few as two people in a four-seat room, and `launch` would have handed the empty
+    // seats to bots; a pot fought partly by the server is not a wager. Refuse and say why.
+    if (r.members.length !== r.size) {
+      for (const m of r.members) err(m.c, `A wagered ${r.size}-player match needs all ${r.size} seats taken by players. ${r.size - r.members.length} still open.`, 'seats');
+      broadcastRoom(r); return;
+    }
+    return beginFunding(r);
+  }
   for (const m of r.members) {
     if (accounts.get(m.th).bal + 1e-9 < r.stake) {
       m.ready = false; err(m.c, 'Not enough practice ETH for this stake. Refill or lower the stake.', 'funds');
@@ -304,10 +372,13 @@ function launch(r, real) {
   const members = r.members.slice();
   const players = members.map(m => ({ char: m.char, name: m.name, human: true, th: m.th, member: m }));
   const E = engine.get(r.digest);
-  if (r.size === 4 && r.cpuFill) while (players.length < 4) players.push({ char: E.chars[rint(E.chars.length)], name: 'CPU', cpu: true, level: CPU_LEVEL });
+  if (r.size === 4 && r.cpuFill && !real) while (players.length < 4) players.push({ char: E.chars[rint(E.chars.length)], name: 'CPU', cpu: true, level: CPU_LEVEL });
+  if (real && players.some(p => !p.human)) throw new Error('refusing to launch a wagered match with a CPU in it');
   const ids = E.stages.map(x => x.id);
   const want = r.quick ? (r.picked || pickMap(r)) : r.stage;
-  const stage = want === 'random' || !ids.includes(want) ? ids[rint(ids.length)] : want;
+  // the last-resort roll skips the vault for the same reason pickMap does: nobody chose it here
+  const roll = ids.filter(id => !vaultIdFor('stage', id));
+  const stage = want === 'random' || !ids.includes(want) ? roll[rint(roll.length)] : want;
   const humans = players.filter(p => p.human).length;
   const pot = +(r.stake * humans).toFixed(9);
   // THE FAIRNESS RULE, enforced here and nowhere else: a staked or ranked room gets `arsenal: false`
@@ -621,6 +692,14 @@ function finish(M, reason) {
     if (x.client.seat && x.client.seat.M === M) { x.client.seat = null; presence(x.client); }
   }
   log('match', M.id, 'end', reason, 'winner', winner, 'payee', payee, 'ticks', G.tick);
+  if (CFG.tourneyKey) {
+    tourneyFeed.push({ id: M.id, at: Date.now(), code: r ? r.code : null, ranked: !!M.ranked, reason,
+      winner, cancelled, ticks: G.tick, replay: replayHash,
+      players: M.slots.map((x, i) => ({ slot: i, name: x.name, human: !!x.human, dropped: !!x.dropped,
+        acct: x.th ? accounts.get(x.th).id : null, x: (M.handles && M.handles[i]) || null,
+        stocks: stats[i] ? stats[i].stocks : null, dmg: stats[i] ? stats[i].dmg : null })) });
+    if (tourneyFeed.length > CFG.tourneyKeep) tourneyFeed.splice(0, tourneyFeed.length - CFG.tourneyKeep);
+  }
   M.sim = null;
   // the room goes back to its lobby with whoever is still here
   if (r) {
@@ -697,14 +776,20 @@ async function beginFunding(r) {
     log('funding budget exhausted for room', r.code, ms.map(m => m.c && m.c.acct).join(','));
     broadcastRoom(r); return;
   }
-  const stakeWei = BigInt(Math.round(r.stake * 1e6)) * 10n ** 12n;
+  // 6dp stablecoin units for a token escrow, wei for the native one. r.stake is a plain number of
+  // whole units (1 = 1 USDC, or 1 ETH), so scale by the right number of decimals.
+  const dec = escrow.token ? escrow.tokenDecimals : 18;
+  const stakeUnits = BigInt(Math.round(r.stake * 1e6)) * 10n ** BigInt(Math.max(0, dec - 6));
+  const stakeWei = stakeUnits;
   const id = '0x' + rid(32), windowSecs = clamp(+process.env.FUND_WINDOW_S || 120, 30, 3600);
   r.state = 'funding'; r.funding = { id, stakeWei: stakeWei.toString(), deadline: Date.now() + windowSecs * 1000, players: ms.map(m => m.addr), polling: false, charged: ms };
   broadcastRoom(r);
   try { await escrow.open(id, ms.map(m => m.addr), stakeWei, windowSecs); if (r.funding && r.funding.id === id) r.funding.opened = true; }
   catch (e) { log('escrow open failed', e.message.split('\n')[0]); abortFunding(r, 'Could not open the match on chain. Nobody was charged.'); return; }
   if (!r.funding || r.funding.id !== id) return;
-  for (const m of r.members) sendTo(m.c, { k: 'fund', id, escrow: escrow.address, stakeWei: stakeWei.toString(), deadline: r.funding.deadline, chainId: escrow.chainId });
+  for (const m of r.members) sendTo(m.c, { k: 'fund', id, escrow: escrow.address, stakeWei: stakeWei.toString(),
+    token: escrow.token, tokenSymbol: escrow.tokenSymbol, tokenDecimals: escrow.token ? escrow.tokenDecimals : 18,
+    deadline: r.funding.deadline, chainId: escrow.chainId });
   pollFunding(r, id);
 }
 async function pollFunding(r, id) {
@@ -815,7 +900,11 @@ if (CFG.realMoney) {
 
 // ------------------------------------------------------------------ messages
 const LOBBY_KINDS = new Set(['name', 'quick', 'create', 'join', 'leave', 'pick', 'ready', 'set', 'start', 'widen', 'refill', 'wallet', 'stats', 'look',
-  'social', 'friend_add', 'friend_accept', 'friend_decline', 'friend_remove', 'challenge', 'challenge_reply', 'recovery_new', 'recover', 'board']);
+  'social', 'friend_add', 'friend_accept', 'friend_decline', 'friend_remove', 'challenge', 'challenge_reply', 'recovery_new', 'recover', 'board',
+  'xclaim', 'xverify', 'xforget',
+  // the checkout: each of these costs an outbound price-feed or RPC read, so they go in the SLOW
+  // bucket with the other lobby messages rather than the 400/s one
+  'paymenu', 'payquote', 'payclaim']);
 
 function onMessage(c, raw) {
   const now = Date.now();
@@ -866,6 +955,9 @@ function onMessage(c, raw) {
     case 'wallet': return bindWallet(c, msg);
     case 'chat': return onChat(c, msg);
     case 'look': return onLook(c, msg);
+    case 'xclaim': return xClaim(c, msg);
+    case 'xverify': return xVerifyNow(c);
+    case 'xforget': return xForget(c);
     case 'social': return sendTo(c, socialMsg(c));
     case 'board': return sendTo(c, Object.assign({ k: 'board' }, accounts.leaderboard(100), { mine: accounts.boardPlace(c.acct) }));
     case 'friend_add': return friendAdd(c, msg);
@@ -875,8 +967,11 @@ function onMessage(c, raw) {
     case 'recovery_new': return sendTo(c, { k: 'recovery', code: accounts.newRecovery(c.th) });
     case 'recover': return recover(c, msg);
     // store + entitlements + loadout (lib/economy.js). A page can only ever read or change its OWN
-    // row, and `buy` is refused unless PAYMENTS=stub: no money moves through this server.
-    case 'econ': case 'econset': case 'buy': return void economy.handle(c, msg, { sendTo });
+    // row, and `buy` is refused unless PAYMENTS is set. With PAYMENTS=chain the three `pay*`
+    // messages run the crypto checkout (lib/pay.js): a payment goes wallet -> treasury address and
+    // is verified on-chain here, so no money and no key ever moves through this process.
+    case 'econ': case 'econset': case 'buy':
+    case 'paymenu': case 'payquote': case 'payclaim': return void economy.handle(c, msg, { sendTo });
     default: return strike(c);
   }
 }
@@ -1011,7 +1106,7 @@ function quick(c, msg) {
   if (!requireBuild(c) || c.seat || (c.room && c.room.state !== 'lobby')) return;
   const size = msg.size === 4 ? 4 : 2, stake = Number(msg.stake) || 0;
   if (!validStake(false, stake)) return err(c, 'Pick one of the listed stakes.');
-  const want = cleanPool(msg.stages, c.digest);
+  const want = cleanPool(msg.stages, c.digest, c.acct);
   c.wantStages = want;
   let best = null;
   for (const r of rooms.values()) {
@@ -1058,6 +1153,8 @@ function memberOf(c) { const r = c.room; return r && r.members.find(m => m.c ===
 function pick(c, msg) {
   const r = c.room, m = memberOf(c); if (!m || r.state !== 'lobby') return;
   if (!engine.get(r.digest).chars.includes(msg.char)) return err(c, 'Unknown fighter.');
+  // the secret fighter is on the engine's list (both sides need the same table) but not everybody's
+  if (!vaultOk(c.acct, 'fighter', msg.char)) return err(c, vaultName('fighter', msg.char) + ' is a vault fighter. Unlock it in the store and it is yours on every device.', 'vault');
   m.char = msg.char; broadcastRoom(r);
 }
 function ready(c, msg) {
@@ -1070,10 +1167,15 @@ function ready(c, msg) {
 function setRoom(c, msg) {
   const r = c.room; if (!r || r.state !== 'lobby' || r.hostId !== c.id || r.quick) return;
   let reset = false;
-  if (engine.get(r.digest).stages.some(x => x.id === msg.stage) || msg.stage === 'random') r.stage = msg.stage;
+  if (msg.stage && msg.stage !== 'random' && !vaultOk(c.acct, 'stage', msg.stage)) {
+    err(c, vaultName('stage', msg.stage) + ' is a vault stage. Unlock it in the store and it is yours on every device.', 'vault');
+  } else if (engine.get(r.digest).stages.some(x => x.id === msg.stage) || msg.stage === 'random') r.stage = msg.stage;
   if (msg.stocks != null) r.stocks = clamp(msg.stocks | 0, 1, 5);
   if (msg.items != null) r.items = !!msg.items;
-  if (msg.cpuFill != null) r.cpuFill = r.size === 4 && !!msg.cpuFill;
+  if (msg.cpuFill != null) {
+    if (r.real && msg.cpuFill) err(c, 'A wagered match is players only. Fill the seats with people, or drop the stake.', 'cpu');
+    r.cpuFill = r.size === 4 && !!msg.cpuFill && !r.real;
+  }
   if (msg.ranked != null) r.ranked = r.size === 2 && !!msg.ranked;
   if (msg.stake != null && validStake(r.real, Number(msg.stake)) && Number(msg.stake) !== r.stake) { r.stake = Number(msg.stake); reset = true; }
   if (msg.size === 2 || msg.size === 4) {
@@ -1144,11 +1246,15 @@ function onHash(c, msg) {
 }
 
 // ------------------------------------------------------------------ profile, looks, chat
-function handleOf(a) { return (a.look && a.look.x) || null; }
+// Only a VERIFIED handle is ever shown. `a.x` is written by xverify and by nothing else, so a name
+// over a fighter's head is always an X account that player proved they control.
+function handleOf(a) { return (a && a.x) || null; }
 function profileOf(a) {
   const se = accounts.season(a);
   return { id: a.id, fc: a.fc, name: a.name, look: a.look || null, elo: a.elo, rated: a.rg, rw: a.rw, rl: a.rl, rank: accounts.rankOf(a),
-    season: { id: se.id, elo: se.elo, g: se.g, w: se.w, l: se.l }, games: a.games, wins: a.wins, recovery: !!a.recAt };
+    season: { id: se.id, elo: se.elo, g: se.g, w: se.w, l: se.l }, games: a.games, wins: a.wins, recovery: !!a.recAt,
+    // the VERIFIED X handle (lib/xverify.js). Never from `look`, which anyone could type into.
+    x: a.x || null, xav: a.xav || null };
 }
 function meMsg(c) { const a = accounts.get(c.th); return { k: 'me', name: c.name, bal: a.bal, profile: profileOf(a) }; }
 
@@ -1170,7 +1276,11 @@ function cleanLook(lk) {
     if (k === 'base' || k === 'v' || !/^[a-z][a-z0-9]{0,15}$/i.test(k) || ++n > 40) continue;
     if (k === 'name') out.name = cleanName(v);
     else if (k === 'title') out.title = cleanTitle(v);
-    else if (k === 'x') { const h = cleanHandle(v); if (h) out.x = h; }
+    // `x` is NOT accepted here any more. The handle used to be a free-text field on the custom
+    // fighter, so anybody could put @elonmusk over their head in a match people were betting on.
+    // It now lives on the account and only xverify (lib/xverify.js) can set it. Silently dropped
+    // rather than rejected, so an older page saving its look does not break.
+    else if (k === 'x') { /* verified on the account, never self-set */ }
     else if (typeof v === 'string' && /^[#a-z0-9_.-]{1,20}$/i.test(v)) out[k] = v;
     else if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
     else if (typeof v === 'boolean') out[k] = v;
@@ -1178,6 +1288,92 @@ function cleanLook(lk) {
   if (!out.name) out.name = 'Rookie';
   return out;
 }
+// ---- X handle: connect it, never type it (lib/xverify.js) ----
+function xState(c) {
+  const a = accounts.get(c.th), p = xv.pending(a.id);
+  return { k: 'xstate', x: a.x || null, xav: a.xav || null, pending: p, oauth: xv.oauthReady() };
+}
+// Binding an account to a verified X identity, from wherever the proof arrived.
+function xBind(a, r) {
+  a.x = r.x; a.xid = r.xid; a.xav = r.xav; a.xat = Date.now();
+  accounts.touch();
+  log('x connected', a.id, '@' + r.x);
+}
+// Everyone currently connected on this account (a player may have the game open in two tabs).
+function connsFor(accId) { const out = []; for (const c of clients) { if (c.th && accounts.get(c.th).id === accId) out.push(c); } return out; }
+function pushXState(accId) {
+  for (const c of connsFor(accId)) { sendTo(c, xState(c)); if (c.room) broadcastRoom(c.room); }
+}
+function xClaim(c, msg) {
+  const me = accounts.get(c.th);
+  const heldBy = h => { const a = accounts.byHandle(h); return a ? a.id : null; };
+  const r = xv.claim(me.id, msg && msg.handle, heldBy);
+  if (r.err) return err(c, r.err, 'x');
+  sendTo(c, xState(c));
+  // Watch for them. They are over on X editing a bio; coming back to press a button is the step
+  // people give up on, so the server checks on their behalf and the page flips by itself.
+  const holder = id => { const b = accounts.byXid(id); return b ? b.id : null; };
+  xv.startPolling(me.id, holder, (accId, res) => {
+    const acc = accounts.byId(accId); if (!acc) return;
+    // the handle turned out to be on an existing account: this is a sign-in, not a fresh connect
+    if (res.adopt) {
+      // snapshot FIRST -- the device token moves on the first adopt, so connsFor() would come back
+      // empty for the second tab on the same device
+      for (const cc of connsFor(accId)) xAdopt(cc, res);
+      return;
+    }
+    xBind(acc, res);
+    pushXState(accId);
+  });
+}
+async function xVerifyNow(c) {
+  const me = accounts.get(c.th);
+  // the check is "is this X account on SOMEBODY ELSE's account", so compare account ids, not tokens
+  const holder = id => { const a = accounts.byXid(id); return a ? a.id : null; };
+  let r;
+  try { r = await xv.verify(me.id, holder); }
+  catch (e) { log('xverify', e.message); return err(c, 'Could not check that right now. Try again in a moment.', 'x'); }
+  if (r.err) return err(c, r.err, 'x');
+  if (r.adopt) return xAdopt(c, r);
+  xBind(accounts.get(c.th), r);
+  pushXState(me.id);
+}
+// ---- SIGNING IN: the verified X account already has an account, so this device joins it ----------
+// This is the half that makes a purchase permanent. Everything bought is an entitlement on the
+// ACCOUNT (lib/economy.js), and the account used to be reachable only through this browser's device
+// token -- so clearing site data lost a paid stage. A verified X id is now a way back in from any
+// device, and anything bought on the device before signing in comes with it.
+function xAdopt(c, r) {
+  if (c.room || c.seat) return err(c, 'Leave your room first, then connect.', 'x');
+  const target = accounts.byId(r.adopt);
+  if (!target) return err(c, 'That account could not be found. Try again in a moment.', 'x');
+  const from = accounts.idFor(c.th);
+  const prev = from ? accounts.byId(from) : null;
+  // WHAT CARRIES OVER, AND WHAT MUST NOT. Moving the purchases off the device's old account is the
+  // point -- buy something, then sign in, and it comes with you. But on a shared computer the old
+  // account may belong to somebody else, and emptying it would take their things.
+  // So it only happens when that account is plainly a scratch one: never signed in to an X account
+  // of its own, and no rated games on it. Anything with either is left exactly as it is, and the
+  // person who owns it still has their own way back to it.
+  const scratch = !!prev && !prev.x && !(prev.rg > 0);
+  if (from && from !== target.id && scratch) economy.mergeInto(from, target.id);
+  xBind(target, r);                       // refresh the handle and the avatar while we are here
+  c.name = target.name || c.name;
+  attachAcct(c, target.id);
+  log('x signed in', target.id, '@' + r.x, from && from !== target.id ? (scratch ? '(merged ' + from + ')' : '(left ' + from + ' alone)') : '');
+  sendTo(c, Object.assign(meMsg(c), { recovered: true }));
+  sendTo(c, socialMsg(c));
+  sendTo(c, economy.state(target.id));    // the entitlements this device is here for
+  sendTo(c, xState(c));
+}
+function xForget(c) {
+  const a = accounts.get(c.th);
+  xv.cancel(a.id);
+  if (a.x) { a.x = null; a.xid = null; a.xav = null; a.xat = 0; accounts.touch(); }
+  sendTo(c, xState(c));
+  if (c.room) broadcastRoom(c.room);
+}
+
 function onLook(c, msg) {
   const lk = msg.look === null ? null : cleanLook(msg.look);
   if (msg.look !== null && !lk) return err(c, 'That custom fighter could not be saved.');
@@ -1361,6 +1557,17 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30', 'Access-Control-Allow-Origin': '*' });
     return res.end(JSON.stringify(body));
   }
+  // Finished matches, for the tournament bracket runner. Needs TOURNEY_KEY both to exist and to be
+  // presented; without the env it is not a route at all.
+  if (req.url.startsWith('/api/matches')) {
+    if (!CFG.tourneyKey) return send(res, 404, 'not found');
+    const q = new URL(req.url, 'http://x').searchParams;
+    if (!tourneyAuth(req.headers['x-tourney-key'] || q.get('key'))) return send(res, 403, 'forbidden');
+    const since = +q.get('since') || 0, lim = clamp(parseInt(q.get('limit'), 10) || 200, 1, 500);
+    const out = tourneyFeed.filter(m => m.at > since).slice(-lim);
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    return res.end(JSON.stringify({ now: Date.now(), matches: out }));
+  }
   // public replay files: seed, config and every input of a finished match, so anyone can re-run it
   const rm = /^\/api\/replay\/(m[0-9a-z]{6,24})$/.exec(req.url);
   if (rm) {
@@ -1507,6 +1714,18 @@ process.on('unhandledRejection', e => { log('unhandled rejection:', String(e && 
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
-server.listen(CFG.port, CFG.host, () => log('brawlstreet online on', CFG.host + ':' + CFG.port, 'engines', engine.versions().join(' '), ENGINE.chars.length + ' fighters', 'static', CFG.publicDir));
+// What this box is doing about money, said at boot. Without it "are payments on?" can only be
+// answered by connecting a game client, and a missing pay.json fails silently into "not taking
+// payments yet" (lib/pay.js) — which is exactly the kind of thing that is discovered by a player.
+function payLine() {
+  try {
+    if (economy.mode !== 'chain') return 'payments ' + economy.mode;
+    const p = economy.pay();
+    if (!p || !p.enabled()) return 'payments chain BUT NO CONFIG — the store will refuse every purchase (net/pay.json)';
+    const curs = p.menuList();
+    return 'payments chain: ' + curs.map(c => c.symbol + '@' + c.chainId).join(' ') + ' -> ' + curs[0].to;
+  } catch (e) { return 'payments ?'; }
+}
+server.listen(CFG.port, CFG.host, () => log('brawlstreet online on', CFG.host + ':' + CFG.port, 'engines', engine.versions().join(' '), ENGINE.chars.length + ' fighters', 'static', CFG.publicDir, '|', payLine()));
 
 module.exports = { server, CFG };

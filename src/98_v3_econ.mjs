@@ -50,12 +50,6 @@
     const f = cyl(g, 0.009, 0.009, 0.14, fuse, 0.41, 0.02); f.rotation.z = -0.35;
     sph(g, 0.022, glow('#ffd45c', 3), 0.07, 0.48);
   }
-  function girderMesh(g) {
-    const steel = std(0xd05a2a, { metalness: 0.6, roughness: 0.5 });
-    box(g, 0.5, 0.05, 0.16, steel, 0, 0.3); box(g, 0.5, 0.05, 0.16, steel, 0, 0.1);
-    box(g, 0.05, 0.25, 0.1, steel, 0, 0.2);
-    for (const x of [-0.2, 0, 0.2]) box(g, 0.03, 0.03, 0.18, std(0x2a2a30), x, 0.3);
-  }
   function bouncerMesh(g) {
     const body = new T.Mesh(SPH, std(0x2a3a5a, { metalness: 0.6, roughness: 0.3 })); body.scale.set(0.2, 0.13, 0.2); body.position.y = 0.13; g.add(body);
     const ring = new T.Mesh(new T.TorusGeometry(0.21, 0.035, 10, 28), glow('#9fe8ff', 2.2)); ring.rotation.x = Math.PI / 2; ring.position.y = 0.15; g.add(ring);
@@ -174,11 +168,18 @@
     return g;
   }
 
+  // THE SHOP KINDS ARE NOT IN HERE, 15 Oct. zip, boots, flamer, freeze, aegis, turret and well were,
+  // and they are all weapons the store sells with a full forge model on the card
+  // (src/92a_v3_props.mjs). makeProp0 (92_v3_items.mjs) asks makeProp2 BEFORE the forge, so these
+  // seven simple stand-ins -- three to eight meshes, written during the econ session before the
+  // forge existed -- won the lookup and the weapon in your hand was never the weapon you were sold.
+  // Same fault as `mine` in 94_v3_moves.mjs, seven more times. dev/store_test.js fails the build if
+  // any shop kind is claimed here again.
   const PROPS = {
-    peel: peelMesh, pan: panMesh, prod: prodMesh, dyna: dynaMesh, girder: girderMesh, bouncer: bouncerMesh,
-    zip: zipMesh, boots: bootsMesh, cluster: g => clusterMesh(g, 1), clustlet: g => clusterMesh(g, 0.5),
-    sheep: sheepMesh, flamer: flamerMesh, freeze: freezeMesh, homer: homerMesh, drill: drillMesh,
-    aegis: aegisMesh, turret: turretMesh, well: wellMesh, strike: remoteMesh, donkey: donkeyRemote,
+    peel: peelMesh, pan: panMesh, prod: prodMesh, dyna: dynaMesh, bouncer: bouncerMesh,
+    cluster: g => clusterMesh(g, 1), clustlet: g => clusterMesh(g, 0.5),
+    sheep: sheepMesh, homer: homerMesh, drill: drillMesh,
+    strike: remoteMesh, donkey: donkeyRemote,
     armageddon: armageddonMesh,
   };
   const prevProp = V3.makeProp2;
@@ -247,7 +248,7 @@
   // they were written. Silently, with no error, forever.
   //
   // What was invisible as a result: the airstrike marker, the three jets, the three missiles, the
-  // concrete donkey, every placed girder, and Armageddon's red sky. The sim was running all of it
+  // concrete donkey and Armageddon's red sky. The sim was running all of it
   // correctly the whole time — `dev/weapon_test.js` passes 24 assertions on the airstrike — which
   // is exactly why nobody noticed. The feature worked; it just could not be seen.
   //
@@ -346,7 +347,7 @@
       }
     }
   }
-  // --- ice, drones, wells, girders, the red sky ---
+  // --- ice, drones, wells, the red sky ---
   function bodyFrame() {
     const SCx = V3.SC;
     for (const f of Game.fighters) {
@@ -370,22 +371,6 @@
       }
     }
     const I = items3();
-    if (I && I.girders) for (let i = 0; i < I.girders.length; i++) {
-      const p = I.girders[i];
-      const g = get('gd' + i + '_' + p.born, () => {
-        const grp = new T.Group(), steel = std(0xd05a2a, { metalness: 0.6, roughness: 0.5 });
-        const web = new T.Mesh(BOX, steel); web.scale.set(1, 0.1, 0.34); grp.add(web);
-        for (const y of [-0.13, 0.13]) { const fl = new T.Mesh(BOX, steel); fl.scale.set(1, 0.07, 0.5); fl.position.y = y; grp.add(fl); }
-        for (let d = 0; d < 9; d++) { const b = new T.Mesh(BOX, std(0x8a3a18)); b.scale.set(0.02, 0.26, 0.36); b.position.x = -0.45 + d * 0.11; b.rotation.z = d % 2 ? 0.5 : -0.5; grp.add(b); }
-        grp.traverse(o => { if (o.isMesh) o.castShadow = true; });
-        return grp;
-      });
-      const w = (p.x1 - p.x0) * SCx;
-      g.position.set((p.x0 + p.x1) / 2 * SCx, -p.y * SCx - 0.09, 0.05);
-      g.scale.set(w, 1, 1);
-      const left = (p.born + p.life) - Game.frame;
-      g.visible = left > 90 || Math.floor(left / 5) % 2 === 0;    // blinks out in its last 1.5 s
-    }
     if (I && I.rain) {
       const sky = get('doom', () => { const m = new T.Mesh(PLANE, glow('#ff2a1a', 1.1, 0.16)); m.scale.set(80, 50, 1); m.position.set(0, 0, -8); return m; });
       sky.material.opacity = 0.1 + Math.sin(performance.now() / 90) * 0.06;
@@ -515,8 +500,28 @@
       const look = E.lookFor(f.idx) || {};
       // --- weapon finish: recolour whatever is in hand, AND the holstered sidearm on their back,
       // which is the half that is visible when their hands are empty (i.e. nearly always)
-      if (av.held) for (const [kind, m] of Object.entries(av.held)) { if (m.visible) tintGroup(m, look.finish || null); }
+      // 2026-10-16: a finish is now PER WEAPON, the way Counter-Strike does it -- you do not own
+      // "gold", you own The Chopper in Bodega Gold. `Econ.skinFor(kind)` answers which paint goes on
+      // whatever is in this hand right now, and falls back to the old universal finish so nothing
+      // anyone already owns stops working. Local play only resolves the local account's finishes;
+      // online, `look.finish` still carries whatever the server sent for that seat.
+      if (av.held) for (const [kind, m] of Object.entries(av.held)) {
+        if (!m.visible) continue;
+        const sk = (f.cpu || E.S.slotLooks) ? null : (E.skinFor ? E.skinFor(kind) : null);
+        tintGroup(m, sk || look.finish || null);
+      }
       finishFrame(f, look);
+      // --- the taunt. One clip the rig already carries, held over whatever the state machine
+      // picked, cancelled by any input (src/8j_taunt.js owns the rules). It is applied HERE rather
+      // than in the avatar because it must land after the state machine has chosen this frame's
+      // clip, and this hook is the last thing to run before the mixer updates.
+      if (window.Taunt && av.play) {
+        const tn = Taunt.frame(f);
+        if (tn) {
+          const a = av.play(tn.clip, 0.12);
+          if (a && a.setEffectiveTimeScale) a.setEffectiveTimeScale(tn.rate);
+        }
+      }
       const dead = f.state === 'dead';
       // --- aura: a coloured light and a slow ring at the feet
       if (look.aura && !dead) {
@@ -611,6 +616,97 @@
         KOFX.push({ o: c, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp + 0.03, g: -0.0016, spin: 0.35, t: 0, life: 130, fade: 1 });
       }
     }
+    // ---- the eight added 2026-10-16 ----------------------------------------------------------
+    // The KO is the half second every player in the match is watching, and we were shipping four.
+    // Brawlhalla sells this exact category as a headline and the research put it top of the list.
+    else if (ko.id === 'ko_bell') {
+      // a brass ring that opens out of nothing, with a hard white flash inside it
+      const r = new T.Mesh(RING, glow('#ffd77a', 3, 0.95)); r.position.set(x, y, 0.3); r.scale.setScalar(0.2);
+      const s = new T.Mesh(SPH, glow('#fffbe8', 3.2, 0.9)); s.position.set(x, y, 0.28); s.scale.setScalar(0.5);
+      V3.scene.add(r); V3.scene.add(s);
+      KOFX.push({ o: r, grow: 0.62, t: 0, life: 46, fade: 1 });
+      KOFX.push({ o: s, grow: -0.012, t: 0, life: 18, fade: 1 });
+      for (let i = 0; i < 10; i++) {
+        const b = new T.Mesh(RING, glow('#c8a03a', 2, 0.6));
+        b.position.set(x, y, 0.26); b.scale.setScalar(0.3 + i * 0.08);
+        V3.scene.add(b); KOFX.push({ o: b, grow: 0.3 + i * 0.03, t: 0, life: 40 + i * 2, fade: 1 });
+      }
+    } else if (ko.id === 'ko_cash') {
+      // a wall of notes that keeps going, instead of settling the way confetti does
+      for (let i = 0; i < 30; i++) {
+        const n = new T.Mesh(PLANE, glow('#9fd9a0', 1.6, 0.95));
+        n.scale.set(0.2, 0.1, 1);
+        n.position.set(x - 1 + Math.random() * 2, y - 0.5 + Math.random() * 2.5, (Math.random() - 0.5) * 0.8);
+        n.rotation.z = Math.random() * Math.PI;
+        V3.scene.add(n);
+        KOFX.push({ o: n, vx: 0.05 + Math.random() * 0.07, vy: 0.01 + Math.random() * 0.03, g: -0.0009, spin: 0.22, t: 0, life: 160, fade: 1 });
+      }
+    } else if (ko.id === 'ko_lamp') {
+      // the stage goes dark for a beat: a big black plane that fades in fast and out slow
+      const p = new T.Mesh(PLANE, new T.MeshBasicMaterial({ color: 0x05070b, transparent: true, opacity: 0.0, depthWrite: false, fog: false }));
+      p.scale.set(80, 48, 1); p.position.set(x, y, 1.6);
+      V3.scene.add(p);
+      KOFX.push({ o: p, t: 0, life: 52, flick: 1 });
+    } else if (ko.id === 'ko_siren') {
+      // red and blue washing over the whole stage, alternating
+      for (let i = 0; i < 2; i++) {
+        const p = new T.Mesh(PLANE, glow(i ? '#2a6aff' : '#ff2a3a', 1.1, 0.0));
+        p.scale.set(80, 48, 1); p.position.set(x, y, 1.5 - i * 0.02);
+        V3.scene.add(p);
+        KOFX.push({ o: p, t: 0, life: 110, wash: i ? 1 : 0 });
+      }
+    } else if (ko.id === 'ko_chalk') {
+      // an outline left on the floor. It stays, which is the whole joke, so it gets a long life.
+      const g = new T.Group();
+      for (let i = 0; i < 14; i++) {
+        const seg = new T.Mesh(PLANE, glow('#e8edf4', 1.4, 0.8));
+        const a = (i / 14) * Math.PI * 2;
+        seg.scale.set(0.09, 0.26, 1);
+        seg.position.set(Math.cos(a) * 0.55, Math.sin(a) * 0.9, 0);
+        seg.rotation.z = a;
+        g.add(seg);
+      }
+      g.position.set(x, y - 0.6, 0.2); g.rotation.x = -1.15;
+      V3.scene.add(g);
+      KOFX.push({ o: g, t: 0, life: 520, fade: 1 });
+    } else if (ko.id === 'ko_spark') {
+      // grinder sparks: warm, fast, and they fall
+      for (let i = 0; i < 44; i++) {
+        const s = new T.Mesh(PLANE, glow(i % 5 ? '#ffd36a' : '#fff3c0', 3, 1));
+        s.scale.set(0.055, 0.012, 1);
+        s.position.set(x, y, (Math.random() - 0.5) * 0.5);
+        const a = Math.random() * Math.PI * 2, sp = 0.05 + Math.random() * 0.1;
+        s.rotation.z = a;
+        V3.scene.add(s);
+        KOFX.push({ o: s, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, g: -0.0032, spin: 0.05, t: 0, life: 50 + Math.random() * 40, fade: 1 });
+      }
+    } else if (ko.id === 'ko_smoke') {
+      // a thick column that goes up and drifts off the top of the screen
+      for (let i = 0; i < 16; i++) {
+        const p = new T.Mesh(SPH, new T.MeshBasicMaterial({ color: 0x8f98a6, transparent: true, opacity: 0.4, depthWrite: false, fog: false }));
+        p.scale.setScalar(0.3 + Math.random() * 0.35);
+        p.position.set(x + (Math.random() - 0.5) * 0.5, y + i * 0.22, (Math.random() - 0.5) * 0.5);
+        V3.scene.add(p);
+        KOFX.push({ o: p, vx: 0.004 + Math.random() * 0.006, vy: 0.022 + Math.random() * 0.012, grow: 0.012, t: 0, life: 120 + i * 4, fade: 1 });
+      }
+    } else if (ko.id === 'ko_drop') {
+      // a cover swings open under them and the street takes them
+      const lid = new T.Mesh(CYL, std(0x4a4238, { metalness: 0.9, roughness: 0.5 }));
+      lid.scale.set(0.95, 0.06, 0.95); lid.position.set(x, y - 0.9, 0.1);
+      V3.scene.add(lid);
+      KOFX.push({ o: lid, t: 0, life: 90, swing: 1, fade: 1 });
+      const hole = new T.Mesh(CYL, new T.MeshBasicMaterial({ color: 0x02030a, fog: false }));
+      hole.scale.set(0.9, 0.02, 0.9); hole.position.set(x, y - 0.95, 0.08);
+      V3.scene.add(hole);
+      KOFX.push({ o: hole, t: 0, life: 90, fade: 1 });
+      for (let i = 0; i < 10; i++) {
+        const d = new T.Mesh(BOX, glow('#6a7078', 1.2, 0.7));
+        d.scale.setScalar(0.05 + Math.random() * 0.05);
+        d.position.set(x + (Math.random() - 0.5) * 1.2, y - 0.8, (Math.random() - 0.5) * 0.4);
+        V3.scene.add(d);
+        KOFX.push({ o: d, vx: (Math.random() - 0.5) * 0.04, vy: 0.03 + Math.random() * 0.03, g: -0.0022, spin: 0.3, t: 0, life: 70, fade: 1 });
+      }
+    }
   }
   // A KO effect owns its materials so it can fade them, and disposes them when it is done.
   // This used to `material.clone()` every frame of every particle — 34 confetti x 130 frames was
@@ -635,7 +731,18 @@
       if (e.vx != null) { e.o.position.x += e.vx; e.o.position.y += e.vy; if (e.g) e.vy += e.g; }
       if (e.spin) e.o.rotation.z += e.spin;
       if (e.grow) e.o.scale.addScalar(e.grow);
-      if (e.fade) { fadeOwn(e.o); setOpacity(e.o, Math.max(0, 1 - e.t / e.life)); }
+      // ---- the three added 2026-10-16, each the reason one of the new KO effects reads ----
+      // A black plane that comes in hard and leaves slowly: the stage lights cutting out.
+      if (e.flick) { fadeOwn(e.o); setOpacity(e.o, e.t < 6 ? e.t / 6 * 0.86 : Math.max(0, 0.86 * (1 - (e.t - 6) / (e.life - 6)))); }
+      // Red and blue washing over the stage, out of phase, dying away over the life.
+      if (e.wash != null) {
+        fadeOwn(e.o);
+        const ph = Math.sin((e.t / 9) + e.wash * Math.PI);
+        setOpacity(e.o, Math.max(0, ph) * 0.3 * Math.max(0, 1 - e.t / e.life));
+      }
+      // A manhole cover swinging open on one edge.
+      if (e.swing) { e.o.rotation.z = Math.min(1.5, e.t * 0.05); e.o.position.x += 0.004; }
+      if (e.fade && !e.flick && e.wash == null) { fadeOwn(e.o); setOpacity(e.o, Math.max(0, 1 - e.t / e.life)); }
       if (e.t > e.life) { disposeFx(e.o); KOFX.splice(i, 1); }
     }
   }

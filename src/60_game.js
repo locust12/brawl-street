@@ -155,7 +155,7 @@ const Game = {
           if (h.hb.pre && h.hb.pre(a, b, h.hb)) break;
           const mult = a.chargeMult() * (a.powerT > 0 ? 1.4 : 1);
           if (this.feel && FEEL.dropParry(b, h.hb.dmg * mult, a)) break;   // parry just after the shield came down (25_feel)
-          if (b.state === 'shield') { this.shieldHit(b, h.hb.dmg * mult, a.x, a); break; }
+          if (b.state === 'shield') { this.shieldHit(b, h.hb.dmg * mult, a.x, a, h.hb.shieldEat); break; }
           const bonk = a.move.def.bonk;
           b.takeHit(h.hb, a, mult, a.x, a.face);
           COMBO.landed(a, b);   // opens the cancel window (23_combo)
@@ -166,9 +166,13 @@ const Game = {
       }
     }
   },
-  shieldHit(b, dmg, srcX, a) {
+  // `eat` is the shield multiplier, 2026-10-16. Everything has always drained a shield at a flat
+  // 1.3x its damage, which meant no weapon could ever BE the anti-shield weapon -- the Nail Gun's
+  // whole identity is that it eats a block, and the field it declared was being read by nothing.
+  // Default unchanged, so every existing weapon and every seeded fight behaves exactly as before.
+  shieldHit(b, dmg, srcX, a, eat) {
     if (this.feel && FEEL.shield(b, dmg, srcX, a)) return;   // perfect shield = parry (25_feel)
-    b.shieldHP -= dmg * 1.3;
+    b.shieldHP -= dmg * (eat || 1.3);
     b.vx = (b.x >= srcX ? 1 : -1) * Math.min(7, 1 + dmg * 0.4);
     const lag = clamp(Math.floor(dmg * 0.3 + 3), 3, 12);
     b.hitlag = lag; if (a) a.hitlag = Math.max(a.hitlag, lag);
@@ -201,7 +205,7 @@ const Game = {
         if (b.state === 'move' && b.move.def.reflect && MV2.reflect(p, b)) break;
         if (p.rehit ? MV2.rehitWait(p, b) : p.hitSet && p.hitSet.has(b)) continue;
         if (!p.rehit) (p.hitSet = p.hitSet || new Set()).add(b);
-        if (b.state === 'shield') { this.shieldHit(b, p.dmg, p.x, null); if (!p.boomer && !p.pierce) p.dead = true; continue; }
+        if (b.state === 'shield') { this.shieldHit(b, p.dmg, p.x, null, p.shieldEat); if (!p.boomer && !p.pierce) p.dead = true; continue; }
         const keep = p.owner.hitlag;
         b.takeHit({ dmg: p.dmg, ang: p.ang, bkb: p.bkb, kbg: p.kbg, radial: true, kind: p.kind }, p.owner, 1, p.x - p.vx, 1);
         p.owner.hitlag = keep;

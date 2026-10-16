@@ -236,6 +236,35 @@
         if (Math.random() < 0.5) sparks.push({ x: m.position.x, y: m.position.y, vx: (Math.random() - 0.5) * 0.05, vy: (Math.random() - 0.5) * 0.05, t: 0, life: 12 + Math.random() * 10, c: Math.random() < 0.5 ? '#fff6a0' : col });
       };
     },
+    // VOLT's thrown bolt: five short bars laid end to end and kicked alternately off the travel
+    // line, so it keeps a jagged silhouette under bloom, plus a hot head at the point. SPARK's
+    // arcbolt is a round head with a tail and photographs as a white streak -- wrong for the thing
+    // VOLT throws, and the two electric fighters have to read apart on sight.
+    voltbolt(p, g) {
+      const col = p.color || '#c6ff2e';
+      const segs = []; for (let i = 0; i < 5; i++) { const b = new THREE.Mesh(CAPS, glowM(col, 2.2, 1)); g.add(b); segs.push(b); }
+      const head = new THREE.Mesh(SPH, glowM('#f2ffd0', 2.4, 0.95)); g.add(head);
+      return (p, m) => {
+        const sp = Math.hypot(p.vx, p.vy) || 1, ux = p.vx / sp, uy = -p.vy / sp;
+        m.rotation.set(0, 0, 0);
+        m.scale.setScalar(p.r * V3.SC * 1.9);    // the bolt draws bigger than its hitbox, like every arc in the game
+        head.scale.setScalar(0.34 + Math.random() * 0.1);
+        head.position.set(ux * 0.95, uy * 0.95, 0);
+        const n = segs.length, L = 3.1, step = L / n;
+        for (let i = 0; i < n; i++) {
+          const t0 = -2.2 + i * step, t1 = t0 + step;
+          const k0 = (i % 2 ? 1 : -1) * (0.2 + Math.random() * 0.2), k1 = (i % 2 ? -1 : 1) * (0.2 + Math.random() * 0.2);
+          const x0 = ux * t0 - uy * k0, y0 = uy * t0 + ux * k0;
+          const x1 = ux * t1 - uy * k1, y1 = uy * t1 + ux * k1;
+          const dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy) || 1, b = segs[i];
+          b.position.set((x0 + x1) / 2, (y0 + y1) / 2, 0);
+          b.rotation.z = Math.atan2(dy, dx);
+          const w = (0.13 + 0.15 * (i / n)) * (0.85 + Math.random() * 0.3);
+          b.scale.set(len * 0.52, w, w);
+        }
+        if (Math.random() < 0.7) sparks.push({ x: m.position.x, y: m.position.y, vx: (Math.random() - 0.5) * 0.05, vy: (Math.random() - 0.5) * 0.05, t: 0, life: 8 + Math.random() * 10, c: Math.random() < 0.75 ? col : '#eaffb0' });
+      };
+    },
     wave(p, g) {
       const col = p.color || '#ffffff';
       const dome = new THREE.Mesh(DOME, rimM(col, 2.4, 1.5, 0.12)); const core = new THREE.Mesh(DOME, glowM('#ffffff', 1.4, 0.35)); core.scale.setScalar(0.55);
@@ -298,6 +327,27 @@
     const c = new THREE.Mesh(CAPS, glowM('#ffffff', 2.2, 1)), o = new THREE.Mesh(CAPS, glowM(p.color || '#9ff4ff', 1.6, 0.7)); o.scale.set(1.1, 2.4, 2.4);
     const tr = new THREE.Mesh(CAPS, glowM(p.color || '#9ff4ff', 0.9, 0.35)); tr.scale.set(3, 1.4, 1.4); tr.position.x = -4; g.add(tr, o, c);
     return (p, m) => { const r = p.r * V3.SC; m.scale.set(r * 6, r * 0.55, r * 0.55); m.rotation.set(0, 0, Math.atan2(-p.vy, p.vx)); };
+  };
+  // WOLVERINU's CROSS RAKE (67_unique): the cut itself, left hanging in the air. Four blades make the
+  // X -- two thick coloured ones and two thin white cores. glowM caches its materials by colour, so the
+  // fade has to be on a CLONE or it would dim every other projectile sharing that key.
+  KIND.rake = (p, g) => {
+    const c = p.color || '#9bf000', blades = [];
+    for (let i = 0; i < 4; i++) {
+      const hot = i % 2 === 1;
+      const b = new THREE.Mesh(CAPS, (hot ? glowM('#ffffff', 2.4, 0.9) : glowM(c, 1.9, 0.6)).clone());
+      b.rotation.z = (i < 2 ? 1 : -1) * 0.7; b.position.z = hot ? 0.02 : 0;
+      b.userData.op = hot ? 0.9 : 0.6; b.userData.hot = hot;
+      blades.push(b); g.add(b);
+    }
+    return (p, m) => {
+      const r = p.r * V3.SC, k = Math.min(1, (p.life - p.age) / 16) * Math.min(1, p.age / 3 + 0.4);
+      for (const b of blades) {
+        const t = b.userData.hot ? 0.05 : 0.11;
+        b.scale.set(r * (b.userData.hot ? 1.5 : 1.75), r * t, r * t);
+        b.material.opacity = b.userData.op * k;
+      }
+    };
   };
   KIND.shard = (p, g) => {
     if (!SH.shard) { SH.shard = new THREE.TetrahedronGeometry(0.55, 0); SH.shardM = std(0xffe04a, { roughness: 0.4, emissive: 0x6a5000, emissiveIntensity: 0.6, flatShading: true }); }
@@ -479,17 +529,20 @@
     // caught in it (the electrocuted state afterwards is drawn per fighter by zapped(), below).
     thunder(f, d, t) {
       const w = hbWin(d) || [20, 26];
+      // the crackle takes the move's own colour (VOLT charges lime, SPARK stays yellow). It was
+      // hardcoded to SPARK's #ffe84a, so every electric fighter wound up in the same colour.
+      const EC = d.color || '#ffe84a';
       if (t < w[0] - 2) {                                   // charge: arcs crackling inward
         const k = Math.min(1, t / Math.max(1, w[0] - 2));
         const c = fx(f, 'tc', () => {
           const g = new THREE.Group(); g.userData.arcs = [];
-          for (let i = 0; i < 6; i++) { const l = new THREE.Line(arcGeo(7), lineM(i % 2 ? '#8fd8ff' : '#fff6a0', 2.6)); g.add(l); g.userData.arcs.push(l); }
-          const gl = new THREE.Mesh(SPH, glowM('#ffe84a', 1.6, 0.5)); g.add(gl); g.userData.gl = gl;
+          for (let i = 0; i < 6; i++) { const l = new THREE.Line(arcGeo(7), lineM(i % 2 ? EC : '#fff6a0', 2.6)); g.add(l); g.userData.arcs.push(l); }
+          const gl = new THREE.Mesh(SPH, glowM(EC, 1.6, 0.5)); g.add(gl); g.userData.gl = gl;
           return g;
         });
         const [X, Y] = P(f.x, f.y - f.h * 0.55); c.position.set(X, Y, zOf(f));
         c.scale.setScalar(f.h * V3.SC);
-        c.userData.gl.scale.setScalar(0.1 + k * 0.28); c.userData.gl.material = glowM('#ffe84a', 1.4 + k * 1.6, 0.25 + k * 0.4);
+        c.userData.gl.scale.setScalar(0.06 + k * 0.12); c.userData.gl.material = glowM(EC, 0.9 + k * 0.9, 0.14 + k * 0.2);
         for (const l of c.userData.arcs) {
           l.visible = Math.random() < 0.3 + k * 0.6;
           const a = Math.random() * 6.283, R = (1.5 - k) * (0.5 + Math.random() * 0.6);
@@ -498,7 +551,7 @@
         return;
       }
       if (t >= w[0] - 2 && t <= w[1] + 2) {
-        const o = fx(f, 'tb', () => { const g = new THREE.Group(); g.add(new THREE.Mesh(SPH, rimM('#ffe84a', 3, 1.3, 0.15))); g.userData.arcs = []; for (let i = 0; i < 8; i++) { const l = new THREE.Line(arcGeo(8), lineM(i % 2 ? '#8fd8ff' : '#fff6a0', 3.2)); g.add(l); g.userData.arcs.push(l); } return g; });
+        const o = fx(f, 'tb', () => { const g = new THREE.Group(); g.add(new THREE.Mesh(SPH, rimM(EC, 3, 1.3, 0.15))); g.userData.arcs = []; for (let i = 0; i < 8; i++) { const l = new THREE.Line(arcGeo(8), lineM(i % 2 ? EC : '#fff6a0', 3.2)); g.add(l); g.userData.arcs.push(l); } return g; });
         const [X, Y] = P(f.x, f.y - f.h * 0.5); o.position.set(X, Y, zOf(f));
         const R = (d.hits && d.hits[0] ? d.hits[0].r : 72) * V3.SC * (0.7 + (t - (w[0] - 2)) * 0.05); o.scale.setScalar(R);
         for (const l of o.userData.arcs) { const a = Math.random() * 6.283; zap(l, 0, 0, Math.cos(a) * 1.3, Math.sin(a) * 1.3, 0.25); }
@@ -512,7 +565,7 @@
           const b = fx(f, 'tz' + n, () => new THREE.Line(arcGeo(12), lineM('#fff6a0', 3.4)));
           b.position.set(X, Y, zOf(f) + 0.05); b.scale.setScalar(1);
           zap(b, 0, 0, dx * V3.SC, -dy * V3.SC, 0.06 + Math.random() * 0.05);
-          b.material = lineM(n % 2 ? '#fff6a0' : '#8fd8ff', 3 + Math.random() * 1.5);
+          b.material = lineM(n % 2 ? '#fff6a0' : EC, 3 + Math.random() * 1.5);
           b.visible = Math.random() < 0.85;
           n++;
         }
@@ -714,6 +767,29 @@
       for (const s of o.children) { s.position.set((Math.random() - 0.3) * 0.35 * f.face, (Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 0.2); s.scale.setScalar(0.03 + Math.random() * 0.04); }
     },
     snake(f, d, t) { FXF.rush(f, Object.assign({}, d, { color: '#ffd23f' }), t); },
+    // WOLVERINU's PROWL (67_unique): a held sprint, so this is not a hitbox effect -- it reads the
+    // body's actual speed and lays horizontal streaks BEHIND him plus a low scrape at the claws.
+    // `rush` would have put a clump of sparks at the shoulder and said nothing about running.
+    // Materials are cloned because glowM caches by colour and these fade per frame.
+    prowl(f, d, t) {
+      const sp = Math.min(1, Math.abs(f.vx) / 19);
+      if (t < 4 || sp < 0.15) return;
+      const hex = f.feralT > 0 ? '#eaffb0' : (d.color || '#9bf000');
+      const o = fx(f, 'pw', () => {
+        const g = new THREE.Group();
+        for (let i = 0; i < 8; i++) { const s = new THREE.Mesh(PLANE, glowM(hex, i % 2 ? 2 : 2.6, 0.6, true).clone()); s.userData.i = i; g.add(s); }
+        return g;
+      });
+      const [X, Y] = P(f.x, f.y - f.h * 0.45); o.position.set(X, Y, zOf(f) - 0.02);
+      for (const s of o.children) {
+        const i = s.userData.i, back = (0.3 + i * 0.22 + Math.random() * 0.25) * f.w * V3.SC;
+        s.position.set(-back * f.face, (Math.random() - 0.5) * f.h * V3.SC * 0.72, (Math.random() - 0.5) * 0.14);
+        s.scale.set(f.w * V3.SC * (0.45 + Math.random() * 0.95) * sp, f.h * V3.SC * (0.012 + Math.random() * 0.028), 1);
+        s.material.color.set(col3(hex, (i % 2 ? 2 : 2.6) * HOT));
+        s.material.opacity = sp * Math.max(0.05, 0.7 - i * 0.07);
+      }
+      aura(f, 'pwc', f.x - f.face * f.w * 0.3, f.y - 5, 20 * sp, hex);     // claws scraping the deck
+    },
     nunchaku(f, d, t) {
       const w = hbWin(d); if (!w || t < w[0] - 2 || t > (d.hits[1] ? d.hits[1].f[1] : w[1]) + 2) return;
       const o = fx(f, 'nc', () => { const g = new THREE.Group(); const m = new THREE.MeshStandardMaterial({ color: 0x2a1a10, roughness: 0.5 }); for (const s of [-1, 1]) { const c = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.24, 8), m); c.position.x = s * 0.16; c.rotation.z = Math.PI / 2; g.add(c); } g.add(new THREE.Mesh(TORUS, glowM('#ffd23f', 1.6, 0.5))); g.children[2].scale.setScalar(0.3); return g; });
@@ -1267,15 +1343,12 @@
       const hl = new THREE.Mesh(SPH_LO, glowM('#ffffff', 2, 0.8)); hl.scale.setScalar(0.03); hl.position.set(-0.06, 0.28, 0.12); inner.add(hl);
       return true;
     }
-    if (kind === 'mine') {
-      const shell = std(0x3a4230, { roughness: 0.6, metalness: 0.3 }), dark = std(0x171a14, { roughness: 0.8 });
-      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.2, 0.09, 22), shell); body.position.y = 0.05; inner.add(body);
-      const top = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.05, 14), dark); top.position.y = 0.11; inner.add(top);
-      for (let i = 0; i < 3; i++) { const a = i / 3 * Math.PI * 2; const pr = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.1, 6), dark); pr.position.set(Math.cos(a) * 0.15, 0.11, Math.sin(a) * 0.15); inner.add(pr); }
-      const led = new THREE.Mesh(SPH_LO, glowM('#ff3a3a', 2.4, 1)); led.scale.setScalar(0.035); led.position.y = 0.15; inner.add(led);
-      inner.traverse(o => { if (o.isMesh) o.castShadow = true; });
-      return true;
-    }
+    // The Detonator ('mine') USED to be built here, as a three-pronged landmine on a cylinder.
+    // It is a shop weapon now and the forge has a full SLAM-style charge for it
+    // (src/92a_v3_props.mjs M.mine), which is also the model on its store card -- but makeProp0
+    // (92_v3_items.mjs) asks makeProp2 BEFORE the forge, so this branch won the lookup and the
+    // weapon in your hand was never the weapon you were sold. Removed 15 Oct; dev/store_test.js
+    // fails the build if any shop kind is claimed here again.
     if (kind === 'crate') {
       if (!IP.crateM) IP.crateM = new THREE.MeshStandardMaterial({ map: woodTex(), roughness: 0.85 });
       const c = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.4, 0.4), IP.crateM); c.position.y = 0.2; inner.add(c);

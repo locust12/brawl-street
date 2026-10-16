@@ -21,6 +21,12 @@
   // #rrggbb + alpha -> rgba()
   function rgba(hex, a) {
     if (!hex) return 'rgba(255,255,255,' + a + ')';
+    // 15 Oct: `hueAt` returns an hsl() string and this only ever parsed HEX, so `parseInt('hsl(42,
+    // 95%,62%)', 16)` came back NaN and every fill built from it was an invalid colour the canvas
+    // silently dropped. That is the whole reason FULL SPECTRUM rendered as a few drifting dots on
+    // black: its bloom, its pool and its rim were all painted in NaN and none of them ever appeared.
+    // Every other aura has a hex colour, which is why only the rainbow one was affected.
+    if (hex[0] !== '#' && hex.slice(0, 3) === 'hsl') return hex.replace(/^hsl\(/, 'hsla(').replace(/\)$/, ',' + a + ')');
     const h = hex.replace('#', '');
     const n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h, 16);
     return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
@@ -85,8 +91,14 @@
     g.clearRect(0, 0, W, H);
     return g;
   }
-  // clear a soft oval where the fighter stands, so the effect frames them instead of covering them
+  // clear a soft oval where the fighter stands, so the effect frames them instead of covering them.
+  //
+  // 15 Oct: SOLO turns this off. The store's cosmetic cards are baked without a fighter in them
+  // (dev/cosmbake.mjs) because 25 cards all showing the same doge is not a shop, and with nobody
+  // standing there the punched hole is just a bite out of the middle of the effect.
+  let SOLO = false;
   function punch(g, W, H, r0, r1) {
+    if (SOLO) return;
     g.save();
     g.globalCompositeOperation = 'destination-out';
     const grd = g.createRadialGradient(W / 2, H * 0.54, W * r0, W / 2, H * 0.54, W * r1);
@@ -199,6 +211,90 @@
         ctx.fillStyle = rgba(col, 0.8);
         ctx.beginPath(); ctx.ellipse(x, y, W * 0.022, W * 0.01, 0.4, 0, Math.PI * 2); ctx.fill();
       }
+    } else if (ko.id === 'ko_bell') {
+      // the bell goes: concentric brass rings opening out of the middle
+      for (let i = 0; i < 4; i++) {
+        const r = W * (0.1 + 0.13 * i + 0.05 * Math.sin(t * 2));
+        ctx.strokeStyle = rgba(col, 0.85 - i * 0.18); ctx.lineWidth = W * (0.022 - i * 0.004);
+        ctx.beginPath(); ctx.arc(W / 2, H * 0.5, r, 0, Math.PI * 2); ctx.stroke();
+      }
+      const g = ctx.createRadialGradient(W / 2, H * 0.5, W * 0.02, W / 2, H * 0.5, W * 0.4);
+      g.addColorStop(0, rgba(col, 0.55)); g.addColorStop(1, rgba(col, 0));
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    } else if (ko.id === 'ko_cash') {
+      // a wall of notes blowing across and still going
+      for (let i = 0; i < 26; i++) {
+        const x = ((i * 61 + t * 90) % 118 - 9) / 100 * W, y = ((i * 37) % 100) / 100 * H;
+        ctx.save(); ctx.translate(x, y); ctx.rotate(-0.5 + ((i * 29) % 100) / 100);
+        ctx.fillStyle = rgba(col, 0.9); ctx.fillRect(0, 0, W * 0.07, W * 0.032);
+        ctx.fillStyle = rgba('#0d2a18', 0.5); ctx.fillRect(W * 0.024, W * 0.009, W * 0.022, W * 0.014);
+        ctx.restore();
+      }
+    } else if (ko.id === 'ko_lamp') {
+      // every light on the stage cuts out for a beat: one failing lamp, everything else gone
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = 'rgba(2,3,5,.72)'; ctx.fillRect(0, 0, W, H);
+      ctx.globalCompositeOperation = 'lighter';
+      const flick = 0.35 + 0.65 * Math.abs(Math.sin(t * 9));
+      const g = ctx.createRadialGradient(W / 2, H * 0.3, W * 0.01, W / 2, H * 0.3, W * 0.42);
+      g.addColorStop(0, rgba(col, 0.95 * flick)); g.addColorStop(1, rgba(col, 0));
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = rgba(col, 0.8 * flick);
+      ctx.beginPath(); ctx.moveTo(W * 0.5, H * 0.3); ctx.lineTo(W * 0.3, H); ctx.lineTo(W * 0.7, H); ctx.fill();
+    } else if (ko.id === 'ko_siren') {
+      // red and blue over the whole stage: somebody called it in
+      for (const [c, side] of [['#ff2a3a', -1], ['#2a6aff', 1]]) {
+        const cx = W / 2 + side * W * 0.26 * (0.7 + 0.3 * Math.sin(t * 3 * side));
+        const g = ctx.createRadialGradient(cx, H * 0.45, W * 0.02, cx, H * 0.45, W * 0.46);
+        g.addColorStop(0, rgba(c, 0.85)); g.addColorStop(1, rgba(c, 0));
+        ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      }
+    } else if (ko.id === 'ko_chalk') {
+      // the outline left on the floor, drawn as the chalk line it is
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.strokeStyle = rgba(col, 0.92); ctx.lineWidth = Math.max(2, W * 0.012);
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      const cx = W / 2, cy = H * 0.56, u = W * 0.1;
+      ctx.beginPath(); ctx.arc(cx, cy - u * 1.5, u * 0.5, 0, Math.PI * 2); ctx.stroke();        // head
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - u); ctx.lineTo(cx, cy + u * 0.6);                                     // spine
+      ctx.moveTo(cx, cy - u * 0.7); ctx.lineTo(cx - u * 1.5, cy - u * 0.1);                     // arms
+      ctx.moveTo(cx, cy - u * 0.7); ctx.lineTo(cx + u * 1.5, cy - u * 0.5);
+      ctx.moveTo(cx, cy + u * 0.6); ctx.lineTo(cx - u * 0.8, cy + u * 1.8);                     // legs
+      ctx.moveTo(cx, cy + u * 0.6); ctx.lineTo(cx + u * 0.9, cy + u * 1.7);
+      ctx.stroke();
+    } else if (ko.id === 'ko_spark') {
+      // grinder sparks: one source, warm, long falloff
+      for (let i = 0; i < 30; i++) {
+        const a = -Math.PI * 0.78 + (i % 11) / 11 * Math.PI * 0.56;
+        const r = W * (0.06 + 0.34 * (((i * 13) % 10) / 10));
+        const x = W * 0.5 + Math.cos(a) * r, y = H * 0.66 + Math.sin(a) * r;
+        ctx.strokeStyle = rgba(i % 3 ? col : '#fff3d0', 0.9 - r / W);
+        ctx.lineWidth = Math.max(1.5, W * 0.006);
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a) * W * 0.035, y + Math.sin(a) * W * 0.035); ctx.stroke();
+      }
+    } else if (ko.id === 'ko_smoke') {
+      // a thick column going up and off the top
+      for (let i = 0; i < 9; i++) {
+        const k = i / 9, y = H * (0.92 - k * 0.95), r = W * (0.07 + k * 0.17);
+        const g = ctx.createRadialGradient(W / 2 + Math.sin(t + i) * W * 0.04, y, 1, W / 2, y, r);
+        g.addColorStop(0, rgba(col, 0.42 * (1 - k * 0.6))); g.addColorStop(1, rgba(col, 0));
+        ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      }
+    } else if (ko.id === 'ko_drop') {
+      // the cover swings open and the street takes them
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = 'rgba(3,4,7,.95)';
+      ctx.beginPath(); ctx.ellipse(W / 2, H * 0.62, W * 0.2, H * 0.1, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = rgba('#8b8070', 0.9); ctx.lineWidth = Math.max(2, W * 0.01);
+      ctx.beginPath(); ctx.ellipse(W / 2, H * 0.62, W * 0.2, H * 0.1, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.save();                                    // the cover, hinged open behind the hole
+      ctx.translate(W * 0.68, H * 0.5); ctx.rotate(-0.5);
+      ctx.fillStyle = rgba(col, 0.95);
+      ctx.beginPath(); ctx.ellipse(0, 0, W * 0.19, H * 0.062, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = Math.max(1, W * 0.005);
+      ctx.beginPath(); ctx.ellipse(0, 0, W * 0.13, H * 0.042, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
     } else {
       const C = ['#ff4fd8', '#27e1ff', '#ffc83a', '#3dff8a'];
       for (let i = 0; i < 22; i++) {
@@ -269,12 +365,14 @@
     const W = cv.width, H = cv.height, t = ((opts && opts.t) != null ? opts.t : performance.now() / 1000);
     const only = (opts && opts.only) || null;
     const on = s => !only || only.indexOf(s) >= 0;
+    SOLO = !!(opts && opts.solo);
     if (on('ko')) paintKo(ctx, W, H, look.ko, t);
     if (on('pose')) paintPose(ctx, W, H, look.pose, t);
     if (on('finish')) paintFinish(ctx, W, H, look.finish, t);
     if (on('trail')) paintTrail(ctx, W, H, look.trail, t);
     if (on('aura')) paintAura(ctx, W, H, look.aura, t);
     if (on('plate')) paintPlate(ctx, W, H, look.plate);
+    SOLO = false;
   }
 
   // ---------------------------------------------------------------- a chip row, for "what is on"
@@ -411,10 +509,18 @@
   .cosm-chip i{font-style:normal;font-size:13px}
   #heroP1 .cosm-row,#heroP2 .cosm-row{justify-content:flex-start;margin-top:10px}
   .cosm-row.sel .cosm-chip{font-size:10px;padding:2px 7px}
-  .card .sw{position:absolute;right:8px;top:8px;width:54px;height:54px;pointer-events:none;opacity:.98;
-    box-shadow:inset 0 0 0 1px var(--line)}
-  .card.lock .sw{filter:saturate(.25) brightness(.5)}
-  .card .ic{position:relative;z-index:2}
+  /* 15 Oct, after Duane: "Cosmetics all the images are dark I cant even see what it is".
+     Three causes, all here:
+       1. the preview was a 54px chip in the corner while the card's 212x132 art box sat EMPTY, so
+          the big dark rectangle was the rarity gradient with nothing on it;
+       2. .card.lock dimmed it to brightness(.5) -- the one item you are deciding whether to buy was
+          the one drawn darkest;
+       3. nothing else ever filled .ic, because no cosmetic has a baked render.
+     The swatch now IS the artwork: it fills the art box, and a locked card only desaturates slightly
+     so you can still see exactly what you would be paying for. */
+  .card .sw{position:absolute;inset:0;margin:auto;height:100%;width:auto;pointer-events:none;opacity:1;display:block}
+  .card.lock .sw{filter:saturate(.82)}
+  .card .ic{position:relative;z-index:2;overflow:hidden}
   `;
   let styled = false;
   function style() { if (styled) return; styled = true; const s = document.createElement('style'); s.textContent = css; document.head.appendChild(s); }
@@ -496,14 +602,29 @@
     style();
     if (!card || card.querySelector('.sw')) return;
     const cv = document.createElement('canvas');
-    cv.className = 'sw'; cv.width = 108; cv.height = 108;
-    try {
-      const id = (typeof store !== 'undefined' && store.get('lastChar', null)) || 'doge';
-      const c = (typeof CHAR_BY_ID !== 'undefined' && (CHAR_BY_ID[id] || CHAR_BY_ID.doge)) || null;
-      if (c && typeof drawPortrait === 'function') drawPortrait(cv, c, { bare: true });
-    } catch (e) { /* no art here: the swatch still shows the effect over an empty plate */ }
-    paint(cv, { [d.slot]: d }, { only: [d.slot] });
-    card.appendChild(cv);
+    // drawn at 2x the box it fills, so it is sharp on a retina panel
+    // drawPortrait draws SQUARE; a landscape canvas put it off the edge and the box came out black.
+    cv.className = 'sw'; cv.width = 320; cv.height = 320;
+    // ROOT CAUSE of "the cosmetics are all black", found 15 Oct by extracting the canvas: the swatch
+    // painted ONCE, synchronously, at card-build time. drawArt() bails out when the portrait image
+    // has not finished loading (`!im.complete`), so on a cold card the canvas stayed empty and
+    // nothing ever came back to repaint it. Probing it later always looked fine, because by then the
+    // image was cached -- which is exactly why this hid for so long.
+    // So: draw now, and draw AGAIN when the portrait actually arrives.
+    const id = (typeof store !== 'undefined' && store.get('lastChar', null)) || 'doge';
+    const ch = (typeof CHAR_BY_ID !== 'undefined' && (CHAR_BY_ID[id] || CHAR_BY_ID.doge)) || null;
+    const render = () => {
+      try { if (ch && typeof drawPortrait === 'function') drawPortrait(cv, ch, { bare: true }); }
+      catch (e) { /* the effect still paints over an empty plate */ }
+      paint(cv, { [d.slot]: d }, { only: [d.slot] });
+    };
+    render();
+    const im = (typeof PORTRAITS !== 'undefined' && ch) ? PORTRAITS[ch.id] : null;
+    if (im && !(im.complete && im.naturalWidth)) {
+      im.addEventListener('load', render, { once: true });
+      im.addEventListener('error', render, { once: true });
+    }
+    (card.querySelector('.ic') || card).appendChild(cv);
   }
 
   // ---------------------------------------------------------------- wiring

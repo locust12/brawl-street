@@ -15,8 +15,13 @@
       // one dropped request (flaky mobile data) left that fighter's tile blank for the session: when the cutout fails
       // the portrait jpg is preloaded, with two retries, before the tile is painted
       const done = () => { a.done = true; a.wait.splice(0).forEach(f => f(a)); };
-      const jpg = () => { let jt = 0; const j = new Image(); j.onload = () => { a.url = j.src; done(); }; j.onerror = () => { if (++jt < 3) setTimeout(() => { j.src = a.url + '?r=' + jt; }, 700 * jt); else done(); }; j.src = a.url; };
+      const jpg = () => { let jt = 0; const j = new Image(); try { j.fetchPriority = 'low'; } catch (e) {} j.onload = () => { a.url = j.src; done(); }; j.onerror = () => { if (++jt < 3) setTimeout(() => { j.src = a.url + '?r=' + jt; }, 700 * jt); else done(); }; j.src = a.url; };
       const im = new Image();
+      // Low, for the same reason as loadPortraits (30_draw.js): the roster warms every fighter's
+      // cut-out at once, and at the default Low-with-everything-else that queue is what the Store's
+      // own art had to wait behind. A tile that paints a second later costs nothing; a shop full of
+      // empty boxes for twenty seconds is the thing people were seeing.
+      try { im.fetchPriority = 'low'; } catch (e) { /* older engines ignore it */ }
       im.onload = () => { a.url = im.src; a.cut = true; a.wait.splice(0).forEach(f => f(a)); };
       im.onerror = jpg;   // no cutout (or it failed): the portrait, retried, never a blank tile
       im.src = ASSET + ASSET_ID(id) + '_cut.webp';
@@ -307,8 +312,13 @@
   if (typeof UI === 'undefined') return;
 
   // ---------- fighter select (Tekken layout) ----------
-  const statBars = c => [['Speed', (c.walk - 4.5) / 3.4], ['Power', (c.power - 0.85) / 0.35], ['Weight', (c.weight - 75) / 50]]
-    .map(([l, v]) => `<span>${l}</span><span class="bar"><i style="width:${Math.round(Math.max(0.06, Math.min(1, v)) * 100)}%"></i></span>`).join('');
+  // 10/15: the bars read the LOCAL stat line, not the base roster entry. 66_traits swaps a fighter's
+  // profile in at the start of every unseeded match (Game.sigs), which is every match a player starts
+  // from this screen -- so the card was quietly showing numbers nobody plays with. KAIJU's card said
+  // weight 134 is walk 4.8 and WOLVERINU's said he walks at 7.0 when he walks at 7.3.
+  const liveStats = c => (typeof PROFILE !== 'undefined' && PROFILE[c.id]) ? Object.assign({}, c, PROFILE[c.id]) : c;
+  const statBars = c0 => { const c = liveStats(c0); return [['Speed', (c.walk - 4.5) / 3.4], ['Power', (c.power - 0.85) / 0.35], ['Weight', (c.weight - 75) / 50]]
+    .map(([l, v]) => `<span>${l}</span><span class="bar"><i style="width:${Math.round(Math.max(0.06, Math.min(1, v)) * 100)}%"></i></span>`).join(''); };
   const heroState = {};
   function paintHero(elId, slotIdx, charId) {
     const el = q(elId); if (!el) return;
@@ -447,7 +457,11 @@
     // cards that fill in a few seconds later. That flash is the first thing a portal reviewer sees of
     // the stage list. Kicking the loads off one screen earlier costs nothing and removes it.
     UI.warmStages = function () {
-      const ids = (typeof CORE_SET !== 'undefined' && CORE_SET.stages) ? CORE_SET.stages : [];
+      const ids = (typeof CORE_SET !== 'undefined' && CORE_SET.stages) ? CORE_SET.stages.slice() : [];
+      // the vault's stages are drawn in the picker too -- as a shadow when they are locked
+      // (8f_vault.js) and as a normal card once they are owned -- so they want the same warm-up, or
+      // the one card on the screen that is a procedural placeholder is the one being sold.
+      try { for (const v of Econ.vault()) if (v.kind === 'stage') ids.push(v.unlocks); } catch (e) { /* no store */ }
       for (const id of ids) if (!BG[id]) BG[id] = Object.assign(new Image(), { src: ASSET + 'bg_' + id + '.jpg' });
     };
     UI.paintStage = function (cv, id) {
@@ -456,12 +470,99 @@
       if (im.complete && im.naturalWidth) draw(); else { orig(cv, id); im.addEventListener('load', draw, { once: true }); }
     };
   }
+  // The Random card's thumbnail: four of the stages it can land on, as quadrants, so the card shows
+  // what is in the pool instead of a question mark on a flat tile.
+  // ---------- the Random card: IT FLICKERS THROUGH THE MAPS ----------
+  // Duane, 2026-10-16: *"same as the random map that u select. you are supposed to copy other games.
+  // usually it flickers btween the maps when u hover over random DO THAT"* / *"it should quickly
+  // flicker between maps the random one"*.
+  //
+  // He is describing Smash's random panel, and it is the right call: a card that rolls through the
+  // actual stages SHOWS you the pool instead of printing a question mark over a mosaic of it. The
+  // old card was four quadrants with a big "?" sitting on top, which is the cheap version of
+  // exactly this idea.
+  //
+  // It draws one real backdrop per tick through `UI.paintStage`, so it is the same picture the
+  // stage's own card shows, already warmed and cached (UI.warmStages). One interval for the whole
+  // picker, cleared on every re-render, so a card that is thrown away can never keep painting.
+  const RAND_MS = 110;        // fast enough to read as a flicker, slow enough to see each place
+  let randTimer = null, randAt = 0;
+  function randomStop(cv, pool) {
+    if (randTimer) { clearInterval(randTimer); randTimer = null; }
+    if (cv) paintRandom(cv, pool);
+  }
+  UI.randomStop = () => { if (randTimer) { clearInterval(randTimer); randTimer = null; } };
+  function randomFlicker(cv, pool) {
+    if (!cv || pool.length < 2) return;
+    UI.randomStop();
+    const order = pool.slice().sort(() => Math.random() - 0.5);
+    const tick = () => {
+      if (!cv.isConnected) return UI.randomStop();     // the picker re-rendered under us
+      randAt = (randAt + 1) % order.length;
+      try { UI.paintStage(cv, order[randAt]); } catch (e) { /* mid-load */ }
+      label(cv);
+    };
+    tick();
+    randTimer = setInterval(tick, RAND_MS);
+  }
+  // the one thing the flicker must not lose: that this card is RANDOM and not the stage on it
+  function label(cv) {
+    const c = cv.getContext('2d'), W = cv.width, H = cv.height;
+    const g = c.createLinearGradient(0, H * 0.45, 0, H);
+    g.addColorStop(0, 'rgba(10,12,17,0)'); g.addColorStop(1, 'rgba(10,12,17,.86)');
+    c.fillStyle = g; c.fillRect(0, H * 0.45, W, H * 0.55);
+  }
+  function paintRandom(cv, pool) {
+    const c = cv.getContext('2d'), W = cv.width, H = cv.height;
+    c.fillStyle = '#0d1016'; c.fillRect(0, 0, W, H);
+    const pick = pool.slice().sort(() => Math.random() - 0.5).slice(0, 4);
+    pick.forEach((id, i) => {
+      const x = (i % 2) * W / 2, y = (i < 2 ? 0 : 1) * H / 2;
+      const im = Object.assign(new Image(), { src: ASSET + 'bg_' + id + '.jpg' });
+      const draw = () => {
+        const s = Math.max((W / 2) / im.naturalWidth, (H / 2) / im.naturalHeight);
+        c.save(); c.beginPath(); c.rect(x, y, W / 2, H / 2); c.clip();
+        c.drawImage(im, x + (W / 2 - im.naturalWidth * s) / 2, y + (H / 2 - im.naturalHeight * s) / 2, im.naturalWidth * s, im.naturalHeight * s);
+        c.restore(); scrim();
+      };
+      if (im.complete && im.naturalWidth) draw(); else im.addEventListener('load', draw, { once: true });
+    });
+    // THE QUESTION MARK IS GONE. It was a 86px system-font "?" with a blur under it, over a mosaic,
+    // and it is the single cheapest thing that was on this screen.
+    function scrim() { label(cv); }
+    scrim();
+  }
   // item frequency (25_feel: Game.itemRate) — the old on/off toggle becomes off / normal / mayhem
   UI.itemRate = (() => { try { return localStorage.getItem('tb_itemRate') || 'normal'; } catch (e) { return 'normal'; } })();
+  // Roll the stage at the moment the fight starts, never when the card is clicked, so a rematch
+  // from the results screen lands somewhere new too. The pick avoids the stage just played when
+  // there is anything else to pick, because two identical "random" stages in a row reads as broken.
+  UI.rollStage = function () {
+    const pool = (UI.stagePool && UI.stagePool.length ? UI.stagePool : ['isle', 'moon', 'chart', 'roof', 'dojo'])
+      .filter(id => typeof coreStage !== 'function' || coreStage(id));
+    const avoid = UI.lastRolled;
+    const take = pool.length > 1 ? pool.filter(id => id !== avoid) : pool;
+    const id = take[Math.floor(Math.random() * take.length)] || 'isle';
+    UI.lastRolled = id;
+    return id;
+  };
+  // Safety net: 'random' is a choice in the picker, never a stage. If any other path hands it to
+  // the fight code (a rematch, a deep link, the portal build) roll it here instead of asking
+  // makeStage for a stage that does not exist. UI file, so the seeded arena never sees this.
+  try {
+    const startR = Game.start.bind(Game);
+    Game.start = function (slots, stageId, stocks, demo, itemsOn, seed) {
+      if (stageId === 'random') stageId = UI.rollStage();
+      return startR(slots, stageId, stocks, demo, itemsOn, seed);
+    };
+  } catch (e) { /* no Game yet: the picker guard above still covers the normal path */ }
   const origFight = UI.fight && UI.fight.bind(UI);
   if (origFight) UI.fight = function () {
     this.itemsOn = UI.itemRate !== 'off';
+    const wasRandom = this.stageId === 'random';
+    if (wasRandom) this.stageId = UI.rollStage();
     origFight();
+    if (wasRandom) this.stageId = 'random';   // the picker keeps showing Random as the choice
     try { Game.itemRate = UI.itemRate; } catch (e) {}
   };
   // the select screen is the one screen that always precedes the picker, in every mode
@@ -476,9 +577,34 @@
     for (const [id, name, sub] of extra) {
       if (!coreStage(id)) continue;   // 79_core
       const b = document.createElement('button'); b.className = 'stagec' + (this.stageId === id ? ' on' : '');
+      b.dataset.stage = id;
       b.innerHTML = `<canvas width="480" height="240"></canvas><div>${name}<small>${sub || ''}</small></div>`;
       b.addEventListener('click', () => { this.stageId = id; safeSfx(); this.renderWager(); });
       sb.appendChild(b); this.paintStage(b.querySelector('canvas'), id);
+    }
+    // ---------- RANDOM ----------
+    // Duane, 15 Oct: *"add a random option where it switches between maps in the map choosing
+    // step"*. It sits at the FRONT of the picker, the way Smash puts it first, and it rolls again
+    // every match -- including a rematch from the results screen -- rather than locking one stage
+    // in at the moment you click it. The pool is read off the cards that are actually on screen
+    // (`data-stage`), so a stage added or gated later is in or out of the roll by itself.
+    const pool = [...sb.querySelectorAll('.stagec[data-stage]')].map(el => el.dataset.stage);
+    UI.stagePool = pool;
+    UI.randomStop();   // the old card is about to be thrown away; never leave it painting
+    if (pool.length > 1) {
+      const rb = document.createElement('button');
+      rb.className = 'stagec' + (this.stageId === 'random' ? ' on' : '');
+      rb.dataset.stage = '';   // not itself a stage, so it never lands in the pool
+      rb.innerHTML = `<canvas width="480" height="240"></canvas><div>Random<small>A different stage every match</small></div>`;
+      rb.addEventListener('click', () => { this.stageId = 'random'; safeSfx(); this.renderWager(); });
+      sb.insertBefore(rb, sb.firstChild);
+      const rcv = rb.querySelector('canvas');
+      paintRandom(rcv, pool);
+      // hover flickers it through the real stages, and it keeps flickering while it is the one
+      // selected, which is what Smash's random panel does
+      rb.addEventListener('pointerenter', () => randomFlicker(rcv, pool));
+      rb.addEventListener('pointerleave', () => { if (this.stageId !== 'random') randomStop(rcv, pool); else randomFlicker(rcv, pool); });
+      if (this.stageId === 'random') randomFlicker(rcv, pool);
     }
     const ip = q('itemPick');
     if (ip) {

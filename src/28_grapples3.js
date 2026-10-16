@@ -126,7 +126,7 @@ Object.assign(TK.ESCOF, {
   blackbox: 'E', sniper: 'R', giga: 'R', ronin: 'E', tyrant: 'E', gwei: 'R', shroom: 'E',
   kaiju: 'R', mochi: 'E+R', omen: 'E+R', wisp: 'R', spark: 'E', turbo: 'R', chop: 'E',
   ginga: 'R', sifu: 'E+R', fro: 'R', bling: 'E', techno: 'E+R', hoodie: 'E', slam: 'E+R',
-  mystic: 'E', ape: 'E+R', ember: 'E+R',
+  mystic: 'E', ape: 'E+R', ember: 'E+R', wolverinu: 'E+R',
 });
 
 // ---- damage scale over a fighter's scripted throw numbers (TK.SCALE is the global knob) ----

@@ -17,7 +17,11 @@ const Net = (() => {
   const BACKUP_URL = 'https://' + LW + '/';
   const PROTO = 1;
   const PSTAKES = [0, 0.01, 0.05, 0.1, 0.25];
-  const SEL = { deposit: 'b214faa5', claim: 'bd66528a', refund: '7249fbb6' };
+  const SEL = { deposit: 'b214faa5', claim: 'bd66528a', refund: '7249fbb6', approve: '095ea7b3', allowance: 'dd62ed3e' };
+  const w256 = v => BigInt(v).toString(16).padStart(64, '0');
+  // what a real stake is denominated in: the escrow's token when there is one, else native ETH
+  const realUnit = () => (N.me && N.me.real && N.me.real.tokenSymbol) || 'ETH';
+  const wAddr = a => String(a).toLowerCase().replace(/^0x/, '').padStart(64, '0');
   const byId = id => document.getElementById(id);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   const fmt = v => { const a = Math.abs(v); return a > 0 && a < 0.01 ? v.toFixed(4) : v.toFixed(3); };
@@ -639,8 +643,8 @@ const Net = (() => {
   function renderRoom() {
     if (!built || !N.room) return;
     const r = N.room, me = r.members.find(x => x.id === r.you), host = r.host === r.you, lobby = r.state === 'lobby';
-    const unit = r.real ? ' ETH' : ' ETH';
-    byId('nrKick').textContent = `Room ${r.code} · ${r.size === 2 ? '1v1' : '4-player free-for-all'} · ${r.quick ? 'quick match' : 'private'}${r.ranked ? ' · ranked' : ''}${r.real ? ' · real ETH' : ''}`
+    const unit = r.real ? ' ' + realUnit() : ' ETH';
+    byId('nrKick').textContent = `Room ${r.code} · ${r.size === 2 ? '1v1' : '4-player free-for-all'} · ${r.quick ? 'quick match' : 'private'}${r.ranked ? ' · ranked' : ''}${r.real ? ' · real ' + realUnit() : ''}`
       + (r.quick && r.picked ? ' · ' + stageName(r.picked).toUpperCase() : '');
     byId('nrTitle').textContent = r.state === 'funding' ? 'Deposit your stake' : r.members.length < 2 ? 'Waiting for players' : me && me.ready ? 'Waiting for the others' : 'Pick your fighter';
     byId('nrCode').textContent = r.code;
@@ -653,7 +657,7 @@ const Net = (() => {
       el.style.setProperty('--c', slotColor(i));
       if (!p) {
         el.className = 'nr-p empty';
-        el.innerHTML = `<div class="art">${r.size === 4 && r.cpuFill ? 'CPU fills this seat' : 'Waiting for player'}</div><div class="pl"><div class="pn">P${i + 1}</div><div class="who" style="color:var(--dim)">Open seat</div></div>`;
+        el.innerHTML = `<div class="art">${r.real ? 'Needs a player' : r.size === 4 && r.cpuFill ? 'CPU fills this seat' : 'Waiting for player'}</div><div class="pl"><div class="pn">P${i + 1}</div><div class="who" style="color:var(--dim)">Open seat</div></div>`;
       } else {
         el.className = 'nr-p' + (p.id === r.you ? ' me' : '');
         el.innerHTML = `<div class="art"></div><div class="pl"><div class="pn">P${i + 1}${p.id === r.host ? '<span class="tag">HOST</span>' : ''}${p.id === r.you ? '<span class="tag">YOU</span>' : ''}</div>
@@ -700,7 +704,7 @@ const Net = (() => {
     pills('nrStocks', [1, 2, 3, 4, 5].map(v => [v, String(v)]), r.stocks, 'stocks', Number);
     pills('nrItems', [[true, 'On'], [false, 'Off']], r.items, 'items', v => v === 'true');
     const stakeOpts = r.real ? ((N.me.real && N.me.real.stakes) || []) : PSTAKES;
-    pills('nrStake', stakeOpts.map(v => [v, v ? v + (r.real ? ' ETH' : ' Ξ') : 'Free']), r.stake, 'stake', Number);
+    pills('nrStake', stakeOpts.map(v => [v, v ? v + (r.real ? ' ' + realUnit() : ' Ξ') : 'Free']), r.stake, 'stake', Number);
     pills('nrMode', [[2, '1v1'], [4, '4-player FFA']], r.size, 'size', Number);
     pills('nrCpu', [[true, 'On'], [false, 'Off']], r.cpuFill, 'cpuFill', v => v === 'true');
     pills('nrRanked', [[true, 'On'], [false, 'Off']], !!r.ranked, 'ranked', v => v === 'true');
@@ -709,11 +713,13 @@ const Net = (() => {
     byId('nrMine').hidden = !(mine && lobby && me && !me.ready && CHAR_BY_ID[mine.base] && me.char !== mine.base);
     byId('nrMine').textContent = mine ? 'Use ' + mine.name : 'Use my fighter';
     byId('nrModeRow').hidden = r.quick;
-    byId('nrCpuF').hidden = r.size !== 4;
+    // No CPU-fill switch on a wagered room: money matches are players only, so offering the toggle
+    // would only promise something the server refuses.
+    byId('nrCpuF').hidden = r.size !== 4 || r.real;
     // pot + actions
     const humans = r.members.length;
     byId('nrPot').textContent = fmt(r.stake * Math.max(2, humans)) + unit;
-    byId('nrBal').textContent = r.real ? (N.wallet ? 'Wallet ' + N.wallet.slice(0, 6) + '…' + N.wallet.slice(-4) : 'Connect a wallet to play for real ETH')
+    byId('nrBal').textContent = r.real ? (N.wallet ? 'Wallet ' + N.wallet.slice(0, 6) + '…' + N.wallet.slice(-4) : 'Connect a wallet to play for real ' + realUnit())
       : (N.me ? `Stake ${r.stake ? r.stake + ' ETH each' : 'free'} · your balance ${fmt(N.me.bal)} ETH (practice)` : '');
     const rd = byId('nrReady');
     rd.textContent = me && me.ready ? 'Ready ✓' : 'Ready';
@@ -903,7 +909,7 @@ const Net = (() => {
     }
     const d = r.deltas[you] || 0, pay = byId('nsPay');
     pay.className = 'ns-pay ' + (d > 1e-12 ? 'win' : d < -1e-12 ? 'lose' : 'even');
-    pay.textContent = !M.stake && !r.real ? 'Free play' : (d > 0 ? '+' : d < 0 ? '−' : '') + fmt(Math.abs(d)) + ' ETH' + (r.real ? '' : ' (practice)');
+    pay.textContent = !M.stake && !r.real ? 'Free play' : (d > 0 ? '+' : d < 0 ? '−' : '') + fmt(Math.abs(d)) + ' ' + (r.real ? realUnit() : 'ETH') + (r.real ? '' : ' (practice)');
     const ver = [];
     ver.push(r.desync && r.desync.length ? '<span>Replay decided it (a player desynced)</span>' : '<span class="ok">✓ Server-verified replay</span>');
     ver.push(`<span>${r.ticks} ticks · replay ${esc(String(r.replay).slice(2, 12))}</span>`);
@@ -937,7 +943,7 @@ const Net = (() => {
     const claim = byId('nsClaim');
     claim.hidden = !(r.real && r.real.claim && N.wallet && r.real.claim.toLowerCase() === N.wallet.toLowerCase()) && !(r.real && r.real.refund);
     if (r.real) {
-      claim.textContent = r.real.refund ? 'Refund stake' : 'Claim ' + fmt(M.pot) + ' ETH';
+      claim.textContent = r.real.refund ? 'Refund stake' : 'Claim ' + fmt(M.pot) + ' ' + realUnit();
       claim.onclick = () => walletTx(r.real.escrow, r.real.refund ? SEL.refund : SEL.claim, r.real.id, 0n).then(() => { toast('Sent to your wallet'); claim.hidden = true; }).catch(e => toast(e.message, true));
     }
     byId('nsAgain').hidden = !N.room;
@@ -993,6 +999,17 @@ const Net = (() => {
     const sig = await window.ethereum.request({ method: 'personal_sign', params: [data, a] });
     send({ k: 'wallet', addr: a, sig });
   }
+  // read-only eth_call through the wallet's own provider, so the allowance check uses the same
+  // chain the deposit will go to
+  async function walletRead(to, data) {
+    return window.ethereum.request({ method: 'eth_call', params: [{ to, data }, 'latest'] });
+  }
+  async function walletSend(to, data, value) {
+    const a = N.wallet || await wallet();
+    const tx = { from: a, to, data };
+    if (value) tx.value = '0x' + BigInt(value).toString(16);
+    return window.ethereum.request({ method: 'eth_sendTransaction', params: [tx] });
+  }
   async function walletTx(to, sel, id, value) {
     const a = N.wallet || await wallet();
     const tx = { from: a, to, data: '0x' + sel + String(id).replace(/^0x/, '') };
@@ -1019,24 +1036,69 @@ const Net = (() => {
       return `The deposit address does not match the escrow this game uses (${expect || 'unknown'}). Nothing was sent.`;
     if (pinned && ESCROW_LIVE.chainId && Number(ESCROW_LIVE.chainId) !== Number(real.chainId))
       return 'The server asked for a different chain than this build expects. Nothing was sent.';
+    // A token match must name the token, and it must be the one this build was pinned to. Without
+    // this a tampered server could point the approve at a token of its choosing.
+    const tok = m.token ? String(m.token) : null;
+    if (tok && !HEX40.test(tok)) return 'The server sent a malformed token address.';
+    const pinnedTok = typeof ESCROW_LIVE !== 'undefined' && ESCROW_LIVE && ESCROW_LIVE.token;
+    if (pinnedTok && (!tok || pinnedTok.toLowerCase() !== tok.toLowerCase()))
+      return 'The server asked for a different token than this build expects. Nothing was sent.';
+    if (!tok && pinnedTok) return 'The server asked for a native deposit but this build expects a token. Nothing was sent.';
+
+    const dec = Number(m.tokenDecimals != null ? m.tokenDecimals : 18);
+    if (!(dec >= 0 && dec <= 36)) return 'The server sent malformed token decimals.';
+    const sym = m.tokenSymbol || (tok ? 'tokens' : 'ETH');
+    const scale = (v) => BigInt(Math.round(Number(v) * 1e6)) * (10n ** BigInt(Math.max(0, dec - 6)));
+
     let wei; try { wei = BigInt(m.stakeWei); } catch (e) { return 'The server sent a malformed stake.'; }
     if (wei <= 0n) return 'The server asked for a stake of zero.';
-    // exactly the stake shown in the room, to the wei
+    // exactly the stake shown in the room, to the smallest unit
     const agreed = N.room && N.room.stake;
-    if (agreed != null) {
-      const want = (BigInt(Math.round(Number(agreed) * 1e6)) * (10n ** 12n));
-      if (want !== wei) return `The server asked for ${Number(wei) / 1e18} ETH but this room's stake is ${agreed} ETH. Nothing was sent.`;
-    }
-    const offered = (real.stakes || []).map(v => BigInt(Math.round(Number(v) * 1e6)) * (10n ** 12n));
+    if (agreed != null && scale(agreed) !== wei)
+      return `The server asked for ${Number(wei) / 10 ** dec} ${sym} but this room's stake is ${agreed} ${sym}. Nothing was sent.`;
+    const offered = (real.stakes || []).map(scale);
     if (offered.length && !offered.some(v => v === wei)) return 'The server asked for a stake that is not one of the listed amounts. Nothing was sent.';
     return null;
+  }
+  // What a token stake actually sends, as data rather than side effects: [] when the allowance
+  // already covers it (deposit only), otherwise approve first. Pure, and exported on Net so the
+  // money path can be tested without a wallet.
+  function fundCalls(m, allowance, me) {
+    const need = BigInt(m.stakeWei);
+    const out = [];
+    if (m.token && BigInt(allowance || 0) < need) {
+      out.push({ to: m.token, data: '0x' + SEL.approve + wAddr(m.escrow) + w256(need), label: 'approve' });
+    }
+    out.push(m.token
+      ? { to: m.escrow, data: '0x' + SEL.deposit + String(m.id).replace(/^0x/, ''), label: 'deposit' }
+      : { to: m.escrow, data: '0x' + SEL.deposit + String(m.id).replace(/^0x/, ''), value: need, label: 'deposit' });
+    return out;
   }
   function onFund(m) {
     N.room && (N.room.state = 'funding'); renderRoom();
     const bad = checkFund(m);
     if (bad) { toast(bad, true); send({ k: 'leave' }); return; }
-    toast('Confirm the deposit in your wallet');
-    walletTx(m.escrow, SEL.deposit, m.id, BigInt(m.stakeWei)).then(() => toast('Deposit sent. Waiting for the others…')).catch(e => toast('Deposit not sent: ' + (e.message || e), true));
+    if (!m.token) {
+      toast('Confirm the deposit in your wallet');
+      walletTx(m.escrow, SEL.deposit, m.id, BigInt(m.stakeWei)).then(() => toast('Deposit sent. Waiting for the others…')).catch(e => toast('Deposit not sent: ' + (e.message || e), true));
+      return;
+    }
+    // An ERC20 stake is two steps: let the escrow move exactly this much, then deposit. The approve
+    // is skipped when the existing allowance already covers it, so a second match is one click.
+    (async () => {
+      const me = N.wallet || await wallet();
+      let have = 0n;
+      try { have = BigInt(await walletRead(m.token, '0x' + SEL.allowance + wAddr(me) + wAddr(m.escrow))); } catch (e) { /* treat as zero */ }
+      const calls = fundCalls(m, have, me);
+      for (let i = 0; i < calls.length; i++) {
+        const c = calls[i];
+        toast(c.label === 'approve'
+          ? 'Approve ' + (m.tokenSymbol || 'the token') + ' in your wallet (step 1 of ' + calls.length + ')'
+          : 'Confirm the deposit in your wallet' + (calls.length > 1 ? ' (step ' + (i + 1) + ' of ' + calls.length + ')' : ''));
+        await walletSend(c.to, c.data, c.value);
+      }
+      toast('Deposit sent. Waiting for the others…');
+    })().catch(e => toast('Deposit not sent: ' + (e.message || e), true));
   }
 
   // ------------------------------------------------------------------ wiring
@@ -1100,6 +1162,6 @@ const Net = (() => {
   addEventListener('hashchange', () => { if (/^#(room|online)/.test(location.hash)) fromHash(); });
   setTimeout(() => { try { fromHash(); } catch (e) { /* page still booting */ } }, 0);
 
-  return { active: false, open, frame, send, toast, esc, charName, artImg, fmt, on: fn => hooks.push(fn), get state() { return N; } };
+  return { active: false, open, frame, send, toast, esc, charName, artImg, fmt, fundCalls, on: fn => hooks.push(fn), get state() { return N; } };
 })();
 window.Net = Net;

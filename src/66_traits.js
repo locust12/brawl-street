@@ -42,6 +42,11 @@ const PROFILE = {
   topg:     { weight: 98, walk: 6.6, power: 1.12 },
   pepe:     { weight: 98, walk: 6.6, power: 1.02 },
   ronin:    { weight: 96, walk: 6.3, power: 1.06, reach: 1.24, ai2: [['nb', 'punish'], ['sb', 'dash'], ['db', 'breaker'], ['ub', 'up']] },   // sword set (21_roster2 moves2)
+  // 10/15: the lead of the key art played at DOGE's pace on DOGE's reach. He is the rushdown now --
+  // second-fastest walk behind TURBO (7.6), the longest arms outside the sword/limb fighters, and
+  // real power -- and he pays for it in weight: 100 is dead middleweight, no armour at all. His claw kit, the
+  // held sprint and the FERAL state are in 67_unique.js.
+  wolverinu:{ weight: 100, walk: 7.3, power: 1.1, reach: 1.22, jump: 15.0, air: 5.2 },
   doge:     { weight: 96, walk: 6.4, power: 1.0 },
   wojak:    { weight: 88, walk: 7.1, power: 0.92, grav: 0.58 },
   mystic:   { weight: 92, walk: 6.4, power: 1.04 },
@@ -69,6 +74,7 @@ const PROFILE = {
 };
 
 // one passive each. kb = knockback taken, dmg = damage dealt, rage = [own damage %, damage multiplier],
+// hunt = [VICTIM's damage %, damage multiplier] -- rage read off the other fighter instead of yourself,
 // run = top ground speed after a run-up, airc = air control, shield = shield HP (60 is standard),
 // burn = fire damage taken, fall = fast-fall speed, land = landing lag.
 const TRAIT = {
@@ -85,6 +91,7 @@ const TRAIT = {
   floki:    { name: 'Axe Master', dmg: 1.05 },
   trump:    { name: 'Big League', dmg: 1.04 },
   gwei:     { name: 'Torque', dmg: 1.06 },
+  volt:     { name: 'Live Wire', dmg: 1.03 },
 
   wojak:    { name: 'Cope Harder', rage: [80, 1.18] },
   sin:      { name: 'No Filter', rage: [90, 1.20] },
@@ -126,6 +133,13 @@ const TRAIT = {
   cashcat:  { name: 'Cat Landing', land: 0.68 },
 
   wif:      { name: 'Hat Drop', fall: 1.30 },
+
+  // 10/15: the only passive on the roster that reads the OTHER fighter. WOLVERINU is a hunter, so he
+  // is at his worst against a fresh opponent and at his best finishing a hurt one: over 70% damage
+  // every claw he lands does 16% more. He also gets a real run-up, because a rushdown that could not
+  // run was the whole problem (his held sprint is sb PROWL, 67_unique). Two mechanics in one trait,
+  // which nobody else has either -- he is the lead of the key art and the kit is allowed to say so.
+  wolverinu:{ name: 'Scent of Blood', hunt: [70, 1.16], run: 1.19 },
 };
 
 const TR = {
@@ -159,6 +173,7 @@ const TR = {
     if (ta) {
       if (ta.dmg) mult = (mult || 1) * ta.dmg;
       if (ta.rage && att.dmg >= ta.rage[0]) mult = (mult || 1) * ta.rage[1];
+      if (ta.hunt && this.dmg >= ta.hunt[0]) mult = (mult || 1) * ta.hunt[1];   // rage read off the VICTIM
     }
     if (tv && tv.kb && hb && (hb.bkb != null || hb.kbg != null)) {
       hb = Object.assign({}, hb, { bkb: (hb.bkb || 0) * tv.kb, kbg: (hb.kbg || 0) * tv.kb });

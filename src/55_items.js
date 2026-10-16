@@ -135,13 +135,21 @@ const Items = {
       f.takeHit({ dmg: b.dmg, ang: 55, bkb: b.bkb, kbg: b.kbg, radial: true }, it.thrownBy || null, 1, it.x, 1);
       if (it.thrownBy && it.thrownBy !== f) it.thrownBy.hitlag = keep;
     }
-    for (let i = 0; i < 46; i++) { const a = rand(0, TAU), s = rand(3, 12); G.parts.push({ x: it.x, y: it.y, vx: dcos(a) * s, vy: dsin(a) * s, life: 34, max: 34, color: i % 3 ? '#ffb347' : '#ffffff', size: rand(6, 14), g: 0.05 }); }
-    for (let i = 0; i < 14; i++) G.parts.push({ x: it.x + rand(-30, 30), y: it.y + rand(-30, 30), vx: rand(-1, 1), vy: rand(-2, 0), life: 50, max: 50, color: '#6a5a50', size: rand(14, 26), g: 0, soft: true });
-    for (let i = 0; i < 22; i++) { const a = rand(0, TAU), s = rand(1, 6); G.parts.push({ x: it.x, y: it.y, vx: dcos(a) * s, vy: dsin(a) * s - 1.5, life: 32, max: 32, color: i % 3 ? '#ff8a1a' : '#ffe27a', size: rand(24, 46), g: 0, fire: true }); }
+    // THE BLAST IS AS BIG AS THE BLAST. Duane, 2026-10-16: "the explosions were so small and
+    // uneventful". Every number below used to be a constant, so a 196-radius Vortex Grenade threw
+    // exactly the same 46 sparks the same distance as a 100-radius Grenade and read identically.
+    // `k` scales the SIZE and the SPEED of what is already there, never the COUNT: the particle
+    // loops run off the seeded `rand()`, so adding one would fork every replay and the bet arena
+    // with it. Same number of rolls, bigger explosion.
+    const k = Math.max(0.8, Math.min(2.1, b.r / 118)), k2 = k * k;
+    for (let i = 0; i < 46; i++) { const a = rand(0, TAU), s = rand(3, 12) * k; G.parts.push({ x: it.x, y: it.y, vx: dcos(a) * s, vy: dsin(a) * s, life: 34, max: 34, color: i % 3 ? '#ffb347' : '#ffffff', size: rand(6, 14) * k, g: 0.05 }); }
+    for (let i = 0; i < 14; i++) G.parts.push({ x: it.x + rand(-30, 30) * k, y: it.y + rand(-30, 30) * k, vx: rand(-1, 1) * k, vy: rand(-2, 0) * k, life: 50, max: 50, color: '#6a5a50', size: rand(14, 26) * k, g: 0, soft: true });
+    for (let i = 0; i < 22; i++) { const a = rand(0, TAU), s = rand(1, 6) * k; G.parts.push({ x: it.x, y: it.y, vx: dcos(a) * s, vy: dsin(a) * s - 1.5, life: 32, max: 32, color: i % 3 ? '#ff8a1a' : '#ffe27a', size: rand(24, 46) * k, g: 0, fire: true }); }
     G.impact = { x: it.x, y: it.y, t: 30 };
-    G.rings.push({ x: it.x, y: it.y, r: 10, max: b.r * 1.3, color: '#ffd45c', life: 20, w: 18 });
-    G.rings.push({ x: it.x, y: it.y, r: 10, max: b.r * 0.8, color: '#ffffff', life: 12, w: 10 });
-    G.shake(20); G.flashT = 5; Sfx.ko();
+    G.rings.push({ x: it.x, y: it.y, r: 10, max: b.r * 1.55, color: '#ffd45c', life: 22, w: 18 * k });
+    G.rings.push({ x: it.x, y: it.y, r: 10, max: b.r * 1.0, color: '#ffffff', life: 14, w: 10 * k });
+    G.rings.push({ x: it.x, y: it.y, r: 10, max: b.r * 2.0, color: '#ff8a1a', life: 28, w: 7 * k });
+    G.shake(18 * k2); G.flashT = Math.round(5 * k); Sfx.ko();
     G.text(it.x, it.y - 40, it.kind === 'bomb' ? 'RUGGED' : 'BOOM', '#ffb347', 1.4);
     // chain reaction
     for (const o of G.items) if (!o.dead && ITEM_DEFS[o.kind].boom && dhypot(o.x - it.x, o.y - it.y) < b.r) { o.armed = true; o.fuse = 6; }

@@ -9,7 +9,22 @@ const NetSim = {
   CHECK: 60,            // players and server compare a state hash every 60 ticks
   done: null, elim: [], onEnd: null,
 
-  encode(o) { let m = 0; for (let i = 0; i < ACTIONS.length; i++) if (o[ACTIONS[i]]) m |= 1 << i; return m; },
+  // Bits 0..11 are the ACTIONS mask and never move. Bits 12..18 carry FREE AIM: the aim angle
+  // quantised to AIM_STEPS positions around the circle, stored as `step + 1` so that an input with
+  // no aim encodes to exactly the number it always did. Every replay and every seeded arena fight
+  // therefore produces bit-identical masks to before this existed.
+  //
+  // The quantising is the whole point, not a shortcut. A raw float angle would be a different number
+  // on every machine's mouse and would desync lockstep; it would also hand a mouse player perfect
+  // angles against a gamepad player, which in a wagered match is not a style question. 128 steps is
+  // 2.8 degrees, far below what anyone can see in play, it is one byte on the wire, and mouse, right
+  // stick and keyboard all drive the same 128 positions, so no input device has an advantage.
+  encode(o) {
+    let m = 0;
+    for (let i = 0; i < ACTIONS.length; i++) if (o[ACTIONS[i]]) m |= 1 << i;
+    if (o.aim != null) m |= ((((o.aim | 0) % AIM_STEPS + AIM_STEPS) % AIM_STEPS) + 1) << ACTIONS.length;
+    return m;
+  },
 
   // The rule flags Game.start gates on `seed` (item set, signature moves, reach, duck, combos, feel, and
   // whatever gets added next). Online has to play the same game as local practice, and every peer has to

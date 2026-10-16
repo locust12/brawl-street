@@ -298,6 +298,7 @@ const MV2 = {
       else { p.x = o.x; if (p.y + p.vy >= o.y - o.h * 0.6) { p.dead = true; return; } }
     }
     if (p.crawl) return MV2.crawl(p, G, M);
+    if (p.boomer) MV2.boomer(p);                 // chakram: out, then back to the hand that threw it
     if (p.home) MV2.steer(p, p.home);            // arcing bolt: bends toward whoever it is chasing
     if (p.drag) { p.vx *= p.drag; p.vy *= p.drag; }
     p.vy += p.grav || 0;
@@ -310,6 +311,20 @@ const MV2 = {
       p.dead = true;
       if (p.boom) Items2.projBoom(p); else if (p.big) NOVA_BOOM(p); else if (p.spark) G.burst(p.x, p.y, '#ffd08a', 4); else G.puff(p.x, M.top, 5, '#ffffff');
     }
+  },
+  // BOOMERANG, 2026-10-16. Out for `out` frames on the velocity it was thrown with, then pulled
+  // back to the fighter who threw it, accelerating the whole way home. It keeps its hitbox on both
+  // legs, which is the entire point: throwing a chakram PAST someone is the correct play.
+  // dhypot, not Math.hypot: this runs in the seeded sim ([[determinism]] lint in build.py).
+  boomer(p) {
+    if (p.out > 0) { p.out--; return; }
+    const o = p.boomer;
+    if (!o || o.state === 'dead') { p.boomer = null; return; }
+    const dx = o.x - p.x, dy = (o.y - o.h * 0.55) - p.y;
+    const d = dhypot(dx, dy) || 1;
+    p.vx += (dx / d) * 1.6; p.vy += (dy / d) * 1.6;
+    p.vx *= 0.92; p.vy *= 0.92;
+    if (d < 28) p.dead = true;                   // caught
   },
   // homing: bend the velocity toward the nearest live opponent without changing its speed
   steer(p, k) {
@@ -1105,6 +1120,100 @@ const ROSTER2 = [
       },
     }),
   },
+  {
+    // VOLT, added 10/05. The partner character: Volt Inu, taken from voltinu.meme's own art -- a white
+    // and silver wolf with lime-green lightning, lime eyes and the grey bolt markings in the ears. It is
+    // also a playable fighter in the METABRAWL trailer (2024-03-30), where its stated style is Northern
+    // Wolf Kung Fu and its special is Volt Power Blast; both are kept here.
+    // title 10/09 Duane: the old one was meaningless and he said so. Northern Wolf is the style Volt
+    // Inu's own METABRAWL trailer gives it, so it is the one name here that is not invented.
+    id: 'volt', name: 'VOLT', title: 'Northern Wolf', blurb: 'Throws lightning. Rail dash, rising arc, ground surge.',
+    w: 56, h: 76, walk: 6.3, air: 4.6, grav: 0.66, fall: 11.5, jump: 14.4, djump: 13.4, jumps: 1, weight: 104, power: 1.1, reach: 0.92,
+    look: { kind: 'dog', fur: '#eef2f4', belly: '#cfd6da', ear: '#9aa4ab', dark: '#1b2028', eye: 'fierce', acc: 'none' },
+    ai2: [['nb', 'zone'], ['sb', 'dash'], ['db', 'slam'], ['ub', 'up']],
+    specials: c => ({
+      // THROWN BOLT, 10/09 Duane: VOLT throws the lightning now. It was a short lance off the glove,
+      // which only ever reached punching range; this winds up and hurls a forked bolt that crosses
+      // the stage, pierces, and on a deep charge lands fat enough to stagger. Charge scales speed,
+      // size, damage and knockback. The shout stays VOLT POWER BLAST -- that name is Volt Inu's own,
+      // off the 2024 METABRAWL trailer. SPARK's bolts home and chase; this one is thrown straight and
+      // hits like a spear, so the two electric fighters still read apart.
+      nb: {
+        total: 56, clip: 'cast', fx: 'thunder', color: '#c6ff2e', charge: { at: 12, key: 'special', max: 72 }, aiHold: [10, 72],
+        tick(f, t) {
+          if (f.air) f.vy = Math.min(f.vy, 1);
+          f.vx *= 0.82;
+          if (t === 12) {
+            const ch = f.move.charge;
+            if (ch && ch % 4 === 0) Game.chargeSpark(f);
+            if (ch === 1) Sfx.tone(280, 880, 0.5, 'sawtooth', 0.05);
+          }
+          if (t === 20 && Game.projCount(f, 'voltbolt') < 2) {
+            const k = f.move.charge / 72;
+            MV2.say(f, 'VOLT POWER BLAST', 1.0 + k * 0.5);
+            Sfx.tone(170, 740, 0.4, 'sawtooth', 0.15); Sfx.noise(0.28, 0.22, 1000);
+            Game.shake(3 + 7 * k); Game.flashT = Math.max(Game.flashT, 2 + 2 * k);
+            MV2.spawn(f, { kind: 'voltbolt', vx: 13 + 3 * k, vy: 0, grav: 0, r: 13 + 11 * k, dmg: 7 + 9 * k, ang: 38,
+              bkb: 26 + 16 * k, kbg: 52 + 32 * k, life: 64, step: true, pierce: true, big: k > 0.6, color: '#c6ff2e',
+              after: (p, b) => {
+                if (p.big) STATUS.stagger(b, 20, '#c6ff2e');
+                Game.ring(b.x, b.y - b.h * 0.5, '#e8ff9a', 58); Sfx.tone(1400, 240, 0.1, 'square', 0.1);
+              } }, c.w * 0.5 + 10, c.h * 0.6);
+          }
+        },
+      },
+      sb: Object.assign(mkDash({ total: 38, a: 6, b: 18, speed: 15, hit: H(0, 0, c.w * 0.5 + 10, -c.h * 0.5, 28, 12, 36, 44, 84) }), { clip: 'punch', fx: 'rush', color: '#c6ff2e' }),
+      ub: Object.assign(mkRise({ total: 44, at: 4, vy: -16.5, hits: [
+        H(4, 10, 0, -c.h * 0.55, 30, 7, 88, 36, 44, { radial: true }), fin(H(11, 16, 0, -c.h * 0.7, 32, 8, 80, 48, 92, { radial: true }))] }), { clip: 'uppercut', fx: 'spin', color: '#c6ff2e' }),
+      db: Object.assign(mkSlam({
+        ground: { total: 40, clip: 'slam', hits: [H(13, 17, c.w * 0.5 + 12, -10, 30, 12, 60, 42, 74)],
+          tick(f, t) { if (t === 14) { const w = Object.assign({}, WAVE_ROCK, { color: '#c6ff2e', dmg: 6 }); MV2.wave(f, 1, w); MV2.wave(f, -1, w); Game.shock(f.x, f.y, '#c6ff2e'); } } },
+        air: { drop: 17, clip: 'slam', hits: [H(6, 199, 0, 4, 28, 12, -78, 26, 78)],
+          land: { total: 26, clip: 'slam', hits: [H(1, 5, 0, -12, 62, 8, 62, 50, 44, { radial: true })], start(f) { const w = Object.assign({}, WAVE_ROCK, { color: '#c6ff2e', dmg: 6 }); MV2.wave(f, 1, w); MV2.wave(f, -1, w); } } },
+      }), { shout: 'GROUND SURGE' }),
+    }),
+  },
+  {
+    // WOLVERINU, the partner character: carbon armour, lime circuit seams, green eyes, white muzzle,
+    // chrome claws. A rushdown with claw reach: it closes fast, cuts on the way in, and its energy is
+    // CIRCUIT, never lightning -- lightning is VOLT's.
+    //
+    // 10/10, read off the source: this entry used to say the design came "straight off wolverinu.fun's
+    // own upright poster". There is no upright poster. Every image on wolverinu.fun AND the @WolverinuRH
+    // X header show a FOUR-LEGGED armoured wolf with a big bushy lime-tipped tail. assets3d/wolverinu_ref.png
+    // (and so wolverinu_glb.wasm, the model this fighter actually uses) is a biped with no tail, which is
+    // the roster convention but is NOT what the brand looks like. The real art is now kept beside it as
+    // assets3d/wolverinu_site_ref.png and wolverinu_site_poster.jpg, and the site roster tile uses it.
+    // Re-rigging the playable model as a quadruped is a separate job and has not been done.
+    //
+    // 10/15: the kit below is the ARENA kit (ARENA.version 1, seeded fights). What he actually plays
+    // like in a local match is 67_unique.js -- held sprint with three cancels, hanging cross rake,
+    // claw climb, FERAL -- plus the claw normals in 6g_styles, the Scent of Blood passive and the
+    // stat profile in 66_traits, and ADAMANT DRIVER in 26_grapples2. Read those, not this.
+    id: 'wolverinu', name: 'WOLVERINU', title: 'Circuit Prowl', blurb: 'Rushdown. Held sprint into claws, a cut that hangs, and he goes feral.',
+    w: 56, h: 80, walk: 7.0, air: 5.0, grav: 0.66, fall: 12, jump: 14.8, djump: 13.8, jumps: 1, weight: 102, power: 1.06, reach: 1.16, blade: '#9bf000',
+    look: { kind: 'dog', fur: '#1c2026', belly: '#8e9aa2', ear: '#9bf000', dark: '#0a0d12', eye: 'fierce', acc: 'none' },
+    ai2: [['sb', 'dash'], ['nb', 'trap'], ['db', 'punish'], ['ub', 'up']],   // nb is a wall, not a zoning shot; db is FERAL on the deck and PLUNGE off it
+    specials: c => ({
+      nb: {
+        total: 36, clip: 'punch', fx: 'slash', weapon: '#9bf000', shout: 'RAKE',
+        tick(f, t) {
+          if (f.air) f.vy = Math.min(f.vy, 1.5);
+          if (t === 10 && Game.projCount(f, 'volley') < 3)
+            MV2.spawn(f, { kind: 'volley', vx: 12, vy: 0, grav: 0, r: 13, dmg: 5, ang: 34, bkb: 22, kbg: 34, life: 30, color: '#9bf000' }, c.w * 0.5 + 14, c.h * 0.55);
+        },
+      },
+      sb: Object.assign(mkDash({ total: 38, a: 6, b: 18, speed: 16.5, hit: H(0, 0, c.w * 0.5 + 26, -c.h * 0.5, 32, 12, 38, 42, 86) }), { clip: 'flykick', fx: 'slash', weapon: '#9bf000', color: '#9bf000' }),
+      ub: Object.assign(mkRise({ total: 46, at: 4, vy: -11, hold: 22, steer: 4, hits: [
+        H(4, 26, 0, -c.h * 0.6, 44, 2.4, 88, 30, 14, { rehit: 5, radial: true }), fin(H(29, 32, 0, -c.h * 0.6, 48, 6, 62, 44, 94, { radial: true }))] }), { clip: 'spin', fx: 'spin', weapon: '#9bf000', color: '#9bf000' }),
+      db: Object.assign(mkSlam({
+        ground: { total: 40, clip: 'slam', fx: 'slash', weapon: '#9bf000', hits: [H(12, 16, c.w * 0.5 + 18, -12, 30, 11, 56, 40, 72)],
+          tick(f, t) { if (t === 13) { const w = Object.assign({}, WAVE_ROCK, { color: '#9bf000', dmg: 6 }); MV2.wave(f, 1, w); MV2.wave(f, -1, w); Game.shock(f.x, f.y, '#9bf000'); } } },
+        air: { drop: 18, clip: 'slam', hits: [H(6, 199, 0, 4, 28, 12, -80, 26, 80)],
+          land: { total: 28, clip: 'slam', hits: [H(1, 5, 0, -12, 60, 8, 60, 50, 44, { radial: true })], start(f) { const w = Object.assign({}, WAVE_ROCK, { color: '#9bf000', dmg: 6 }); MV2.wave(f, 1, w); MV2.wave(f, -1, w); } } },
+      }), { shout: 'GROUND SPLIT' }),
+    }),
+  },
 ];
 // one signature move each: [slot, the shout that lands with it]. The showpiece gets the freeze-flash.
 const SIGNATURE = {
@@ -1113,13 +1222,13 @@ const SIGNATURE = {
   wisp: ['nb', 'BUBBLE'], spark: ['db', 'THUNDERCLAP'], turbo: ['nb', 'BLAZE PUNCH'], chop: ['nb', 'WATAA'],
   ginga: ['ub', 'GINGA'], sifu: ['sb', 'TIGER'], fro: ['nb', 'ONE CUT'], bling: ['db', 'MIC DROP'],
   techno: ['sb', 'STEEL TRUCK'], hoodie: ['nb', 'TAKEDOWN'], slam: ['nb', 'POWER BOMB'], mystic: ['db', 'AXE KICK'],
-  ape: ['db', 'APE STRONG'], ember: ['sb', 'INFERNO RUSH'],
+  ape: ['db', 'APE STRONG'], ember: ['sb', 'INFERNO RUSH'], volt: ['nb', 'VOLT POWER BLAST'], wolverinu: ['sb', 'PROWL'],
 };
 const TAUNTS = {
   giga: 'SNACK TIME', ronin: 'NICE SWORD', tyrant: 'KNEEL', gwei: 'ITS LEAKING', shroom: 'FUN GUY', kaiju: 'ROAR',
   mochi: 'HI', omen: 'THINK', wisp: 'WHEEE', spark: 'ZAP ZAP', turbo: 'SHOW ME', chop: 'WAAAH', ginga: 'DANCE',
   sifu: 'BOW', fro: 'HMPH', bling: 'WAGWAN MY G', techno: 'TO THE MOON', hoodie: 'GG', slam: 'FLEX', mystic: 'WHO',
-  ape: 'OOH OOH', ember: 'TOASTY',
+  ape: 'OOH OOH', ember: 'TOASTY', volt: 'STEP UP', wolverinu: 'COME ON',
 };
 for (const c of ROSTER2) {
   c.moves = Object.assign(baseMoves(c), c.specials(c), kicks(c));

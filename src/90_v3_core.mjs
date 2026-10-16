@@ -188,6 +188,16 @@ const QUAL = {
 };
 V3.QUAL = QUAL;
 
+// --- PBR sidecar strength (Ceiling 01) -----------------------------------------------
+// Live knobs so a look can be A/B'd from the console without a rebuild:
+//   V3.NRM_SCALE = 0   -> normal map off      V3.AO_INT = 0 -> baked AO off
+// NRM_SCALE multiplies the tangent-space normal's XY. Above ~1.4 the grain starts to
+// read as noise under the bloom pyramid rather than as surface.
+V3.NRM_SCALE = 0.85;
+// The bake already has a lifted floor (0.42) so this stays at 1: the darkening is in the
+// map, not in the intensity, which keeps it consistent with fighters that have no sidecar.
+V3.AO_INT = 1.0;
+
 // Three tiers. Resolution is the FIRST thing given up and the LAST thing restored (see qualityTick);
 // these are what goes after it. Nothing here touches the fighters: they keep their models, their
 // materials, their shadow and their share of the screen at every tier. What steps down is the stuff
@@ -554,6 +564,10 @@ const retry = async (fn, n = 4) => { for (let i = 0; ; i++) { try { return await
 let gltf, texL;
 const charP = {};
 V3.hasChar = id => !!models[id];
+// Test-only accessor. `models` is module-local, so a QA pass could not ask whether a fighter
+// actually came back with a skinned rig and its PBR maps bound -- it could only infer it from a
+// screenshot. dev/aaa/qa_fighters.mjs reads this. Returns the live record, so do not mutate it.
+V3.modelOf = id => models[id] || null;
 V3.missing = new Set();   // fighter ids whose model failed to load
 const rtRigged = scene => { let skin = false, hips = false; scene.traverse(o => { if (o.isSkinnedMesh) skin = true; if (o.isBone && o.name === 'Hips') hips = true; }); return skin && hips; };
 V3.loadChar = function (id) {
@@ -561,9 +575,20 @@ V3.loadChar = function (id) {
   // ASSET_ID (10_core.js, swapped by 2f_origins.js) picks which art set this fighter loads. The model
   // is still cached and keyed under the plain id, so nothing else in the renderer has to know.
   const a = typeof ASSET_ID === 'function' ? ASSET_ID(id) : id;
-  const get = name => Promise.all([retry(() => gltf.loadAsync(ASSET + name + '_glb.wasm')), retry(() => texL.loadAsync(ASSET + name + '_tex.jpg'))]);
+  // PBR SIDECARS (dev/aaa/pbrgen.py, Ceiling 01): <id>_nrm.webp is a tangent-space normal and
+  // <id>_orm.webp packs R=ambient occlusion (voxel-traced off the real mesh), G=roughness,
+  // B=metallic, which is the glTF ORM convention, so one texture feeds three slots. They are
+  // OPTIONAL on purpose: a fighter with no sidecar keeps exactly the look it had, so the roster
+  // can be converted a few at a time without a flag day. optT resolves null on any 404.
+  const optT = url => new Promise(res => texL.load(url, t => res(t), undefined, () => res(null)));
+  const get = name => Promise.all([
+    retry(() => gltf.loadAsync(ASSET + name + '_glb.wasm')),
+    retry(() => texL.loadAsync(ASSET + name + '_tex.jpg')),
+    optT(ASSET + name + '_nrm.webp'),
+    optT(ASSET + name + '_orm.webp'),
+  ]);
   return charP[id] = (async () => {
-    const [g, tex] = await get(a);
+    const [g, tex, nrm, orm] = await get(a);
     // A model with no skinned rig can play no clip, take no pose and hold no weapon (9/22 audit A3:
     // shroom_v2 THISTLE and mochi_v2 BLOAT shipped like that — Meshy could not rig those shapes). Falling
     // back to the older rigged art is NOT an option: those are the Toad / Kirby look-alikes the originals
@@ -576,11 +601,37 @@ V3.loadChar = function (id) {
     // this one texture, so both must survive an Avatar.dispose() (which disposes everything else it
     // owns). See V3.disposeArena.
     tex.userData.shared = true;
+    // The sidecars are DATA, not colour: sRGB-decoding a normal or a roughness map bends every
+    // value and the lighting goes subtly wrong everywhere. They also need the base map's flipY
+    // so they sit on the same UVs.
+    for (const t of [nrm, orm]) {
+      if (!t) continue;
+      t.flipY = false; t.colorSpace = THREE.NoColorSpace; t.anisotropy = QUAL.aniso;
+      t.userData.shared = true;
+    }
+    const clank = id === 'clanker';
     g.scene.traverse(o => {
       if (o.isMesh) {
         o.geometry.userData.shared = true;
         o.castShadow = true; o.receiveShadow = !V3.noFighterShade; o.frustumCulled = false;   // shade under platforms + self-shadow (audit A14, 9/22 night)
-        o.material = new THREE.MeshStandardMaterial({ map: tex, roughness: id === 'clanker' ? 0.3 : 0.7, metalness: id === 'clanker' ? 0.75 : 0.0, envMapIntensity: id === 'clanker' ? 1.4 : 0.6 });
+        const mp = {
+          map: tex,
+          roughness: clank ? 0.3 : 0.7, metalness: clank ? 0.75 : 0.0,
+          envMapIntensity: clank ? 1.4 : 0.6,
+        };
+        if (nrm) {
+          mp.normalMap = nrm;
+          mp.normalScale = new THREE.Vector2(V3.NRM_SCALE, V3.NRM_SCALE);
+        }
+        if (orm) {
+          // three multiplies these maps INTO the scalars, so the scalars become the ceiling:
+          // roughness/metalness go to 1 and the map carries the whole range. clanker keeps its
+          // hand-set metal floor because its map is authored dielectric.
+          mp.aoMap = orm; mp.aoMapIntensity = V3.AO_INT;
+          mp.roughnessMap = orm; mp.roughness = 1.0;
+          if (!clank) { mp.metalnessMap = orm; mp.metalness = 1.0; }
+        }
+        o.material = new THREE.MeshStandardMaterial(mp);
       }
     });
     const box = new THREE.Box3().setFromObject(g.scene);

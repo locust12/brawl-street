@@ -16,7 +16,7 @@ import {BrawlReferrals} from "../src/BrawlReferrals.sol";
 ///           1. the token
 ///           2. this script (staking needs the token; the splitter needs staking and referrals)
 ///           3. BrawlEscrow / RektArena with `treasury` = the splitter
-///           4. `setCut(300)` on the escrow, `setCutBps(300)` on the arena
+///           4. `setCut(500)` on the escrow, `setCutBps(500)` on the arena
 ///
 ///         Env:
 ///           OWNER        multisig. Owns all three. Never the operator key.
@@ -59,6 +59,6 @@ contract DeployRake is Script {
         console.log("RakeSplitter  ", address(splitter));
         console.log("");
         console.log("Next: deploy BrawlEscrow / RektArena with treasury =", address(splitter));
-        console.log("Then: escrow.setCut(300) and arena.setCutBps(300)");
+        console.log("Then: escrow.setCut(500) and arena.setCutBps(500)");
     }
 }

@@ -3,24 +3,27 @@
 // losing side pro rata. The round's fight is seeded, so every screen shows the same fight and
 // anyone can replay it. Where the rounds come from is a "house": PracticeHouse runs them in the
 // browser with a practice crowd; ChainHouse (76_chain.js) reads them from the contract.
-const CURS = ['REKT', 'ETH', 'USDC'];
-const CUR_AMTS = { REKT: [1000, 5000, 25000, 100000], ETH: [0.005, 0.01, 0.05, 0.1], USDC: [5, 10, 50, 100] };
+// USDT is its own slot, not a relabel of the stable one: on Ethereum both USDC and USDT exist and
+// people hold different ones, so a chain can offer either or both. A config that lists only one of
+// them simply never shows the other (ChainHouse.curs(), 76_chain.js).
+const CURS = ['ETH', 'USDC', 'USDT'];
+const CUR_AMTS = { ETH: [0.005, 0.01, 0.05, 0.1], USDC: [5, 10, 50, 100], USDT: [5, 10, 50, 100] };
 const FAST = typeof location !== 'undefined' && /fast/.test(location.hash);   // dev: #arena:fast shortens the windows for tests
-const BET_SECS = FAST ? 6 : 30, LOCK_SECS = 3, RESULT_SECS = FAST ? 4 : 9;
+// Round pacing. Measured 2026-10-13: the fight itself is ~74s (2 stocks, ARENA.limit 2:30 in
+// 62_rules.js), and the old 30s betting window plus 9s results made the round ~121s, so under
+// 60% of it was anyone actually fighting. Every round is a betting event, so rounds per hour is
+// revenue: 15/5 takes the round to ~102s without touching the fight.
+const BET_SECS = FAST ? 6 : 15, LOCK_SECS = 3, RESULT_SECS = FAST ? 4 : 5;
 const SIDE_COL = [PCOLORS[0], PCOLORS[1]];
 
 function fmtAmt(cur, v) {
-  if (cur === 'REKT') {
-    const a = Math.abs(v);
-    return a >= 1e6 ? (v / 1e6).toFixed(a >= 1e7 ? 1 : 2) + 'M' : a >= 1e3 ? (v / 1e3).toFixed(a >= 1e4 ? 0 : 1) + 'K' : String(Math.round(v));
-  }
   if (cur === 'ETH') return Math.abs(v) < 0.1 ? v.toFixed(4) : v.toFixed(3);
   return v.toFixed(2);
 }
-const CUR_NAME = { REKT: 'REKT', ETH: 'ETH', USDC: 'USDC' };   // the stable slot is relabelled from live.json (e.g. USDG)
+const CUR_NAME = { ETH: 'ETH', USDC: 'USDC', USDT: 'USDT' };   // the USDC slot is relabelled from live.json (e.g. USDG)
 const withCur = (cur, v) => fmtAmt(cur, v) + ' ' + CUR_NAME[cur];
 const signed = (cur, v) => (v > 0 ? '+' : v < 0 ? '−' : '') + withCur(cur, Math.abs(v));
-const blankPools = () => ({ REKT: [0, 0], ETH: [0, 0], USDC: [0, 0] });
+const blankPools = () => ({ ETH: [0, 0], USDC: [0, 0], USDT: [0, 0] });
 function hexSeed() {
   const b = new Uint8Array(32);
   if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(b); else for (let i = 0; i < 32; i++) b[i] = Math.random() * 256 | 0;
@@ -43,7 +46,7 @@ const h2h = (a, b) => (typeof ARENA_FORM !== 'undefined' ? [ARENA_FORM.h2h[a][b]
 const PracticeHouse = {
   mode: 'practice', label: 'Practice', r: null,
   init() {
-    this.bal = Object.assign({ REKT: 250000, ETH: 1, USDC: 500 }, store.get('arenaBal', {}));
+    this.bal = Object.assign({ ETH: 1, USDC: 500, USDT: 500 }, store.get('arenaBal', {}));
     this.n = store.get('arenaRound', 0);
   },
   save() { store.set('arenaBal', this.bal); store.set('arenaRound', this.n); },
@@ -56,9 +59,9 @@ const PracticeHouse = {
     const lean = clamp(0.5 + (formPct(a) - formPct(b)) / 60 + (Math.random() - 0.5) * 0.35, 0.18, 0.82);
     const k = 14 + Math.floor(Math.random() * 20);
     for (let i = 0; i < k; i++) {
-      const u = Math.random(), cur = u < 0.6 ? 'REKT' : u < 0.85 ? 'ETH' : 'USDC', [lo, , , hi] = CUR_AMTS[cur];
+      const u = Math.random(), cur = u < 0.34 ? 'ETH' : u < 0.67 ? 'USDC' : 'USDT', [lo, , , hi] = CUR_AMTS[cur];
       const amt = lo * Math.pow(hi * 1.5 / lo, Math.pow(Math.random(), 1.6));
-      r.crowd.push({ at: now + Math.random() * (BET_SECS - 1.5) * 1000, side: Math.random() < lean ? 1 : 2, cur, amt: cur === 'REKT' ? Math.round(amt / 100) * 100 : +amt.toFixed(cur === 'ETH' ? 4 : 2) });
+      r.crowd.push({ at: now + Math.random() * (BET_SECS - 1.5) * 1000, side: Math.random() < lean ? 1 : 2, cur, amt: +amt.toFixed(cur === 'ETH' ? 4 : 2) });
     }
     r.crowd.sort((x, y) => x.at - y.at);
     this.r = r; this.save();
@@ -91,12 +94,12 @@ const PracticeHouse = {
     this.r = null; this.save();
   },
   balances() { return this.bal; },
-  refill() { this.bal = { REKT: 250000, ETH: 1, USDC: 500 }; this.save(); },
+  refill() { this.bal = { ETH: 1, USDC: 500, USDT: 500 }; this.save(); },
 };
 
 const Arena = {
   active: false, house: PracticeHouse, r: null, phase: '', uiT: 0, resultUntil: 0,
-  cur: store.get('arenaCur', 'REKT'), amt: store.get('arenaAmt', { REKT: 5000, ETH: 0.01, USDC: 10 }),
+  cur: store.get('arenaCur', 'USDC'), amt: store.get('arenaAmt', { ETH: 0.01, USDC: 10, USDT: 10 }),
   hist: store.get('arenaHist', []), rec: store.get('arenaRec', {}),
 
   async enter() {

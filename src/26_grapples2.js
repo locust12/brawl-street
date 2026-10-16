@@ -254,4 +254,56 @@ Object.assign(GRAPPLE.NAMED, {
       { n: 26, clip: 'slam', hold: [0.9, -0.2], toss: { at: 4, dmg: 13, ang: 62, bkb: 64, kbg: 78, ground: true, shake: 18 } },
     ],
   }),
+  // WOLVERINU: ADAMANT DRIVER. The 10/13 version was four stages at 18 damage, mid-table, which is
+  // the wrong size for the fighter on the front of the key art. Rebuilt 10/15 as the showpiece throw
+  // of the whole roster -- six stages, 25.5 held-and-thrown plus the floor wave, so it is the biggest
+  // command throw in the game by a clear margin. What pays for it is TIME: it runs a full two seconds
+  // and he is wide open for all of it, so in a 3-4P match the third fighter walks over and takes it
+  // off him. (The 20-frame break window does not grow with it -- 27_tekken opens it once, at the
+  // catch -- so the length is a cost in the free-for-all, not in the 1v1.)
+  //
+  // Reference is Tekken's KING: a long hold with real cuts in it, not a quick toss. Hook the claws
+  // in, shred across five times, hoist them off the deck, LEAP with them, and drive them head-first
+  // back through the floor. It finishes on the two circuit waves his db special cracks out, so the
+  // throw reads as his. Break button E+R (28_grapples3 TK.ESCOF).
+  wolverinu: () => ({
+    name: 'Adamant Driver', shout: 'COME HERE',
+    stages: [
+      // 1. the hook: both claws in, and he drags them a step toward him
+      { n: 12, clip: 'punch', fx: 'slash', color: '#9bf000', hold: [[1.15, -0.05], [0.95, -0.08]], ease: 8, hit: [[6, 3]],
+        go(f, t) { if (t === 6) { Game.burst(f.x + f.face * f.w * 0.8, f.y - f.h * 0.55, '#9bf000', 12); Sfx.swing(); } } },
+      // 2. the shred: five cuts across, 1.6 each. The sway is what sells it as a mauling.
+      { n: 32, clip: 'jab', fx: 'slash', color: '#9bf000', hold: (f, v, k, t) => [0.95 + 0.07 * dsin(t * 0.9), -0.1 - 0.04 * dcos(t * 0.7)],
+        hit: [[4, 1.6], [10, 1.6], [16, 1.6], [22, 1.6], [28, 1.6]],
+        go(f, t) {
+          if (t % 6 !== 4) return;
+          Game.ring(f.x + f.face * f.w * 0.9, f.y - f.h * (0.4 + (t % 12 === 4 ? 0.2 : 0)), '#9bf000', 40);
+          Game.burst(f.x + f.face * f.w * 0.85, f.y - f.h * 0.5, '#9bf000', 5); Sfx.swing();
+        } },
+      // 3. hoisted off the deck, overhead, on the claws
+      { n: 16, clip: 'uppercut', hold: [[0.95, -0.1], [0.1, -1.3]], ease: 12,
+        go(f, t) { if (t === 12) { Sfx.tone(2000, 620, 0.12, 'sawtooth', 0.07); Game.burst(f.x + f.face * 8, f.y - f.h * 1.3, '#9bf000', 14); } } },
+      // 4. the leap: he jumps WITH them
+      { n: 15, clip: 'jump', hold: [0.1, -1.25], hit: [[9, 2]],
+        go(f, t) { if (t === 1) { f.vy = -13.5; Sfx.jump(); } if (t === 9) Game.ring(f.x, f.y - f.h * 1.4, '#9bf000', 70); } },
+      // 5. and drives them down head-first. `air: true` ends the stage on the landing, not on a count.
+      { n: 60, clip: 'slam', fx: 'dive', color: '#9bf000', air: true, hold: [0.1, -1.1],
+        go(f) { f.vy = 18; } },
+      // 6. through the floor. 3 + 8 held + 2 + 12.5 thrown = 25.5, plus the forward wave on a victim
+      // who is planted on the deck right there: ~29 all in, against a roster whose next biggest
+      // command throw is MYSTIC's at 22.5.
+      { n: 32, clip: 'slam', shout: 'GAME OVER', hold: [0.4, -0.15],
+        toss: { at: 5, dmg: 12.5, ang: 72, bkb: 70, kbg: 88, ground: true, shake: 22 },
+        go(f, t) {
+          if (t !== 5) return;
+          const w = Object.assign({}, WAVE_ROCK, { color: '#9bf000', dmg: 3.5 });
+          MV2.wave(f, 1, w); MV2.wave(f, -1, w);
+          // the shock ring, the two waves, the camera punch-in and the screen flash all land on this
+          // one frame: a second big ring on top of them turned the whole finish into a white ball
+          // with no fighters in it. The shock ring is enough.
+          Game.shock(f.x, f.y, '#9bf000');
+          Game.flashT = Math.max(Game.flashT, 3); Game.shake(18); Sfx.hit(1);
+        } },
+    ],
+  }),
 });

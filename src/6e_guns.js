@@ -46,6 +46,50 @@ const GUNS = {
                 rec: 6, airRec: 8.5, walk: 0.3, round: 'buck', mech: ['pump', 12], shake: 7, throwDmg: 9 },
     smg:      { name: 'SMG', mag: 30, rate: 5, recov: 10, spd: 145, range: 820, r: 5, dmg: 1.5, bkb: 5, kbg: 9, ang: 16,
                 spread: 2.2, climb: 0.35, climbMax: 6, rec: 0.35, airRec: 0.55, walk: 0.5, auto: true, round: 'rsmg', shake: 0.6, throwDmg: 7 },
+    // BLASTERS and BOW: the two ranged archetypes the genre agrees on and we did not have.
+    // Brawlhalla's Blasters are "long-range attacks that can be strung together"; Smash's Ray Gun is
+    // the same idea. The Bow is Brawlhalla's "projectile that shoots out surprisingly fast", and
+    // Smash's charged-shot slot. Between them our shooting shelf stops being three flamethrower
+    // variants and an assault rifle.
+    blaster:  { name: 'Twin Nines', mag: 16, rate: 6, recov: 11, spd: 230, range: 920, r: 6, dmg: 2.7, bkb: 9, kbg: 16, ang: 18,
+                spread: 1.0, rec: 0.4, airRec: 0.7, walk: 0.62, auto: true, round: 'rbls', shake: 1.6, throwDmg: 7 },
+    bow:      { name: 'Speargun', mag: 5, wind: 14, rate: 30, recov: 15, spd: 300, range: 1600, r: 7, dmg: 15, bkb: 44, kbg: 78, ang: 26,
+                spread: 0, rec: 1.6, airRec: 2.2, walk: 0.35, stop: 2, stagger: 14, round: 'rarw', shake: 5, throwDmg: 8 },
+    // STREET SWEEPER: the close-range shotgun. Smash has no shotgun, but the shop is a weapon shop
+    // and every shooter the store art is modelled on carries one. Pellets, so it is devastating in
+    // someone's face and nothing at all across the stage.
+    sweeper:  { name: 'Street Sweeper', mag: 6, wind: 6, rate: 34, recov: 20, spd: 180, range: 360, r: 6, dmg: 4.8, bkb: 18, kbg: 28, ang: 22,
+                pellets: 8, spread: 7.5, rec: 1.5, airRec: 2.1, walk: 0.4, stop: 1, round: 'rsweep', shake: 5, throwDmg: 8 },
+    // CAPTIVE BOLT: a cattle stunner run off a compressed air tank, which is a real industrial tool
+    // and sits on the same shelf as the Fire Axe and the Pipe Cannon. It is the shortest range in
+    // the game by a wide margin -- it has to be touching -- and in exchange it hits harder than
+    // anything else that fires. Two shots, and a long recovery you have to commit to.
+    bolt:     { name: 'Captive Bolt', mag: 2, wind: 16, rate: 46, recov: 30, spd: 150, range: 72, r: 9, dmg: 36, bkb: 94, kbg: 136, ang: 12,
+                spread: 0, rec: 2.4, airRec: 3.2, walk: 0.3, stop: 3, stagger: 24, round: 'rbolt', shake: 9, throwDmg: 9 },
+    // THE AK, built from the real Madness numbers, not from feel.
+    // `studio-minus/madness-interactive-reloaded` -> base/data/weapons/ak_47.json:
+    //   UseDelay 0.1s -> 6 frames between shots (600 rpm) · RoundsPerMagazine 20 · Automatic true
+    //   Accuracy 1.0 · Recoil 1.0 · RotationalRecoilIntensity 0.25 · BulletsPerShot 1
+    // and Weapons/Systems/BulletEmitter.cs raycasts, recursing up to 8 times THROUGH targets, which
+    // is why this is the only automatic here with `pierce`. Ours fires a projectile rather than a
+    // hitscan ray, so `spd` is pushed to 300: a round crosses its whole range in about four frames,
+    // which reads as instant at fighting distance while keeping deflection, tracers and impacts
+    // working instead of bypassing the entire projectile path.
+    ak:       { name: 'The Chopper', mag: 20, rate: 6, recov: 12, spd: 320, range: 1250, r: 6, dmg: 3.4, bkb: 12, kbg: 20, ang: 20,
+                spread: 1.3, climb: 0.5, climbMax: 8, rec: 0.8, airRec: 1.15, walk: 0.45, auto: true, pierce: true,
+                round: 'rak', shake: 3, throwDmg: 9 },
+    // DESERT EAGLE. Duane, 15 Oct: *"make one of the pistols take all of the other players health
+    // but leave a little bit with one shot ... only let it have one bullet ... leaves them in
+    // critical health"*. This game has no health bar -- damage counts UP and a high number is what
+    // gets you launched off the stage -- so "takes nearly all their health" is `crit`: the round
+    // leaves the victim sitting at 160%, one clean hit from a stock, however healthy they were a
+    // moment earlier. The knockback is deliberately tiny (kbg 6) so the Eagle itself does NOT get
+    // the KO: it hands you the kill and makes you land it. ONE round, a heavy draw, and a recovery
+    // you are stuck in if you miss.
+    deagle:   { name: 'Desert Eagle', mag: 1, wind: 20, rate: 60, recov: 46, spd: 280, range: 1150, r: 9, dmg: 24,
+                crit: 160, bkb: 14, kbg: 6, ang: 28,
+                spread: 0, rec: 7, airRec: 9, walk: 0.25, stop: 5, stagger: 30, round: 'rdeagle',
+                mech: ['cock', 14], shake: 11, throwDmg: 10 },
     sniper:   { name: 'Sniper Rifle', mag: 3, wind: 16, rate: 54, recov: 16, spd: 320, range: 2600, r: 6, dmg: 19, bkb: 52, kbg: 92, ang: 18,
                 spread: 0, rec: 5, airRec: 6, walk: 0.15, stop: 7, stagger: 20, pierce: true, round: 'r308', mech: ['bolt', 20], shake: 10, throwDmg: 10 },
     bazooka:  { name: 'Bazooka', mag: 2, rate: 50, recov: 20, rocket: true, rec: 3, airRec: 5, walk: 0.2, shake: 6, throwDmg: 10 },
@@ -268,7 +312,7 @@ const GUNS = {
     for (const q of list) {
       const b = q.b, o = q.o, x = q.x / q.n, y = q.y / q.n;
       if (b.state === 'dead' || b.untouchable) continue;
-      if (b.state === 'shield') { G.shieldHit(b, q.dmg, x - q.vx, null); this.emit('hit', x, y, q.vx, 0, q.gn, b.idx, q.dmg); continue; }
+      if (b.state === 'shield') { G.shieldHit(b, q.dmg, x - q.vx, null, q.shieldEat); this.emit('hit', x, y, q.vx, 0, q.gn, b.idx, q.dmg); continue; }
       const keep = o ? o.hitlag : 0, n = q.n;
       this.curN = n;
       b.takeHit({ dmg: q.dmg, ang: n >= 6 ? 34 : 28, bkb: 10 + 5 * n, kbg: 30 + 9 * n, radial: true, kind: 'buck' }, o, 1, x - q.vx, 1);
@@ -411,6 +455,14 @@ Object.assign(ITEM_DEFS, {
   pistol:   { name: 'Pistol', r: 20, weight: 0, set: 2, ammo: GUNS.DEF.pistol.mag, icon: '🔫' },        // spawns in the Laser Gun's slot (GUNS.tick)
   revolver: { name: 'Revolver', r: 20, weight: 3, set: 2, ammo: GUNS.DEF.revolver.mag, icon: '🤠' },
   smg:      { name: 'SMG', r: 22, weight: 3, set: 2, ammo: GUNS.DEF.smg.mag, icon: '🔫' },
+  ak:       { name: 'The Chopper', r: 24, weight: 2, set: 2, ammo: GUNS.DEF.ak.mag, icon: '🔫' },
+  blaster:  { name: 'Twin Nines', r: 22, weight: 0, set: 3, ammo: GUNS.DEF.blaster.mag, icon: '🔫' },
+  bow:      { name: 'Speargun', r: 24, weight: 0, set: 3, ammo: GUNS.DEF.bow.mag, icon: '🏹' },
+  sweeper:  { name: 'Street Sweeper', r: 26, weight: 0, set: 3, delay: 1200, ammo: GUNS.DEF.sweeper.mag, icon: '💥' },
+  bolt:     { name: 'Captive Bolt', r: 24, weight: 0, set: 3, delay: 2400, ammo: GUNS.DEF.bolt.mag, icon: '🔩' },
+  // one round, and it is locked for the first minute of the match: this is a finisher, on the same
+  // warm-up shelf as the Wrecking Ball, not something you open with
+  deagle:   { name: 'Desert Eagle', r: 22, weight: 0, set: 3, delay: 3600, ammo: GUNS.DEF.deagle.mag, icon: '\u{1F52B}' },
 });
 ITEM_DEFS.mgun.weight = 0;
 ITEM_DEFS.shotgun.weight = 3; ITEM_DEFS.shotgun.ammo = GUNS.DEF.shotgun.mag;
@@ -422,7 +474,7 @@ for (const id of Object.keys(GUNS.DEF)) {
   const oldPick = d.pick; d.pick = (f, it) => (GUNS.on() ? GUNS.pick(f, it) : oldPick ? oldPick(f, it) : false);
 }
 // every round kind stale-scales on repeat hits, like every other shot (65_balance "keep shooting til they fall off")
-for (const k of ['r9', 'r44', 'rsmg', 'r308', 'buck', 'gunthrow']) BAL.SHOTS.add(k);
+for (const k of ['r9', 'r44', 'rsmg', 'rak', 'rbls', 'rarw', 'rsweep', 'rbolt', 'r308', 'buck', 'gunthrow']) BAL.SHOTS.add(k);
 
 // ---- hook: the shared projectile stepper runs our rounds (anything without `gn` is untouched)
 MV2.projStep = (function (base) {
@@ -459,7 +511,20 @@ Fighter.prototype.takeHit = (function (base) {
         return 0;
       }
     }
+    const d0 = this.dmg;
     const kb = base.call(this, hb, att, mult, srcX, srcFace);
+    // THE DESERT EAGLE'S ROUND. `crit` is a damage FLOOR, applied AFTER the hit has already worked
+    // out its knockback -- so the shot itself still barely moves them, and what it leaves behind is
+    // a fighter at 160% who goes off the top of the screen on the next thing that touches them.
+    // Only on a hit that actually landed: a shielded or whiffed round changes nothing.
+    if (g.crit && this.dmg > d0 && this.dmg < g.crit) {
+      const top = g.crit - this.dmg;
+      this.dmg = g.crit;
+      this.stats.taken += top;
+      if (att && att !== this) att.stats.dealt += top;
+      this.flashT = Math.max(this.flashT, 10);
+      if (typeof Game !== 'undefined' && Game.text) Game.text(this.x, this.y - this.h - 26, 'CRITICAL', '#ff3a4a', 1.4);
+    }
     GUNS.after(this, att, g, kb || 0, hb);
     return kb;
   };

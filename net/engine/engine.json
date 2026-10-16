@@ -1,5 +1,5 @@
 {
- "digest": "v1-446c8aa7b298c123",
+ "digest": "v1-a40a8b630012c561",
  "source": "arena/fightsim.js",
  "files": [
   "10_core.js",
@@ -75,6 +75,8 @@
   "mystic",
   "ape",
   "ember",
+  "volt",
+  "wolverinu",
   "bogdanoff",
   "fartcoin",
   "bull",
@@ -86,5 +88,5 @@
   "brett",
   "moodeng"
  ],
- "built": "2026-09-29T11:41:16.877Z"
+ "built": "2026-10-16T10:52:25.504Z"
 }

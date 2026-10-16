@@ -11,7 +11,7 @@ contract DeployEscrow is Script {
         address owner = vm.envAddress("OWNER");
         address operator = vm.envAddress("OPERATOR");
         address treasury = vm.envAddress("TREASURY");
-        uint16 cutBps = uint16(vm.envOr("CUT_BPS", uint256(0)));
+        uint16 cutBps = uint16(vm.envOr("CUT_BPS", uint256(500)));
         vm.startBroadcast();
         esc = new BrawlEscrow(owner, operator, treasury, cutBps);
         vm.stopBroadcast();

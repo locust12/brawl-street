@@ -120,12 +120,36 @@ function padState(i) {
     // throws sit on the two shoulder buttons, Tekken-style; the triggers keep guard
     shield: b(6) || b(7), smash: rs,
     grab: b(4), grapple: b(5), drop: b(10) || b(8),
+    // NOT free aim: the right stick is already the smash flick (`smash: rs` above), so taking it for
+    // aiming would fire a smash every time you pointed the gun. Pad free-aim needs smash moved to a
+    // button first, which is a controls decision, not a rename. Mouse aim is wired up below and is
+    // what Madness itself uses.
   };
 }
 
 // Online play: controllers 'net0'..'net3' read this tick's lockstep input (a bitmask over ACTIONS),
 // set by NetSim.step() in the page (77_net.js) and on the game server (net/), before each Game.step().
 const NetInput = { cur: [0, 0, 0, 0] };
+
+// ---- FREE AIM (Madness-style): the body faces a direction, the arms point anywhere ----
+// The angle is quantised to AIM_STEPS positions around the circle and that integer is the ONLY thing
+// that ever reaches the simulation. The table is precomputed so a given step always yields the exact
+// same cos/sin on every machine; deriving them from a float at sim time is how lockstep desyncs.
+// 128 steps is 2.8 degrees apart, which nobody can see in play, and it keeps mouse, right stick and
+// keyboard on identical footing. See NetSim.encode (63_netsim.js) for the wire format.
+const AIM_STEPS = 128;
+const AIM_COS = [], AIM_SIN = [];
+// dcos/dsin, NOT Math.cos/sin: these values become the bullet's direction, and V8 and Safari
+// disagree on Math.cos in the last bit, which is enough to fork a fight. The table is built once and
+// every step then yields the identical double on every machine.
+for (let i = 0; i < AIM_STEPS; i++) { const a = i * TAU / AIM_STEPS; AIM_COS.push(dcos(a)); AIM_SIN.push(dsin(a)); }
+// Math.atan2 maps THIS device's pointer to a step number: a local input decision, the same class as
+// the gamepad deadzone. Only the integer it produces is ever simulated or sent, so an engine
+// disagreeing by one step changes where that player aimed, never what the fight does.
+const aimStep = (dx, dy) => Math.round(Math.atan2(dy, dx) / TAU * AIM_STEPS) & (AIM_STEPS - 1);   // det-ok: local input quantising; only the integer reaches the fight
+// where the pointer is, in world space, kept by the page; null until the mouse moves over the canvas
+const Aim = { px: null, py: null, kb: [0, 0, 0, 0] };
+
 // Read one controller into a plain {action: bool} object
 function readInput(src) {
   const o = {};
@@ -141,9 +165,12 @@ function readInput(src) {
   } else if (src && src.startsWith('pad')) {
     const s = padState(+src.slice(3));
     for (const a of ACTIONS) o[a] = !!(s && s[a]);
+    if (s && s.aim != null) o.aim = s.aim;
   } else if (src && src.startsWith('net')) {
     const m = NetInput.cur[+src.slice(3)] | 0;
     for (let i = 0; i < ACTIONS.length; i++) o[ACTIONS[i]] = (m & (1 << i)) !== 0;
+    const a = (m >>> ACTIONS.length) & (AIM_STEPS * 2 - 1);
+    if (a) o.aim = a - 1;
   } else for (const a of ACTIONS) o[a] = false;
   return o;
 }

@@ -40,8 +40,15 @@ ssh "$HOST" "cd $DEST/engine && ls -t sim-v*.js 2>/dev/null | tail -n +13 | xarg
 # assets/ is art and models and is NOT in git, so a fresh clone has an empty one. Syncing that with
 # --delete would wipe every asset off the server, so only push them from a machine that has them,
 # and never delete what is already up there.
-if [ -n "$(ls -A "$ROOT/assets" 2>/dev/null)" ]; then
-  rsync -az "$ROOT/assets/" "$HOST:$DEST/public/assets/"
+# SKIP_ASSETS=1 forces a code-only deploy. assets/ is 401 MB, and on 16 Oct pushing it over a home
+# uplink held the ssh session open long enough that it timed out mid-transfer ("Read from remote
+# host ... Operation timed out"), which killed the deploy BEFORE the server code and the docker
+# rebuild — so a change to net/ never shipped and nothing said so except the rsync error.
+# --partial keeps what did transfer, so a retry resumes instead of starting over.
+if [ "${SKIP_ASSETS:-0}" = 1 ]; then
+  echo "SKIP_ASSETS=1: leaving $DEST/public/assets as it is"
+elif [ -n "$(ls -A "$ROOT/assets" 2>/dev/null)" ]; then
+  rsync -az --partial --timeout=180 "$ROOT/assets/" "$HOST:$DEST/public/assets/"
 else
   echo "assets/ is empty on this machine: leaving the server's assets untouched (code-only deploy)"
 fi
@@ -53,7 +60,9 @@ if [ "${1:-}" = "--code" ]; then
   mkdir -p "$NET/econ-src" && cp "$ROOT/src/89_econ.js" "$NET/econ-src/89_econ.js"
   ssh "$HOST" "mkdir -p $DEST/econ-src"
   rsync -az "$NET/econ-src/89_econ.js" "$HOST:$DEST/econ-src/89_econ.js"
-  rsync -az "$NET/package.json" "$NET/package-lock.json" "$NET/server.js" "$NET/Dockerfile" "$NET/compose.yml" "$NET/.dockerignore" "$HOST:$DEST/"
+  # pay.json rides along: the checkout is refused with "not taking payments yet" without it, which
+  # is a silent failure rather than a loud one, so it must never be left behind by a deploy.
+  rsync -az "$NET/package.json" "$NET/package-lock.json" "$NET/server.js" "$NET/pay.json" "$NET/Dockerfile" "$NET/compose.yml" "$NET/.dockerignore" "$HOST:$DEST/"
   rsync -az --delete "$NET/lib/" "$HOST:$DEST/lib/"
   # tools/ carries daily-survey.js, which the nightly report runs inside the container
   rsync -az --delete "$NET/tools/" "$HOST:$DEST/tools/"

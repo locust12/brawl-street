@@ -568,9 +568,8 @@
   }
 
   // ================= local-only mouse aim + crosshair =================
-  const GN_DIRS = [[1, 0], [1, -1], [0, -1], [-1, -1], [-1, 0], [-1, 1], [0, 1], [1, 1]];   // sim space: y down
   const MOUSE_IDLE = 1100;   // ms of stillness after which the pointer stops owning the aim
-  const gnMouse = { x: -1, y: -1, moved: 0, over: false, down: false, el: null, match: null };
+  const gnMouse = { x: -1, y: -1, moved: 0, over: false, down: false, match: null };
   function gnP1() {
     if (!Game.fighters) return null;
     for (const f of Game.fighters) if (f.ctrl === 'kb1' && !f.cpu) return f;
@@ -595,23 +594,28 @@
     // has the fighter back within MOUSE_IDLE.
     const fresh = gnMouse.moved && (performance.now() - gnMouse.moved) < MOUSE_IDLE;
     const f = gnP1(), ok = gnMouseOk() && f && f.state !== 'dead' && f.item && gnIsGun(f.item.kind) && fresh && gnMouse.over;
-    if (!ok) { GUNS.mouse.on = false; if (gnMouse.el) gnMouse.el.style.display = 'none'; document.body.classList.remove('gn-aim'); return; }
-    // aim from the gun shoulder to the pointer, snapped to the nearest of the 8 ways
+    if (!ok) { GUNS.mouse.on = false; return; }
+    // FREE AIM, Madness-style: point the gun wherever the pointer is, not at one of 8 ways.
+    //
+    // Duane, 2026-10-14: *"you can literally like aim anywhere on the screen and shoot ... not just
+    // left or down or diagnal but really like madness"*. The 8-way snap below was the whole reason it
+    // felt stiff: every shot was forced onto a 45 degree spoke.
+    //
+    // The angle is quantised to AIM_STEPS (128) positions, 2.8 degrees apart, and the unit vector is
+    // read out of the precomputed table in 10_core.js rather than computed from the float here. That
+    // is not caution for its own sake: it is one byte if this ever goes on the wire for online play,
+    // it is identical on every machine, and it keeps mouse and pad on the same footing instead of
+    // handing a mouse player angles a stick cannot reach. At 2.8 degrees nobody can feel the steps.
     const s = V3.project(f.x, f.y - f.h * 0.6), dx = gnMouse.x - s.x, dy = gnMouse.y - s.y;
     if (dx * dx + dy * dy > 64) {
-      const a = Math.atan2(-dy, dx), i = ((Math.round(a / (Math.PI / 4)) % 8) + 8) % 8, D = GN_DIRS[i];
-      GUNS.mouse.dx = D[0]; GUNS.mouse.dy = D[1];
+      const st = aimStep(dx, -dy);              // screen y grows down; the step table is math-convention
+      GUNS.mouse.dx = AIM_COS[st]; GUNS.mouse.dy = -AIM_SIN[st];   // back to sim space, y down
     }
     GUNS.mouse.on = true;
-    if (!gnMouse.el) {
-      const el = gnMouse.el = document.createElement('div');
-      el.style.cssText = 'position:fixed;left:0;top:0;width:34px;height:34px;margin:-17px 0 0 -17px;pointer-events:none;z-index:8;';
-      el.innerHTML = '<svg viewBox="0 0 34 34" width="34" height="34"><circle cx="17" cy="17" r="10" fill="none" stroke="#fff" stroke-width="2" opacity=".9"/><circle cx="17" cy="17" r="10" fill="none" stroke="#000" stroke-width="4" opacity=".25"/><path d="M17 1v8M17 25v8M1 17h8M25 17h8" stroke="#ffd45c" stroke-width="2.4" stroke-linecap="round"/><circle cx="17" cy="17" r="1.8" fill="#ff4a4a"/></svg>';
-      document.body.appendChild(el);
-      const st = document.createElement('style'); st.textContent = 'body.gn-aim canvas{cursor:none}'; document.head.appendChild(st);
-    }
-    gnMouse.el.style.display = 'block'; gnMouse.el.style.transform = `translate(${gnMouse.x}px,${gnMouse.y}px)`;
-    document.body.classList.add('gn-aim');
+    // No reticle. Duane, 2026-10-14: *"without the literal aiming circle"*. Madness does not draw one
+    // either; the gun itself points where you are pointing and that is the feedback. The system
+    // cursor stays visible (the old code hid it with `body.gn-aim canvas{cursor:none}`), because with
+    // the crosshair gone, hiding the cursor too would leave nothing on screen to aim with.
   }
   const gnKey = k => { try { return KEYMAPS.kb1[k][0]; } catch (e) { return k === 'attack' ? 'KeyF' : 'KeyE'; } };
   const gnGameTarget = e => e.target && e.target.tagName === 'CANVAS';

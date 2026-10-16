@@ -31,46 +31,134 @@ Object.assign(ITEM_DEFS, {
 
   // ================= THE ARSENAL: every kind below is weight 0 and can NEVER spawn =================
   // $15 tier — cheap, high personality, low power
-  peel:    { name: 'Banana Peel', r: 15, weight: 0, set: 3, icon: '🍌', use: (f, it) => Items3.place(f, it, { peel: 3, life: 780 }), tick: (it, G) => Items3.peelTick(it, G) },
-  prod:    { name: 'Prod', r: 16, weight: 0, set: 3, ammo: 3, cool: 20, icon: '👉', use: (f, it) => Items3.swing(f, it, 'prod') },
-  girder:  { name: 'Girder', r: 22, weight: 0, set: 3, ammo: 2, cool: 40, icon: '🏗️', use: (f, it) => Items3.girder(f, it) },
-  bouncer: { name: 'Spring Bumper', r: 20, weight: 0, set: 3, icon: '🛸', use: (f, it) => Items3.place(f, it, { life: 900 }), tick: (it, G) => Items3.bouncerTick(it, G) },
+  // ================= THE SHELF, REBUILT 15 OCT =================
+  // Duane: *"its just a copy of worms, thats not what i told you to do ... remove banana peel as a
+  // weapon and other direct idiotic copies of worms, the sheep has to go too and the statue"*.
+  // He was right and the code said it out loud: there was a bundle whose id was literally `bnd_worms`.
+  //
+  // Eleven items are gone: Banana Peel, Prod, Cluster Bomb, Sheep, Homing Missile, Mole Bomb,
+  // Airstrike, Concrete Donkey, Armageddon, Banana Bomb, Holy Hand Grenade. Every one of them is a
+  // Worms weapon, and Worms is turn-based artillery, not a platform fighter.
+  //
+  // What replaced them, checked against the genre rather than invented:
+  //   * BRAWLHALLA is nothing but melee archetypes -- Spear, Axe, Scythe, Cannon, Battle Boots,
+  //     Chakram -- so five of the replacements are those, built on the same `sword:` buff the
+  //     Greatsword already uses. No new systems.
+  //   * SMASH supplies the item classes: a thrown explosive (Bob-omb), a proximity trap
+  //     (Motion-Sensor Bomb), a burying trap (Pitfall).
+  //   * Rivals of Aether II and MultiVersus were checked too and have NO pickup arsenal at all --
+  //     they are pure moveset fighters -- so there was nothing there to copy.
+  // Then every one was renamed into Brawl Street's own world: a street fight, not a fantasy tourney.
+  // Rebar, not Spear. Fire Axe, not Axe. Manhole, not Pitfall. Wrecking Ball, not a concrete donkey.
+
+  gloves:  { name: 'Boxing Gloves', r: 24, weight: 0, set: 3, icon: '\u{1F94A}',
+             sword: { reach: 12, dmg: 2.05, kb: 1.72, slow: 3, color: '#ff5a3c' },
+             feelSword: { reach: 10, dmg: 1.5, kb: 1.3, slow: 3, color: '#ff5a3c', hits: 10 } },
+  bat:     { name: 'Slugger', r: 28, weight: 0, set: 3, icon: '\u{1F3CF}',
+             // `hits` is the DEFAULT-path durability (41_combat), not the Game.feel one. Without it
+             // the card's "Four swings, then it is gone" was never enforced and the bat lasted the
+             // whole stock, which made the $14.99 finisher worse value than the $3.99 Fire Axe.
+             sword: { reach: 50, dmg: 3.15, kb: 3.4, slow: 13, hits: 4, color: '#e8d6a8' },
+             feelSword: { reach: 44, dmg: 2.1, kb: 2.3, slow: 13, color: '#e8d6a8', hits: 4 } },
+
+  // RECOVERY. Every fighter in the genre has one and we had none on the shelf at all: Smash has the
+  // Maxim Tomato and the Heart Container, Brawlhalla has none because it has no damage to heal.
+  // `instant` + `pick` is the same path the HODL Heart uses (55_items.js).
+  medkit:  { name: 'Med Kit', r: 18, weight: 0, set: 3, instant: true, icon: '\u{1FA79}',
+             pick: (f) => { const heal = Math.min(f.dmg, 45); if (heal <= 0) return false; f.dmg -= heal;
+               Game.text(f.x, f.y - f.h - 20, '-' + Math.round(heal) + '%', '#6dff8c', 1.1);
+               for (let i = 0; i < 16; i++) Game.parts.push({ x: f.x + rand(-18, 18), y: f.y - rand(0, f.h), vx: rand(-1, 1), vy: rand(-3, -1), life: 34, max: 34, color: '#6dff8c', size: rand(4, 8), g: 0 });
+               return true; } },
+
+  // BOXING GLOVES, Duane 2026-10-14: *"big boxing gloves? so ppl can super punch with it"*.
+  // No `use` and no ammo: like the swords in set 1, these buff every normal while they are held
+  // (40_fighter startMove -> swordify). Barely any extra reach, because a fist is not a blade -- what
+  // they buy is the hardest hit in the game and knockback that actually launches people, which is the
+  // whole point of the thing. `slow` keeps them off being strictly better than everything.
   zip:     { name: 'Zip Hook', r: 18, weight: 0, set: 3, ammo: 3, cool: 30, icon: '🪝', use: (f, it) => Items3.zip(f, it) },
 
   // $20–50 tier — the shadowed shelf
-  boots:   { name: 'Rocket Boots', r: 20, weight: 0, set: 3, delay: 1200, ammo: 2, cool: 60, icon: '🥾', use: (f, it) => Items3.boots(f, it) },
-  cluster: { name: 'Cluster Bomb', r: 18, weight: 0, set: 3, delay: 1200, throwable: true, lob: true, shootable: true, fuse: 84, icon: '🎇',
-             boom: { r: 92, dmg: 11, bkb: 52, kbg: 80 }, after: it => Items3.cluster(it) },
-  clustlet: { name: 'Cluster', r: 11, weight: 0, set: 3, shootable: true, impact: true, icon: '🎇', boom: { r: 72, dmg: 7, bkb: 44, kbg: 64 } },
-  sheep:   { name: 'Sheep', r: 20, weight: 0, set: 3, delay: 1200, icon: '🐑', use: (f, it) => Items3.place(f, it, { walk: 1, life: 320 }),
-             tick: (it, G, st) => Items3.sheepTick(it, G, st), hittable: (it, a) => Items2.setOff(it, a), shootable: true,
-             boom: { r: 128, dmg: 22, bkb: 78, kbg: 98 } },
-  flamer:  { name: 'Flame Thrower', r: 22, weight: 0, set: 3, delay: 1200, ammo: 2, cool: 80, icon: '🔥', use: (f, it) => Items3.gun(f, it, I3_FLAME) },
-  homer:   { name: 'Homing Missile', r: 22, weight: 0, set: 3, delay: 1200, ammo: 2, cool: 70, icon: '🚀', use: (f, it) => Items3.homer(f, it) },
-  drill:   { name: 'Mole Bomb', r: 18, weight: 0, set: 3, delay: 1200, throwable: true, icon: '🐹', boom: { r: 118, dmg: 20, bkb: 74, kbg: 96 }, tick: (it, G, st) => Items3.drillTick(it, G, st) },
-  aegis:   { name: 'Aegis Drone', r: 18, weight: 0, set: 3, delay: 2400, instant: true, icon: '🛰️', pick: f => Items3.giveAegis(f) },
-  freeze:  { name: 'Freeze Ray', r: 22, weight: 0, set: 3, delay: 2400, ammo: 2, cool: 75, icon: '❄️', use: (f, it) => Items3.gun(f, it, I3_FREEZE) },
+  boots:   { name: 'Nitro Boots', r: 20, weight: 0, set: 3, delay: 1200, ammo: 2, cool: 60, icon: '🥾', use: (f, it) => Items3.boots(f, it) },
+  thunder: { name: 'Thunderbolt', r: 24, weight: 0, set: 3, delay: 2400, ammo: 2, cool: 86, icon: '\u{26A1}', use: (f, it) => Items3.gun(f, it, I3_BOLT) },
+  flamer:  { name: 'Flamethrower', r: 22, weight: 0, set: 3, delay: 1200, ammo: 2, cool: 80, icon: '🔥', use: (f, it) => Items3.gun(f, it, I3_FLAME) },
+  aegis:   { name: 'Riot Drone', r: 18, weight: 0, set: 3, delay: 2400, instant: true, icon: '🛰️', pick: f => Items3.giveAegis(f) },
+  freeze:  { name: 'Taser', r: 22, weight: 0, set: 3, delay: 2400, ammo: 2, cool: 75, icon: '❄️', use: (f, it) => Items3.gun(f, it, I3_FREEZE) },
   turret:  { name: 'Sentry Turret', r: 22, weight: 0, set: 3, delay: 2400, icon: '🔫', use: (f, it) => Items3.place(f, it, { life: 460, hp: 26 }),
              tick: (it, G, st) => Items3.turretTick(it, G, st), hittable: (it, a, h) => Items3.hurt(it, a, h) },
-  well:    { name: 'Gravity Well', r: 20, weight: 0, set: 3, delay: 2400, icon: '🕳️', use: (f, it) => Items3.place(f, it, { pull: 1, life: 200 }),
-             tick: (it, G) => Items3.wellTick(it, G), boom: { r: 150, dmg: 18, bkb: 96, kbg: 104 } },
-  strike:  { name: 'Airstrike', r: 20, weight: 0, set: 3, delay: 2400, icon: '✈️', use: (f, it) => Items3.aimStart(f, it, 'strike') },
-  donkey:  { name: 'Concrete Donkey', r: 22, weight: 0, set: 3, delay: 2400, icon: '🫏', use: (f, it) => Items3.aimStart(f, it, 'donkey') },
+  well:    { name: 'Vortex Grenade', r: 20, weight: 0, set: 3, delay: 2400, icon: '🕳️', use: (f, it) => Items3.place(f, it, { pull: 1, life: 200 }),
+             // $9.99. It drags everything in and THEN goes off, so the burst has to pay for the
+             // setup: 18 damage was less than a free Grenade. Biggest radius on the shelf.
+             tick: (it, G) => Items3.wellTick(it, G), boom: { r: 196, dmg: 32, bkb: 118, kbg: 122 } },
 
-  // $100 tier — the finishers. `banana` and `holy` keep their kinds and their code; all that changes
-  // is `weight: 0`, which takes them out of the random pool (Duane: "dont make that available randomly").
-  armageddon: { name: 'Armageddon', r: 24, weight: 0, set: 3, delay: 5400, icon: '☄️', use: (f, it) => Items3.armageddon(f, it) },
+  // ---- melee: the five Brawlhalla archetypes, as street objects ----
+  fireaxe: { name: 'Fire Axe', r: 26, weight: 0, set: 3, icon: '\u{1FA93}',
+             sword: { reach: 42, dmg: 2.1, kb: 1.9, slow: 8, hits: 6, color: '#d4341f' },
+             feelSword: { reach: 38, dmg: 1.5, kb: 1.3, slow: 8, color: '#d4341f', hits: 6 } },
+  pipegun: { name: 'Pipe Cannon', r: 28, weight: 0, set: 3, delay: 2400, icon: '\u{1F6E2}\uFE0F',
+             sword: { reach: 52, dmg: 2.75, kb: 2.95, slow: 11, hits: 5, color: '#e0922e' },
+             feelSword: { reach: 46, dmg: 1.7, kb: 1.5, slow: 11, color: '#e0922e', hits: 5 } },
+
+  // ---- thrown and placed: Smash's item classes, as street hardware ----
+  pipebomb:{ name: 'Pipe Bomb', r: 18, weight: 0, set: 3, delay: 1200, throwable: true, lob: true,
+             shootable: true, fuse: 90, icon: '\u{1F4A3}',
+             // $3.99. WAS 104/15/62, which is under the free Grenade (100/16/62) and barely half a
+             // free Dynamite (165/30/90). You cannot sell a weapon that loses to the one lying on
+             // the floor. On par with TNT now, which is what a pipe bomb should be.
+             boom: { r: 152, dmg: 26, bkb: 84, kbg: 102 } },
+  mine:    { name: 'Detonator', r: 16, weight: 0, set: 3, delay: 1200, ammo: 2, cool: 24, icon: '\u{1F4E1}',
+             use: (f, it) => Items3.detonator(f, it), shootable: true,
+             // $3.99, TWO charges and you pick the moment, so slightly under the Pipe Bomb each but
+             // far more total damage in a round. Was 118/20/74: under free TNT.
+             boom: { r: 148, dmg: 25, bkb: 84, kbg: 100 } },
+  manhole: { name: 'Bear Trap', r: 20, weight: 0, set: 3, delay: 2400, icon: '\u{1F573}\uFE0F',
+             use: (f, it) => Items3.place(f, it, { life: 900, arm: 24 }),
+             tick: (it, G, st) => Items3.manholeTick(it, G, st) },
+
+  // ---- the finisher. Reuses the mark-a-lane machinery, with a demolition ball on the end of it. ----
+  wreck:   { name: 'Wrecking Ball', r: 26, weight: 0, set: 3, delay: 5400, icon: '\u{1F3D7}\uFE0F',
+             use: (f, it) => Items3.aimStart(f, it, 'wreck') },
+
+  // ================= FOUR NEW WEAPONS, 2026-10-16 =================
+  // Duane: "add more weapons". Picked for the HOLES in the shelf rather than for being more of what
+  // is already there, which is the mistake the Worms copies were ([[weapon-catalogue-design]]):
+  //   * there was no cheap LONG-REACH melee at all. Every cheap melee was a short heavy swing.
+  //   * there was no weapon with reach as its whole identity (Brawlhalla's Scythe slot).
+  //   * every automatic was a bullet hose; nothing chipped through a shield.
+  //   * nothing you throw came BACK, so there was no reason to ever miss on purpose.
+  // Each one is built out of machinery that already works -- a sword def, a gun def, a throwable --
+  // so none of this is new fight code, which is why it can ship without a balance season.
+
+  // REBAR: Brawlhalla's Spear. The cheapest thing on the shelf and the longest reach under $4,
+  // because a length of bar off a building site is exactly that. Fast, thin, almost no knockback.
+  rebar:   { name: 'Rebar', r: 24, weight: 0, set: 3, icon: '\u{1F9EF}',
+             sword: { reach: 62, dmg: 1.55, kb: 1.15, slow: 4, hits: 8, color: '#9a6a3a' },
+             feelSword: { reach: 56, dmg: 1.2, kb: 1.0, slow: 4, color: '#9a6a3a', hits: 8 } },
+
+  // CHAIN WHIP: Brawlhalla's Scythe. The longest reach in the game, full stop, and it pays for it
+  // with the slowest swing on the melee shelf and knockback that sends rather than kills.
+  chain:   { name: 'Chain Whip', r: 26, weight: 0, set: 3, delay: 1200, icon: '\u{26D3}\uFE0F',
+             sword: { reach: 86, dmg: 1.95, kb: 2.3, slow: 16, hits: 5, color: '#8d97a6' },
+             feelSword: { reach: 78, dmg: 1.5, kb: 1.9, slow: 16, color: '#8d97a6', hits: 5 } },
+
+  // NAIL GUN: the chip weapon. Nothing else on the shelf eats a shield, and a tool that fires
+  // fasteners is the one thing that obviously should.
+  nailgun: { name: 'Nail Gun', r: 20, weight: 0, set: 3, delay: 1200, ammo: 2, cool: 60, icon: '\u{1FA9B}',
+             use: (f, it) => Items3.gun(f, it, { total: 64, clip: 'punch', gunAnim: true, fx: 'burst', sfx: 'none',
+               tick(f2, t) { Items3.nailTick(f2, t); } }) },
+
+  // BUZZSAW: Brawlhalla's Chakram. It comes BACK, which is the only reason on this shelf to throw
+  // something past them on purpose: it hits on the way out and again on the way home.
+  buzzsaw: { name: 'Buzzsaw', r: 20, weight: 0, set: 3, delay: 1200, ammo: 2, cool: 48, icon: '\u{1FA9A}',
+             use: (f, it) => Items3.buzz(f, it) },
 });
-ITEM_DEFS.banana.weight = 0;   // Banana Bomb: store only ($50)
-ITEM_DEFS.holy.weight = 0;     // Holy Grenade: store only ($100)
-// WEAPON DELAY, straight out of Worms. A `.wsc` scheme file is 4 bytes per weapon — ammo, power,
+// WEAPON DELAY: a weapon is locked for the first N frames of a round, priced against how much it
+// swings a fight. The Wrecking Ball cannot appear in the opening exchange; Rebar can.
+
 // DELAY and crate chance — and the delay (a turn-count lock before a weapon becomes available) is
 // priced against power: Mole Bomb 0 turns, Sheep 1, Homing Pigeon 2, HOLY HAND GRENADE 4, Super
 // Sheep 7. It is the reason a Holy Hand Grenade can be absurd without being broken. Ours is a
 // wall-clock lock in frames, on the same curve: cheap tools from the first second, the $20-35 shelf
 // at 20 s, the $40-50 shelf at 40 s, and the two $100 finishers at 90 s.
-ITEM_DEFS.banana.delay = 2400;
-ITEM_DEFS.holy.delay = 5400;
 
 // ---- PRACTICE: every market weapon free, and back in the random drops (9/22) ----
 // Duane: "bring back the banana grenades and the holy grenades, make them free. just add all the
@@ -80,9 +168,18 @@ ITEM_DEFS.holy.delay = 5400;
 // unlocked. Set 2 is the pool unseeded matches draw from; the seeded bet arena draws set 1 only, so
 // it never sees any of these and its replays are unchanged. Flip PRACTICE_FREE to false to go back
 // to the paid shop exactly as it was.
-const PRACTICE_FREE = true;
-const PRACTICE_WEAPONS = ['banana', 'holy', 'peel', 'prod', 'girder', 'bouncer', 'zip', 'boots', 'cluster', 'sheep',
-  'flamer', 'homer', 'drill', 'aegis', 'freeze', 'turret', 'well', 'strike', 'donkey', 'armageddon'];
+// OFF 2026-10-16, on Duane's word, the day the crypto checkout went in (docs/PAYMENTS.md): the shop
+// cannot sell a weapon it is also giving away, and `Econ.owns()` was answering "you already own it"
+// for all 22. Turning it off does TWO things, which is worth knowing before turning it back on:
+//   1. the shop sells them again (this is the point), and
+//   2. they stop dropping from supply crates in ordinary matches, because the block below is what
+//      put them in set 2 at weight 2 with no warm-up lock.
+// A bought weapon reaches a fight through the ARSENAL (three slots, casual and party only), which
+// is the economy as designed; the seeded bet arena never saw any of this either way.
+const PRACTICE_FREE = false;
+const PRACTICE_WEAPONS = ['zip', 'boots', 'flamer', 'aegis', 'freeze', 'turret', 'well',
+  'gloves', 'bat', 'medkit', 'thunder', 'bolt', 'blaster', 'bow', 'sweeper',
+  'fireaxe', 'pipegun', 'pipebomb', 'mine', 'manhole', 'wreck', 'deagle'];   // the gloves are a shop weapon like the rest, so practice hands them out too
 if (PRACTICE_FREE) for (const k of PRACTICE_WEAPONS) {
   const d = ITEM_DEFS[k]; if (!d) continue;
   d.weight = 2; d.set = 2; d.delay = 0;
@@ -94,6 +191,9 @@ const I3_PAN = { total: 34, clip: 'punch', reflect: [4, 16], weapon: '#c8ccd4', 
 const I3_PROD = { total: 22, clip: 'punch', sfx: 'none',
   hits: [H(4, 7, 40, -44, 20, 1, 6, 74, 4)] };            // 1% damage, enormous flat shove: a ring-out tool
 const I3_FLAME = { total: 78, clip: 'punch', gunAnim: true, fx: 'burst', sfx: 'none', tick(f, t) { Items3.flameTick(f, t); } };
+// QUAKE's Thunderbolt: a CONTINUOUS beam, not a projectile you lead. It holds you in place while it
+// fires and eats its charge fast, which is the trade the original made too.
+const I3_BOLT = { total: 84, clip: 'punch', gunAnim: true, fx: 'scope', sfx: 'none', tick(f, t) { Items3.boltTick(f, t); } };
 const I3_FREEZE = { total: 52, clip: 'punch', gunAnim: true, fx: 'scope', sfx: 'none', tick(f, t) { Items3.freezeTick(f, t); } };
 const I3_BOOTS = { total: 46, clip: 'punch', sfx: 'none', tick(f, t) { Items3.bootsTick(f, t); },
   hits: [H(8, 34, 26, -44, 30, 6, 40, 46, 70, { radial: true, rehit: 12 })] };
@@ -101,12 +201,12 @@ const I3_AIM = { total: 210, clip: 'idle', sfx: 'none', tick(f, t) { Items3.aimT
 const I3_ZIP = { total: 26, clip: 'punch', sfx: 'none' };
 
 const Items3 = {
-  game: null, strikes: [], rain: null, drops: null, girders: [],
+  game: null, strikes: [], rain: null, drops: null,
 
   // ---------- match lifecycle (no edit to Game.start needed: we notice a new fighter array) ----------
   fresh(G) {
     this.game = G.fighters;
-    this.strikes = []; this.rain = null; this.girders = [];
+    this.strikes = []; this.rain = null;
     // scheduled loadout drops for online casual (see "how a bought weapon enters a fight" below)
     const L = G.arsenalOn && Array.isArray(G.loadouts) ? G.loadouts : null;
     // sorted by weapon delay, so the cheap tools arrive first and the finishers last — the same
@@ -161,7 +261,6 @@ const Items3 = {
       if (f.aegis > 0) this.aegisTick(f, G);
     }
     this.strikeTick(G, st);
-    this.girderTick(G);
     if (this.rain) this.rainTick(G, st);
     if (this.drops) this.dropTick(G);
   },
@@ -265,52 +364,8 @@ const Items3 = {
     G.shake(6); Sfx.tone(180, 1500, 0.22, 'sine', 0.16);
   },
 
-  // ---- girder: a solid beam you bolt into the air. No damage: it rewrites the stage ----
-  girder(f, it) {
-    if (it.cd > 0) return true;
-    const G = Game, st = G.stage, y = Math.round(f.y - (f.air ? 0 : 96)), x = f.x + f.face * 96;
-    if (y < st.blast.t + 120 || y > st.main.top - 30) { G.text(f.x, f.y - f.h - 24, 'NO ROOM', '#aaa', 0.9); return true; }
-    it.cd = 40; it.ammo--; if (it.ammo <= 0) f.dropAfter = 'girder';
-    const p = { x0: x - 78, x1: x + 78, y, soft: true, girder: true, born: G.frame, life: 1200 };
-    st.plats.push(p); (this.girders || (this.girders = [])).push(p);
-    G.text(x, y - 30, 'GIRDER', '#cfd4e8', 1.1); G.ring(x, y, '#cfd4e8', 90);
-    f.startMove({ total: 20, throwAnim: 'f' }); Sfx.tone(140, 90, 0.3, 'square', 0.14); Sfx.noise(0.12, 0.1, 700);
-    return true;
-  },
-  girderTick(G) {
-    if (!this.girders || !this.girders.length) return;
-    const st = G.stage, keep = [];
-    for (const p of this.girders) {
-      if (G.frame - p.born < p.life && st.plats.includes(p)) { keep.push(p); continue; }
-      const i = st.plats.indexOf(p); if (i >= 0) st.plats.splice(i, 1);
-      for (const f of G.fighters) if (f.plat === p) { f.plat = null; f.leaveGround(); }
-      G.puff(p.x0 + 78, p.y, 8, '#cfd4e8');
-    }
-    this.girders = keep;
-  },
 
   // ---- spring bumper: no damage, pure chaos. Owns the space in front of a ledge ----
-  bouncerTick(it, G) {
-    if (it.life != null && --it.life <= 0) { it.dead = true; G.burst(it.x, it.y, '#9fe8ff', 16); return true; }
-    it.vy = Math.min((it.vy || 0) + 0.5, 14);
-    const py = it.y; it.y += it.vy;
-    const s = MV2.surf(G.stage, it.x, py, it.x, it.y);
-    if (s) { it.y = s.y; it.vy = 0; }
-    if (it.y > G.stage.blast.b) { it.dead = true; return true; }
-    for (const f of G.fighters) {
-      if (f.state === 'dead' || f.state === 'respawn' || f.untouchable || f.bumpT > 0) continue;
-      const bdx = f.x - it.x, bdy = (f.y - f.h * 0.4) - it.y, bL = dhypot(bdx, bdy);
-      if (bL > 52 + f.w * 0.4) continue;
-      // Unit vector straight off the delta. Math.atan2/cos/sin are engine-dependent and this
-      // sets fighter velocity; dhypot is built on Math.sqrt, which IS exactly specified.
-      const bux = bL > 0 ? bdx / bL : 1, buy = bL > 0 ? bdy / bL : 0;   // atan2(0,0) -> (1, 0)
-      f.vx = bux * 13; f.vy = buy * 13 - 3;
-      f.air = true; f.plat = null; f.move = null; f.hitstun = 16; f.tumble = true; f.setState('hitstun'); f.bumpT = 24;
-      G.text(it.x, it.y - 34, 'BOING', '#9fe8ff', 1.3); G.ring(it.x, it.y, '#9fe8ff', 80);
-      G.shake(6); Sfx.tone(240, 1100, 0.14, 'sine', 0.16);
-    }
-    return true;
-  },
 
   // ---- zip hook: fire up-forward, get yanked to the anchor, jumps reset. Pure mobility ----
   zip(f, it) {
@@ -392,6 +447,53 @@ const Items3 = {
     MV2.spawn(f, { kind: 'flame', vx: V[0], vy: V[1], grav: -0.03, drag: 0.965, step: true, r: 15, rgrow: 0.65,
       dmg: 1.4, ang: 32, bkb: 18, kbg: 6, life: 18, rehit: 10, pierce: true, color: '#ff7a1a' }, f.w * 0.5 + 12, f.h * 0.6);
     if (t % 9 === 0) Sfx.noise(0.16, 0.09, 700);
+  },
+
+  // ---- NAIL GUN. The chip weapon, 2026-10-16. Fast, light, PIERCES, and it is the only thing on
+  // the shelf that eats a shield: 22 nails at 1.1 each is not a kill on its own, it is what you do
+  // to somebody who will not stop blocking. Short range, so it cannot do that from across the stage.
+  nailTick(f, t) {
+    if (f.air) f.vy = Math.min(f.vy, 1.5);
+    f.vx *= 0.93;
+    if (t < 6 || t > 58 || t % 3) return;
+    const V = TK.rot(f.move.aim, 21, rand(-1.1, 1.1) - (f.move.up || 0) * 3.4);
+    MV2.spawn(f, { kind: 'nail', vx: V[0], vy: V[1], grav: 0.02, step: true, r: 5,
+      dmg: 1.1, ang: 24, bkb: 7, kbg: 5, life: 26, pierce: true, shieldEat: 1.9, color: '#cfd6e4' }, f.w * 0.5 + 12, f.h * 0.6);
+    if (t % 6 === 0) Sfx.noise(0.07, 0.04, 2100);
+  },
+
+  // ---- BUZZSAW. Brawlhalla's Chakram: it goes out, it comes back, and it hits on both legs. The
+  // return is the whole weapon -- throwing it PAST someone is the correct play, which is true of
+  // nothing else on this shelf. `rehit` lets the same blade catch them twice in one throw.
+  buzz(f, it) {
+    // It had no cooldown and never spent a charge: a $6.99 weapon with two uses that in fact threw
+    // a saw every single frame you held Attack, for the whole stock. Same two lines every other
+    // arsenal weapon runs (zip, boots, gun), and `dropAfter` is what takes the empty one out of
+    // your hand once you are out of the move (56_items2).
+    if (it.cd > 0) return true;
+    it.cd = ITEM_DEFS.buzzsaw.cool || 48;
+    it.ammo--; if (it.ammo <= 0) f.dropAfter = 'buzzsaw';
+    const dir = f.face;
+    // `boomer` is read by MV2.projStep: fly out for `out` frames, then pull back to the thrower.
+    // NOT `home`, which is the homing-missile steer and chases an OPPONENT.
+    MV2.spawn(f, { kind: 'buzz', vx: dir * 13, vy: -1.2, grav: 0, step: true, spin: 0.9, r: 17,
+      dmg: 4.2, ang: 42, bkb: 26, kbg: 44, life: 110, rehit: 18, pierce: true, color: '#b8c2cf',
+      boomer: f, out: 34 }, f.w * 0.5 + 14, f.h * 0.55);
+    Sfx.noise(0.12, 0.07, 1400);
+    return true;
+  },
+
+  // ---- the Thunderbolt. A held beam: fast, straight, repeat-hitting, almost no knockback, so it
+  // melts someone standing still and does nothing at all to someone who keeps moving. ----
+  boltTick(f, t) {
+    if (f.air) f.vy = Math.min(f.vy, 1.2);
+    f.vx *= 0.86;
+    if (t < 10 || t > 74 || t % 2) return;
+    const V = TK.rot(f.move.aim, 34, -(f.move.up || 0) * 4.5);
+    MV2.spawn(f, { kind: 'arcbolt', vx: V[0], vy: V[1], grav: 0, drag: 1, step: true, r: 10,
+      dmg: 2.2, ang: 14, bkb: 6, kbg: 4, life: 9, rehit: 6, pierce: true, color: '#9fdcff' },
+      f.w * 0.5 + 14, f.h * 0.62);
+    if (t % 6 === 0) { Sfx.tone(2400, 1800, 0.07, 'sawtooth', 0.07); Sfx.noise(0.05, 0.05, 6000); }
   },
 
   // ---- freeze ray: the pure control tool. 1 second of doing nothing at all ----
@@ -541,12 +643,76 @@ const Items3 = {
   // with Attack, because the marker has to be identical on every page and on the server: a mouse
   // position is not in the input stream. On a mouse or a touchscreen, tapping the stage still works
   // (UI.aimTo -> Items3.aimPoint) in LOCAL matches only; online it is stick-only. See docs/ECONOMY.md.
+  // A proximity mine, which is Smash's Motion-Sensor Bomb. It arms after a beat (so you cannot stick
+  // one to someone's face) and then goes off when anyone but the owner walks into it.
+  // First press plants a charge, every press after that sets off everything you have planted.
+  // Two charges max, so it is a decision rather than a carpet.
+  detonator(f, it) {
+    if (it.cd > 0) return true;
+    it.cd = ITEM_DEFS.mine.cool || 24;
+    const G = Game;
+    // One charge out at a time, and the rule is dead simple so nobody has to learn a modifier:
+    // a charge on the floor means PRESS BLOWS IT. No charge means press plants one.
+    const mine = G.items.filter(x => x.kind === 'mine' && x.owner === f.idx);
+    if (mine.length) return this.blow(f, mine, it);
+    if (it.ammo <= 0) { Game.text(f.x, f.y - f.h - 24, 'OUT OF CHARGES', '#8d99a7', 0.95); return true; }
+    // plant one
+    it.ammo--;
+    G.items.push({ kind: 'mine', x: f.x + f.face * f.w * 0.3, y: f.y - 2, vx: 0, vy: f.air ? 2 : 0,
+      age: 0, armed: true, thrownBy: f, owner: f.idx, hp: 0, ammo: 0, face: f.face, arm: 22 });
+    f.startMove({ total: 14, throwAnim: 'f' });
+    G.text(f.x, f.y - f.h - 24, 'CHARGE SET \u2014 PRESS AGAIN', '#ff6a3d', 1.1);
+    G.ring(f.x, f.y - f.h * 0.4, '#ff6a3d', 40);
+    Sfx.tone(380, 240, 0.08, 'square', 0.07);
+    return true;
+  },
+  // the press that matters
+  blow(f, mine, it) {
+    const G = Game;
+    if (!mine.length) { G.text(f.x, f.y - f.h - 24, 'NOTHING SET', '#8d99a7', 0.95); return true; }
+    for (const m of mine) { m.fuse = 0; Items.explode(m); }
+    G.text(f.x, f.y - f.h - 30, 'DETONATE', '#ff3b2f', 1.5);
+    Game.shake(12); Sfx.tone(140, 60, 0.26, 'square', 0.2);
+    if (it && it.ammo <= 0) f.dropAfter = 'mine';
+    return true;
+  },
+  mineTick(it, G, st) {
+    if (it.arm > 0) { it.arm--; if (it.arm === 0) G.ring(it.x, it.y, '#ff4a4a', 26); return; }
+    // a planted charge no longer triggers on proximity: it waits for the remote
+    it.blink = (it.blink || 0) + 1;
+    return;
+    /* eslint-disable no-unreachable */
+    it.blink = (it.blink || 0) + 1;
+    for (const f of G.fighters) {
+      if (f.state === 'dead' || f.idx === it.owner) continue;
+      if (Math.abs(f.x - it.x) < 34 && Math.abs((f.y - f.h * 0.5) - it.y) < 44) { Items2.setOff(it, f); return; }
+    }
+    /* eslint-enable no-unreachable */
+  },
+
+  // A manhole, which is Smash's Pitfall: it does no damage, it takes the opponent out of the fight
+  // for a moment. Reuses `chill`, the freeze ray's hold, rather than inventing a second stun.
+  manholeTick(it, G, st) {
+    if (it.arm > 0) { it.arm--; return; }
+    for (const f of G.fighters) {
+      if (f.state === 'dead' || f.idx === it.owner) continue;
+      if (Math.abs(f.x - it.x) < 30 && Math.abs((f.y - f.h * 0.5) - it.y) < 46) {
+        Items3.chill(f);
+        f.vx *= 0.2; f.vy = 0;
+        G.text(f.x, f.y - f.h - 20, 'DOWN THE HOLE', '#9fe8ff', 1.1);
+        G.ring(it.x, it.y, '#5a6472', 44);
+        it.life = 0;
+        return;
+      }
+    }
+  },
+
   aimStart(f, it, kind) {
     const G = Game;
     f.aimKind = kind; f.aimX = clamp(f.x + f.face * 150, G.stage.main.x0, G.stage.main.x1); f.aimV = 0;
     f.item = null;
     f.startMove(I3_AIM);
-    G.text(f.x, f.y - f.h - 36, kind === 'donkey' ? 'PICK A LANE' : 'MARK THE TARGET', '#ff4a4a', 1.3);
+    G.text(f.x, f.y - f.h - 36, kind === 'wreck' ? 'PICK A LANE' : 'MARK THE TARGET', '#ff4a4a', 1.3);
     Sfx.tone(1200, 1200, 0.08, 'square', 0.08); Sfx.tone(1600, 1600, 0.08, 'square', 0.08, 0.12);
     return true;
   },
@@ -572,8 +738,8 @@ const Items3 = {
     const G = Game, kind = f.aimKind || 'strike', x = f.aimX;
     f.aimKind = null;
     f.move = null; f.setState(f.air ? 'air' : 'ground');
-    if (kind === 'donkey') {
-      this.strikes.push({ kind: 'donkey', x, t: 96, by: f, face: f.face });
+    if (kind === 'wreck') {
+      this.strikes.push({ kind: 'wreck', x, t: 96, by: f, face: f.face });
       G.text(x, G.stage.main.top - 180, 'INCOMING', '#c8ccd4', 1.6);
     } else {
       this.strikes.push({ kind: 'strike', x, t: 150, by: f, face: x >= f.x ? 1 : -1 });
@@ -592,7 +758,7 @@ const Items3 = {
         G.rings.push({ x: s.x, y: st.main.top - 4, r: 6, max: 90, color: s.t < 50 ? '#ff2a3a' : '#ff9a4a', life: 12, w: 5 });
         Sfx.tone(s.t < 50 ? 1500 : 900, s.t < 50 ? 1500 : 900, 0.05, 'square', 0.07);
       }
-      if (s.kind === 'donkey') {
+      if (s.kind === 'wreck') {
         if (s.t === 60) { G.text(s.x, st.blast.t + 200, 'CONCRETE DONKEY', '#c8ccd4', 1.6); Sfx.tone(120, 60, 1.1, 'sawtooth', 0.2); }
         if (s.t > 0) continue;
         G.items.push({ kind: 'blastx', x: s.x, y: st.main.top - 18, vx: 0, vy: 0, age: 0, thrownBy: s.by });
@@ -652,7 +818,7 @@ const Items3 = {
   // ---------- CPU: make the bots use what they are handed, so party matches read right ----------
   ai(f, tgt, o, press) {
     const k = f.item.kind, dx = tgt.x - f.x, adx = Math.abs(dx), toward = dx > 0 ? 'right' : 'left';
-    if (k === 'peel' || k === 'bouncer' || k === 'girder') { if (Rng.next() < 0.02) { press('attack'); return true; } return false; }
+    if (k === 'peel' || k === 'bouncer') { if (Rng.next() < 0.02) { press('attack'); return true; } return false; }
     if (k === 'turret' || k === 'well') { if (adx < 320 && Rng.next() < 0.03) { press('attack'); return true; } return false; }
     if (k === 'sheep' || k === 'drill' || k === 'dyna') { if (adx < 340 && Rng.next() < 0.035) { if ((dx > 0 ? 1 : -1) !== f.face) { o[toward] = true; return true; } press('attack'); return true; } return false; }
     if (k === 'cluster') { if (adx < 420 && Rng.next() < 0.05) { o[toward] = true; press('attack'); return true; } return false; }
@@ -680,7 +846,7 @@ const Items3 = {
 // The 3D layer (src/98_v3_econ.mjs) is a MODULE and this is a classic script, so `Items3` reaches it
 // through the global lexical environment — which a module can read by name but which is NOT a
 // property of `window`. 98 reached for `window.Items3`, got undefined, and silently drew no marker,
-// no jets, no missiles, no donkey, no girders and no Armageddon sky for the life of the file.
+// no jets, no missiles, no donkey and no Armageddon sky for the life of the file.
 // 98 now reads it by name; this line is the belt, and it matches how 89_econ.js exports `Econ`.
 if (typeof window !== 'undefined') window.Items3 = Items3;
 
