@@ -14,7 +14,7 @@
 //     CHAIN_RPC=http://127.0.0.1:18777 CHAIN_ID=42161 \
 //     ESCROW_ADDRESS=0x4f69E9698537Faf2DD0cd9365a5f5443D03Bd427 \
 //     ESCROW_TOKEN=0xaf88d065e77c8cC2239327C5EDb3A432268e5831 ESCROW_TOKEN_DECIMALS=6 \
-//     OPERATOR_KEY=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a \
+//     OPERATOR_KEY=<anvil dev account #2 key, printed by anvil on startup> \
 //     REAL_STAKES=1 SAME_IP_OK=1 FUND_PER_ACCT=1000 node server.js
 //   node test/wager_browser_duo.mjs http://127.0.0.1:18800/ ws://127.0.0.1:18800/ws /tmp/shots b 1
 //
