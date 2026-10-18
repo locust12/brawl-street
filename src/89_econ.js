@@ -200,6 +200,54 @@ const ECON_FIN_SRC = {
     ['Red Disc', 'custom', 'bodega', 'uncommon', '#d43b3b', 0.5],
     ['Scrap Wheel', 'patina', 'dock', 'common', '#7a4a2a', 0.7],
   ],
+  // 17 Oct: finishes for the ten new ones. Same shape as the shelf above -- name, finish, backdrop,
+  // rarity, colour, drop weight -- so the market, the trade-up and the locker all read them without
+  // a special case.
+  toaster: [
+    ['Kitchen Issue', 'patina', 'bodega', 'common', '#c9ced6', 1],
+    ['Burnt', 'custom', 'dock', 'common', '#6b5440', 0.8],
+    ['Chrome Pop', 'anod', 'night', 'rare', '#e6edf6', 0.45],
+  ],
+  riotshield: [
+    ['Precinct', 'patina', 'precinct', 'common', '#aeb6c2', 1],
+    ['Scuffed', 'patina', 'dock', 'common', '#8d97a6', 0.8],
+    ['Riot Line', 'custom', 'night', 'rare', '#2f6fd0', 0.45],
+  ],
+  cardoor: [
+    ['Wrecked Red', 'patina', 'dock', 'common', '#b4382c', 1],
+    ['Primer', 'patina', 'scaffold', 'common', '#8a8f98', 0.8],
+    ['Taxi', 'custom', 'bodega', 'uncommon', '#e2b015', 0.5],
+  ],
+  warhammer: [
+    ['Forge', 'patina', 'scaffold', 'common', '#8a6a3f', 1],
+    ['Pig Iron', 'patina', 'dock', 'common', '#6e737a', 0.8],
+    ['Gilded Head', 'anod', 'night', 'rare', '#d9a441', 0.4],
+  ],
+  chainsaw: [
+    ['Site Orange', 'patina', 'scaffold', 'common', '#d8771f', 1],
+    ['Oil Black', 'custom', 'dock', 'uncommon', '#3a3d42', 0.6],
+    ['Limiter Off', 'anod', 'night', 'rare', '#e04b1f', 0.4],
+  ],
+  katana: [
+    ['Folded', 'patina', 'night', 'common', '#d7dde6', 1],
+    ['Lacquer', 'custom', 'bodega', 'uncommon', '#1f2328', 0.6],
+    ['Gold Saya', 'anod', 'night', 'rare', '#d9a441', 0.38],
+  ],
+  nunchaku: [
+    ['Hardwood', 'patina', 'bodega', 'common', '#6b4a2a', 1],
+    ['Taped Grip', 'custom', 'scaffold', 'common', '#3f4349', 0.8],
+    ['Dragon Cord', 'anod', 'night', 'rare', '#c0392b', 0.42],
+  ],
+  machete: [
+    ['Field', 'patina', 'dock', 'common', '#9aa3ad', 1],
+    ['Blacked', 'custom', 'night', 'uncommon', '#2a2d33', 0.6],
+    ['Bone Grip', 'anod', 'bodega', 'rare', '#e3ddcb', 0.4],
+  ],
+  golfclub: [
+    ['Club House', 'patina', 'bodega', 'common', '#c8ccd2', 1],
+    ['Bent Shaft', 'patina', 'dock', 'common', '#8a8f98', 0.8],
+    ['Tour Chrome', 'anod', 'night', 'rare', '#eef3fa', 0.4],
+  ],
   aegis: [
     ['Riot Grey', 'gunsmith', 'precinct', 'common', '#6a7078', 0.8],
     ['Blue Light', 'anod', 'precinct', 'uncommon', '#2a7fd0', 0.85, 1],
@@ -343,6 +391,42 @@ const ECON_CATALOG = {
       blurb: 'A circular blade off a cut-off saw. It goes out, and it comes back.',
       how: 'Hits on the way out AND on the way home, so throwing it PAST somebody is the correct play. It returns to your hand on its own.',
       counter: 'The return path is a straight line to whoever threw it. Stand off that line and both legs miss.' },
+    { id: 'toaster', kind: 'toaster', name: 'Toaster', price: 199, tier: 10, unlock: null, charges: 10, icon: '\u{1F35E}',
+      blurb: 'Two slices, one setting. Off the counter and into the fight.',
+      how: 'Almost no reach, but it SENDS. Cheapest thing on the shelf and it still launches people off the edge.',
+      counter: 'Stay a step outside arm\u2019s length and it cannot touch you.' },
+    { id: 'riotshield', kind: 'riotshield', name: 'Riot Shield', price: 399, tier: 30, unlock: null, charges: 10, icon: '\u{1F6E1}\uFE0F',
+      blurb: 'Precinct issue. Absorbs four hits and bashes with the rest.',
+      how: 'Picking it up puts a guard on you that eats the next FOUR hits. The bash barely hurts, but it sends.',
+      counter: 'Four hits and the guard pops. Spend them on anything cheap, then fight them properly.' },
+    { id: 'cardoor', kind: 'cardoor', name: 'Car Door', price: 699, tier: 35, unlock: null, charges: 8, icon: '\u{1F6AA}',
+      blurb: 'Torn off a wreck, hinges and all.',
+      how: 'The heavy shield: eats SIX hits, and the swing launches. Slow enough that they will see it coming.',
+      counter: 'It swings like a door. Punish the recovery, do not trade with it.' },
+    { id: 'warhammer', kind: 'warhammer', name: 'War Hammer', price: 999, tier: 50, unlock: null, charges: 4, icon: '\u{1F528}',
+      blurb: 'The hardest single hit on the shelf.',
+      how: 'Four swings, enormous damage and knockback on every one. Miss and you are wide open.',
+      counter: 'The slowest swing in the game. Bait it, step in while it recovers.' },
+    { id: 'chainsaw', kind: 'chainsaw', name: 'Chainsaw', price: 699, tier: 45, unlock: null, charges: 7, icon: '\u{1FA9A}',
+      blurb: 'Starts on the second pull. Usually.',
+      how: 'Grinds rather than launches: big damage, almost no knockback, so they stay in it instead of flying somewhere safe.',
+      counter: 'Short reach. Anything with a handle outranges it.' },
+    { id: 'katana', kind: 'katana', name: 'Katana', price: 699, tier: 40, unlock: null, charges: 6, icon: '\u{1F5E1}\uFE0F',
+      blurb: 'Clean reach and a clean edge.',
+      how: 'Best damage per swing that is not a hammer, and fast with it. Six swings and it is done.',
+      counter: 'It breaks soonest of any blade. Make them spend the six.' },
+    { id: 'nunchaku', kind: 'nunchaku', name: 'Nunchaku', price: 399, tier: 20, unlock: null, charges: 12, icon: '\u{1F94B}',
+      blurb: 'Hardwood and cord. Faster than anything else here.',
+      how: 'Twelve tiny hits, the fastest swing on the shelf. It chips rather than launches.',
+      counter: 'No knockback at all. Walk through it and hit back harder.' },
+    { id: 'machete', kind: 'machete', name: 'Machete', price: 399, tier: 22, unlock: null, charges: 9, icon: '\u{1F52A}',
+      blurb: 'Honest steel. Does the job and keeps doing it.',
+      how: 'A shorter, tougher katana: less damage per swing, nine of them instead of six.',
+      counter: 'Mid reach and no launch. A longer weapon beats it for free.' },
+    { id: 'golfclub', kind: 'golfclub', name: 'Golf Club', price: 399, tier: 25, unlock: null, charges: 7, icon: '\u{26F3}',
+      blurb: 'Driver. Long shaft, lousy lie.',
+      how: 'A launcher, not a killer: middling damage, near-hammer knockback, and fast. Send them off the edge.',
+      counter: 'It barely hurts. Stay away from edges and it is an annoyance.' },
     { id: 'well', kind: 'well', name: 'Vortex Grenade', price: 999, tier: 50, unlock: null, charges: 1, icon: '🕳️',
       blurb: 'Throw it and the floor around it stops being a safe place to stand.',
       how: 'Pulls fighters AND projectiles toward it from 270 px, then bursts for 32%.',
@@ -1110,11 +1194,31 @@ const Econ = (() => {
 
     // ---------- purchases (STUBBED: no money moves until docs/SECURITY-REVIEW.md clears) ----------
     // The client never grants anything. It asks; the server answers; `setServer` is the only writer.
+    // THE SHOP SIGNS YOU IN BY ITSELF. Every entitlement lives on the server, so a purchase needs
+    // the socket -- but it used to be the PLAYER's job to go to Play online, connect, and come back
+    // to the store, and nothing on the card said so until after the click. It connects on demand
+    // now, quietly (Net.signIn never changes the screen), and the purchase carries straight on.
+    ensureOnline(fn, ms) {
+      if (api.connected()) return fn(true);
+      try { if (window.Net && Net.signIn) Net.signIn(); } catch (e) { /* no net module */ }
+      const t0 = Date.now(), lim = ms || 9000;
+      const tick = () => {
+        if (api.connected()) return fn(true);
+        if (Date.now() - t0 > lim) return fn(false);
+        setTimeout(tick, 250);
+      };
+      setTimeout(tick, 250);
+    },
     buy(id, cb) {
       const d = BYID[id];
       if (!d || d.price == null) return cb && cb({ ok: false, msg: 'Not for sale.' });
       if (api.owns(id)) return cb && cb({ ok: false, msg: 'You already own it.' });
-      if (!api.connected()) return cb && cb({ ok: false, msg: 'Connect to online play first — what you own lives on your account, not on this device.' });
+      if (!api.connected()) {
+        return api.ensureOnline(ok => {
+          if (!ok) return cb && cb({ ok: false, msg: 'Could not reach the game server. Try again in a moment.' });
+          api.buy(id, cb);
+        });
+      }
       api.pending = { id, cb, at: Date.now() };
       Net.send({ k: 'buy', id, provider: 'stub' });
       setTimeout(() => { if (api.pending && api.pending.id === id) { const c = api.pending.cb; api.pending = null; c && c({ ok: false, msg: 'The store did not answer. Try again.' }); } }, 8000);
@@ -1133,7 +1237,14 @@ const Econ = (() => {
     // nothing here can name a price: the page sends an item id and a currency, never an amount.
     payWait: {},
     payAsk(kind, body, back, cb, ms) {
-      if (!api.connected()) return cb && cb({ ok: false, msg: 'Connect to online play first — what you buy lives on your account, not on this device.' });
+      // same rule as buy(): bring the socket up rather than sending the player away mid-checkout,
+      // which with a quote already locked would be the worst possible moment to do it
+      if (!api.connected()) {
+        return api.ensureOnline(ok => {
+          if (!ok) return cb && cb({ ok: false, retry: true, msg: 'Could not reach the game server. Try again in a moment.' });
+          api.payAsk(kind, body, back, cb, ms);
+        });
+      }
       const old = api.payWait[back];
       if (old && old.cb) old.cb({ ok: false, msg: 'Cancelled.' });
       const w = { cb, at: Date.now() };
@@ -1146,6 +1257,10 @@ const Econ = (() => {
     payMenu(id, cb) { api.payAsk('paymenu', { id }, 'paymenu', cb); },
     payQuote(id, cur, payer, cb) { api.payAsk('payquote', { id, cur, payer }, 'payq', cb); },
     payClaim(ref, tx, cb) { api.payAsk('payclaim', { ref, tx }, 'payres', cb, 25000); },
+    // Everything this wallet has paid for that is missing from this account. A purchase is delivered
+    // to whichever account the device was on when it paid, so paying before signing in — or coming
+    // back on a fresh device token — used to strand a paid item on an account nobody could reach.
+    payRestore(addr, cb) { if (addr) api.payAsk('payrestore', { addr: String(addr) }, 'payrest', cb || (() => { }), 15000); },
     onPay(m) {
       const w = api.payWait[m.k]; api.payWait[m.k] = null;
       if (m.k === 'payres' && m.ok && m.owned) api.setServer(m.owned, m);
@@ -1536,7 +1651,7 @@ if (typeof Net !== 'undefined' && Net.on) Net.on(m => {
   if (m.k === 'welcome' || m.k === 'me') { Econ.pull(); return; }
   if (m.k === 'econ') { Econ.setServer(m.owned, m); return; }
   if (m.k === 'buyres') { Econ.onBuyResult(m); return; }
-  if (m.k === 'paymenu' || m.k === 'payq' || m.k === 'payres') { Econ.onPay(m); return; }
+  if (m.k === 'paymenu' || m.k === 'payq' || m.k === 'payres' || m.k === 'payrest') { Econ.onPay(m); return; }
   if (m.k === 'lkres') { Econ.onOpenResult(m); return; }
   if (m.k === 'wearres') { Econ.onWearResult(m); return; }
   if (m.k === 'reactres') { Econ.onReactions(m); return; }

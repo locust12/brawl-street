@@ -4,3 +4,6 @@ chain/cache/
 chain/broadcast/
 .DS_Store
 *.env
+
+# shared key that lets net/test/* mark its accounts as test against a live region
+net/.test-key

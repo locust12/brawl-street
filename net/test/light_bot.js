@@ -14,6 +14,25 @@
 // What it cannot do is check for desync, so it answers "does the box keep up", never "is the fight
 // correct". Run sim_clients.js (or load_test.js without --light) for the second question.
 const WebSocket = require('ws');
+const fs = require('fs');
+const path = require('path');
+// WHAT MARKS AN ACCOUNT AS A TEST ACCOUNT.
+//
+// `test: true` in hello is only honoured on a direct loopback connection or when the shared TEST_KEY
+// is presented (server.js mayMarkTest). Behind a proxy the flag is refused SILENTLY, so a bot run
+// against a live region leaves accounts that are indistinguishable from players and sit on the
+// leaderboard for good. That has happened repeatedly, because remembering to export TEST_KEY is a
+// thing a person has to know.
+//
+// So the key is found rather than required: the environment first, then net/.test-key (git-ignored,
+// mode 600, and in .dockerignore so it never reaches the image). Any harness that opens a socket
+// through these clients is therefore safe against a live region by default.
+function testKey() {
+  if (process.env.TEST_KEY) return process.env.TEST_KEY;
+  try { return fs.readFileSync(path.join(__dirname, '..', '.test-key'), 'utf8').trim() || undefined; }
+  catch (e) { return undefined; }
+}
+
 
 const MAX_DELAY = 15;
 
@@ -81,7 +100,7 @@ class LightBot {
         // bot run against a real region leaves PERMANENT accounts on the live leaderboard -- 220 of
         // them had piled up on Singapore -- instead of being hidden and pruned within the hour.
         this.raw({ k: 'hello', v: 1, token: this.token, name: this.name, build: this.build, test: true,
-          testKey: process.env.TEST_KEY || undefined });
+          testKey: testKey() });
         this.pinger = setInterval(() => this.raw({ k: 'ping', t: Date.now(), rtt: this.rtt || 0, jit: this.jitE || 0 }), 1000);
         res();
       });

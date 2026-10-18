@@ -5,3 +5,4 @@ public
 test
 *.md
 .env
+.test-key
