@@ -456,7 +456,7 @@ Object.assign(ITEM_DEFS, {
   revolver: { name: 'Revolver', r: 20, weight: 3, set: 2, ammo: GUNS.DEF.revolver.mag, icon: '🤠' },
   smg:      { name: 'SMG', r: 22, weight: 3, set: 2, ammo: GUNS.DEF.smg.mag, icon: '🔫' },
   ak:       { name: 'The Chopper', r: 24, weight: 2, set: 2, ammo: GUNS.DEF.ak.mag, icon: '🔫' },
-  blaster:  { name: 'Twin Nines', r: 22, weight: 0, set: 3, ammo: GUNS.DEF.blaster.mag, icon: '🔫' },
+  blaster:  { name: 'Twin Nines', r: 22, weight: 0, street: 0.9, set: 3, ammo: GUNS.DEF.blaster.mag, icon: '🔫' },
   bow:      { name: 'Speargun', r: 24, weight: 0, set: 3, ammo: GUNS.DEF.bow.mag, icon: '🏹' },
   sweeper:  { name: 'Street Sweeper', r: 26, weight: 0, set: 3, delay: 1200, ammo: GUNS.DEF.sweeper.mag, icon: '💥' },
   bolt:     { name: 'Captive Bolt', r: 24, weight: 0, set: 3, delay: 2400, ammo: GUNS.DEF.bolt.mag, icon: '🔩' },
@@ -464,6 +464,20 @@ Object.assign(ITEM_DEFS, {
   // warm-up shelf as the Wrecking Ball, not something you open with
   deagle:   { name: 'Desert Eagle', r: 22, weight: 0, set: 3, delay: 3600, ammo: GUNS.DEF.deagle.mag, icon: '\u{1F52B}' },
 });
+// THE PRACTICE SWEEP COULD NEVER REACH THE GUNS. 57_items3.js answers *"i want all of the items to
+// appear in the game when you play but make them rare"* by taking every `set: 3` kind down to
+// weight 0.4 / set 2 — but it builds that list with `Object.keys(ITEM_DEFS)` at its own load time,
+// and THIS file runs after it, so the six guns were defined too late to be in it. They kept
+// `weight: 0`, and `Items2.inSet` only ever draws a kind whose weight is above zero, so the guns
+// were the one part of the store that could not drop at any item set at all.
+//
+// Same treatment here, after they exist. The `delay` locks are kept rather than zeroed: a round
+// should not open with a Street Sweeper, and the Desert Eagle is a one-round finisher.
+for (const id of ['blaster', 'bow', 'sweeper', 'bolt', 'deagle']) {
+  const d = ITEM_DEFS[id];
+  if (d && d.set === 3) { d.weight = 0.4; d.set = 2; }
+}
+
 ITEM_DEFS.mgun.weight = 0;
 ITEM_DEFS.shotgun.weight = 3; ITEM_DEFS.shotgun.ammo = GUNS.DEF.shotgun.mag;
 ITEM_DEFS.sniper.weight = 2; ITEM_DEFS.sniper.ammo = GUNS.DEF.sniper.mag;

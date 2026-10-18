@@ -27,7 +27,9 @@ Object.assign(ITEM_DEFS, {
   dyna:  { name: 'Dynamite', r: 19, weight: 2.2, set: 2, shootable: true, icon: '🧨', fuse: 200,
            use: (f, it) => Items3.place(f, it, {}), hittable: (it, a) => Items2.setOff(it, a),
            boom: { r: 165, dmg: 30, bkb: 90, kbg: 105 } },
-  pan:   { name: 'Frying Pan', r: 20, weight: 1.8, set: 2, ammo: 3, cool: 26, icon: '🍳', use: (f, it) => Items3.swing(f, it, 'pan') },
+  // The FRYING PAN is gone, 17 Oct. Duane held it in a fight, could not tell what it was ("a stick
+  // and round on the end ... like a toilet plunger") and cut it. Both halves went: this free drop
+  // and the `skillet` the store sold, because they were the same object.
 
   // ================= THE ARSENAL: every kind below is weight 0 and can NEVER spawn =================
   // $15 tier — cheap, high personality, low power
@@ -51,7 +53,7 @@ Object.assign(ITEM_DEFS, {
   // Then every one was renamed into Brawl Street's own world: a street fight, not a fantasy tourney.
   // Rebar, not Spear. Fire Axe, not Axe. Manhole, not Pitfall. Wrecking Ball, not a concrete donkey.
 
-  gloves:  { name: 'Boxing Gloves', r: 24, weight: 0, set: 3, icon: '\u{1F94A}',
+  gloves:  { name: 'Boxing Gloves', r: 24, weight: 0, street: 1.2, set: 3, icon: '\u{1F94A}',
              sword: { reach: 12, dmg: 2.05, kb: 1.72, slow: 3, color: '#ff5a3c' },
              feelSword: { reach: 10, dmg: 1.5, kb: 1.3, slow: 3, color: '#ff5a3c', hits: 10 } },
   bat:     { name: 'Slugger', r: 28, weight: 0, set: 3, icon: '\u{1F3CF}',
@@ -91,7 +93,7 @@ Object.assign(ITEM_DEFS, {
              tick: (it, G) => Items3.wellTick(it, G), boom: { r: 196, dmg: 32, bkb: 118, kbg: 122 } },
 
   // ---- melee: the five Brawlhalla archetypes, as street objects ----
-  fireaxe: { name: 'Fire Axe', r: 26, weight: 0, set: 3, icon: '\u{1FA93}',
+  fireaxe: { name: 'Fire Axe', r: 26, weight: 0, street: 0.9, set: 3, icon: '\u{1FA93}',
              sword: { reach: 42, dmg: 2.1, kb: 1.9, slow: 8, hits: 6, color: '#d4341f' },
              feelSword: { reach: 38, dmg: 1.5, kb: 1.3, slow: 8, color: '#d4341f', hits: 6 } },
   pipegun: { name: 'Pipe Cannon', r: 28, weight: 0, set: 3, delay: 2400, icon: '\u{1F6E2}\uFE0F',
@@ -130,26 +132,82 @@ Object.assign(ITEM_DEFS, {
 
   // REBAR: Brawlhalla's Spear. The cheapest thing on the shelf and the longest reach under $4,
   // because a length of bar off a building site is exactly that. Fast, thin, almost no knockback.
-  rebar:   { name: 'Rebar', r: 24, weight: 0, set: 3, icon: '\u{1F9EF}',
+  rebar:   { name: 'Rebar', r: 24, weight: 0, street: 1.6, set: 3, icon: '\u{1F9EF}',
              sword: { reach: 62, dmg: 1.55, kb: 1.15, slow: 4, hits: 8, color: '#9a6a3a' },
              feelSword: { reach: 56, dmg: 1.2, kb: 1.0, slow: 4, color: '#9a6a3a', hits: 8 } },
 
   // CHAIN WHIP: Brawlhalla's Scythe. The longest reach in the game, full stop, and it pays for it
   // with the slowest swing on the melee shelf and knockback that sends rather than kills.
-  chain:   { name: 'Chain Whip', r: 26, weight: 0, set: 3, delay: 1200, icon: '\u{26D3}\uFE0F',
+  chain:   { name: 'Chain Whip', r: 26, weight: 0, street: 0.9, set: 3, delay: 1200, icon: '\u{26D3}\uFE0F',
              sword: { reach: 86, dmg: 1.95, kb: 2.3, slow: 16, hits: 5, color: '#8d97a6' },
              feelSword: { reach: 78, dmg: 1.5, kb: 1.9, slow: 16, color: '#8d97a6', hits: 5 } },
 
   // NAIL GUN: the chip weapon. Nothing else on the shelf eats a shield, and a tool that fires
   // fasteners is the one thing that obviously should.
-  nailgun: { name: 'Nail Gun', r: 20, weight: 0, set: 3, delay: 1200, ammo: 2, cool: 60, icon: '\u{1FA9B}',
+  nailgun: { name: 'Nail Gun', r: 20, weight: 0, street: 0.9, set: 3, delay: 1200, ammo: 2, cool: 60, icon: '\u{1FA9B}',
              use: (f, it) => Items3.gun(f, it, { total: 64, clip: 'punch', gunAnim: true, fx: 'burst', sfx: 'none',
                tick(f2, t) { Items3.nailTick(f2, t); } }) },
 
   // BUZZSAW: Brawlhalla's Chakram. It comes BACK, which is the only reason on this shelf to throw
   // something past them on purpose: it hits on the way out and again on the way home.
-  buzzsaw: { name: 'Buzzsaw', r: 20, weight: 0, set: 3, delay: 1200, ammo: 2, cool: 48, icon: '\u{1FA9A}',
+  buzzsaw: { name: 'Buzzsaw', r: 20, weight: 0, street: 0.55, set: 3, delay: 1200, ammo: 2, cool: 48, icon: '\u{1FA9A}',
              use: (f, it) => Items3.buzz(f, it) },
+
+  // ============ 17 Oct: the ten Duane picked off the shortlist ==================================
+  // Eight swing on the `sword` schema, which is pure data and so cannot desync. The two SHIELDS are
+  // the real gap he named: *"there are literally no shields in the weapons list"*, and he was right.
+  // `aegis` is a Riot DRONE, not a shield, so the shelf had nothing you hold in front of you. They
+  // grant `bubbleHits` on pickup, which is the absorb path 41_combat already checks on line 25 and
+  // 56_items2 already pops -- tested code, not a second shield system invented beside it.
+
+  // TOASTER: the cheapest thing on the shelf and the joke that still works. Dead Rising's rule for
+  // an appliance: almost no reach, but it SENDS, because the comedy is in the launch.
+  toaster: { name: 'Toaster', r: 22, weight: 0, street: 1.6, set: 3, icon: '\u{1F35E}',
+             sword: { reach: 22, dmg: 1.45, kb: 1.85, slow: 6, hits: 10, color: '#c9ced6' },
+             feelSword: { reach: 18, dmg: 1.1, kb: 1.5, slow: 6, color: '#c9ced6', hits: 10 } },
+
+  // RIOT SHIELD: the first real shield. Barely hurts, absorbs four, and the bash still sends.
+  riotshield: { name: 'Riot Shield', r: 26, weight: 0, set: 3, delay: 1200, icon: '\u{1F6E1}\uFE0F',
+             sword: { reach: 28, dmg: 1.1, kb: 2.4, slow: 9, hits: 10, color: '#aeb6c2' },
+             feelSword: { reach: 24, dmg: 0.9, kb: 2.0, slow: 9, color: '#aeb6c2', hits: 10 },
+             pick: f => Items3.giveGuard(f, 4, 900, 'SHIELD UP') },
+
+  // CAR DOOR: the heavy shield. Absorbs six, swings like a door, and the bash launches.
+  cardoor: { name: 'Car Door', r: 30, weight: 0, street: 0.55, set: 3, delay: 2400, icon: '\u{1F6AA}',
+             sword: { reach: 34, dmg: 1.35, kb: 2.9, slow: 14, hits: 8, color: '#b4382c' },
+             feelSword: { reach: 30, dmg: 1.05, kb: 2.4, slow: 14, color: '#b4382c', hits: 8 },
+             pick: f => Items3.giveGuard(f, 6, 1100, 'DOOR UP') },
+
+  // WAR HAMMER: Brawlhalla's Hammer. The hardest single hit on the shelf, and the slowest.
+  warhammer: { name: 'War Hammer', r: 28, weight: 0, street: 0.3, set: 3, delay: 2400, icon: '\u{1F528}',
+             sword: { reach: 40, dmg: 3.1, kb: 3.3, slow: 18, hits: 4, color: '#8a6a3f' },
+             feelSword: { reach: 36, dmg: 2.3, kb: 2.7, slow: 18, color: '#8a6a3f', hits: 4 } },
+
+  // CHAINSAW: Doom's and Dead Rising's. Short, fast, grinds -- damage without the launch, so it
+  // kills where it stands instead of sending them somewhere safer.
+  chainsaw: { name: 'Chainsaw', r: 26, weight: 0, street: 0.3, set: 3, delay: 2400, icon: '\u{1FA9A}',
+             sword: { reach: 34, dmg: 2.6, kb: 0.9, slow: 6, hits: 7, color: '#d8771f' },
+             feelSword: { reach: 30, dmg: 1.95, kb: 0.8, slow: 6, color: '#d8771f', hits: 7 } },
+
+  // KATANA: clean reach and the best damage-per-swing that is not a hammer. Breaks soonest.
+  katana:  { name: 'Katana', r: 26, weight: 0, street: 0.55, set: 3, delay: 1200, icon: '\u{1F5E1}\uFE0F',
+             sword: { reach: 54, dmg: 2.25, kb: 1.25, slow: 5, hits: 6, color: '#d7dde6' },
+             feelSword: { reach: 48, dmg: 1.7, kb: 1.05, slow: 5, color: '#d7dde6', hits: 6 } },
+
+  // NUNCHAKU: the fastest thing on the shelf. Tiny hits, twelve of them, no launch.
+  nunchaku: { name: 'Nunchaku', r: 22, weight: 0, street: 1.2, set: 3, icon: '\u{1F94B}',
+             sword: { reach: 30, dmg: 1.25, kb: 0.95, slow: 2, hits: 12, color: '#6b4a2a' },
+             feelSword: { reach: 26, dmg: 0.95, kb: 0.8, slow: 2, color: '#6b4a2a', hits: 12 } },
+
+  // MACHETE: a shorter, cheaper, tougher katana. The honest mid-shelf blade.
+  machete: { name: 'Machete', r: 24, weight: 0, street: 1.2, set: 3, icon: '\u{1F52A}',
+             sword: { reach: 44, dmg: 1.75, kb: 1.1, slow: 5, hits: 9, color: '#9aa3ad' },
+             feelSword: { reach: 38, dmg: 1.35, kb: 0.95, slow: 5, color: '#9aa3ad', hits: 9 } },
+
+  // GOLF CLUB: a launcher, not a killer. Middling damage, near-hammer knockback, fast swing.
+  golfclub: { name: 'Golf Club', r: 26, weight: 0, street: 1.2, set: 3, icon: '\u{26F3}',
+             sword: { reach: 50, dmg: 1.6, kb: 2.8, slow: 7, hits: 7, color: '#c8ccd2' },
+             feelSword: { reach: 44, dmg: 1.25, kb: 2.3, slow: 7, color: '#c8ccd2', hits: 7 } },
 });
 // WEAPON DELAY: a weapon is locked for the first N frames of a round, priced against how much it
 // swings a fight. The Wrecking Ball cannot appear in the opening exchange; Rebar can.
@@ -168,28 +226,41 @@ Object.assign(ITEM_DEFS, {
 // unlocked. Set 2 is the pool unseeded matches draw from; the seeded bet arena draws set 1 only, so
 // it never sees any of these and its replays are unchanged. Flip PRACTICE_FREE to false to go back
 // to the paid shop exactly as it was.
-// OFF 2026-10-16, on Duane's word, the day the crypto checkout went in (docs/PAYMENTS.md): the shop
-// cannot sell a weapon it is also giving away, and `Econ.owns()` was answering "you already own it"
-// for all 22. Turning it off does TWO things, which is worth knowing before turning it back on:
-//   1. the shop sells them again (this is the point), and
-//   2. they stop dropping from supply crates in ordinary matches, because the block below is what
-//      put them in set 2 at weight 2 with no warm-up lock.
-// A bought weapon reaches a fight through the ARSENAL (three slots, casual and party only), which
-// is the economy as designed; the seeded bet arena never saw any of this either way.
+// SPLIT INTO TWO SWITCHES 2026-10-16, on Duane's word, because the practice period was two
+// different decisions wearing one flag and the launch wants opposite answers to them:
+//
+//   PRACTICE_DROPS  the 22 market weapons still turn up in SUPPLY CRATES in ordinary matches, at
+//                   weight 2 in set 2 with no warm-up lock. Finding a Fire Axe on the floor and
+//                   using it for that match is how anybody learns what it is worth buying, and it
+//                   is the oldest rule in the genre: what the stage hands you is free.
+//   PRACTICE_FREE   whether you OWN them. Off: the shop sells them. On, `Econ.owns()` answered
+//                   "you already own it" for all 27 and nothing in the weapon shelf could sell.
+//
+// So: free to find, bought to BRING. A weapon you own rides into a fight in the ARSENAL (three
+// slots, casual and party only, never ranked or wagered). The seeded bet arena draws set 1 only, so
+// none of this has ever reached it or its replays.
+const PRACTICE_DROPS = true;
 const PRACTICE_FREE = false;
-const PRACTICE_WEAPONS = ['zip', 'boots', 'flamer', 'aegis', 'freeze', 'turret', 'well',
-  'gloves', 'bat', 'medkit', 'thunder', 'bolt', 'blaster', 'bow', 'sweeper',
-  'fireaxe', 'pipegun', 'pipebomb', 'mine', 'manhole', 'wreck', 'deagle'];   // the gloves are a shop weapon like the rest, so practice hands them out too
-if (PRACTICE_FREE) for (const k of PRACTICE_WEAPONS) {
+// DERIVED, NOT TYPED. This was a hand-written list of 22 ids, and a hand-written list is a list
+// somebody forgets to extend: the AK, the Chain Whip, the Rebar, the Nail Gun and the Buzzsaw had
+// all shipped to the shop without ever being added here, so five weapons you could BUY could never
+// turn up in a match. Reading the shelf itself means that cannot happen again -- every set-3 weapon
+// is in the drops the moment it exists.
+const PRACTICE_WEAPONS = Object.keys(ITEM_DEFS).filter(k => ITEM_DEFS[k].set === 3);
+
+// HOW RARE. Duane, 17 Oct: *"i want all of the items to appear in the game when you play but make
+// them rare"*. The second half was the real instruction, because they were not rare at all: at
+// weight 2 each, against a base pool of 19 items totalling 44.6, the shop weapons were taking about
+// HALF of every drop. At 0.4 they take roughly a fifth between them and any ONE of them is about
+// 0.7% of a crate, which is the "oh, a buzzsaw" moment rather than the every-other-crate one. The
+// rarest thing in the base pool is the bubble shield at 1.0, so this sits well under it by design.
+const PRACTICE_WEIGHT = 0.4;
+if (PRACTICE_DROPS) for (const k of PRACTICE_WEAPONS) {
   const d = ITEM_DEFS[k]; if (!d) continue;
-  d.weight = 2; d.set = 2; d.delay = 0;
+  d.weight = PRACTICE_WEIGHT; d.set = 2; d.delay = 0;
 }
 
 // ---- move defs. `sfx:'none'` keeps 40_fighter from playing a generic swing over our own sound.
-const I3_PAN = { total: 34, clip: 'punch', reflect: [4, 16], weapon: '#c8ccd4', sfx: 'none',
-  hits: [H(6, 11, 46, -46, 30, 14, 44, 58, 94, { radial: false })] };
-const I3_PROD = { total: 22, clip: 'punch', sfx: 'none',
-  hits: [H(4, 7, 40, -44, 20, 1, 6, 74, 4)] };            // 1% damage, enormous flat shove: a ring-out tool
 const I3_FLAME = { total: 78, clip: 'punch', gunAnim: true, fx: 'burst', sfx: 'none', tick(f, t) { Items3.flameTick(f, t); } };
 // QUAKE's Thunderbolt: a CONTINUOUS beam, not a projectile you lead. It holds you in place while it
 // fires and eats its charge fast, which is the trade the original made too.
@@ -199,6 +270,60 @@ const I3_BOOTS = { total: 46, clip: 'punch', sfx: 'none', tick(f, t) { Items3.bo
   hits: [H(8, 34, 26, -44, 30, 6, 40, 46, 70, { radial: true, rehit: 12 })] };
 const I3_AIM = { total: 210, clip: 'idle', sfx: 'none', tick(f, t) { Items3.aimTick(f, t); } };
 const I3_ZIP = { total: 26, clip: 'punch', sfx: 'none' };
+
+// ===================== THE MELEE SHELF =====================
+// 17 Oct. Twelve weapons were pickable, had art, had 3D models and had hold rigs, and pressing
+// attack with one in your hand did NOTHING: Fighter.useItem (55_items) runs `if (def.use)`, then
+// `if (def.throwable)`, then returns false, and none of these had either. They were props you
+// carried around. Duane: *"now make all the weapons playable"*.
+//
+// THE NUMBERS COME FROM THE STORE COPY, not from taste. Every one of these already ships a `how`
+// and a `counter` line in 89_econ.js that tells the player exactly what it does, and the 15 Oct
+// value audit was about cards that lied about their numbers. So the copy is the specification and
+// this table is read against it: "the longest reach in the game by a wide margin" is the chain at
+// r 56, double the machete; "twelve tiny hits, the fastest swing on the shelf" is the nunchaku at
+// 2 damage on a 14 frame swing; "the slowest swing in the game" is the war hammer at 60. A hit for
+// scale: a character's jab is 3 damage, their forward smash 15 at bkb 32 / kbg 98.
+//
+//   sw   total frames of the swing (windup + recovery): how committed you are
+//   hit  [first, last] active frames
+//   r    hitbox radius -- this is "reach", the number most of the copy is about
+//   dmg  damage per swing
+//   ang  launch angle; bkb flat knockback, kbg knockback growth (the % scaling)
+//   ammo swings before it breaks, which the copy states outright for most of them
+//   cool frames before you may swing again
+const I3_MELEE = {
+  // "Twelve tiny hits, the fastest swing on the shelf. It chips rather than launches."
+  nunchaku: { sw: 14, hit: [4, 7],   r: 24, dmg: 2,  ang: 40, bkb: 8,  kbg: 18, ammo: 12, cool: 8,  tone: [520, 900, 0.05] },
+  // "The longest reach under four dollars, on a fast thin swing. Low damage and almost no knockback."
+  rebar:    { sw: 20, hit: [5, 9],   r: 40, dmg: 4,  ang: 38, bkb: 10, kbg: 26, ammo: 8,  cool: 13, tone: [300, 640, 0.06] },
+  // "Almost no reach, but it SENDS."
+  toaster:  { sw: 26, hit: [7, 10],  r: 16, dmg: 7,  ang: 46, bkb: 68, kbg: 78, ammo: 10, cool: 20, tone: [880, 1500, 0.1] },
+  // "A shorter, tougher katana: less damage per swing, nine of them instead of six." "no launch"
+  machete:  { sw: 22, hit: [6, 9],   r: 30, dmg: 11, ang: 36, bkb: 16, kbg: 42, ammo: 9,  cool: 15, tone: [740, 1600, 0.07] },
+  // "A launcher, not a killer: middling damage, near-hammer knockback, and fast."
+  golfclub: { sw: 24, hit: [7, 10],  r: 30, dmg: 9,  ang: 48, bkb: 78, kbg: 96, ammo: 7,  cool: 17, tone: [980, 1900, 0.08] },
+  // "Best damage per swing that is not a hammer, and fast with it. Six swings and it is done."
+  katana:   { sw: 24, hit: [6, 10],  r: 34, dmg: 16, ang: 40, bkb: 26, kbg: 76, ammo: 6,  cool: 17, tone: [1200, 2400, 0.09] },
+  // "Grinds rather than launches: big damage, almost no knockback, so they stay in it."
+  chainsaw: { sw: 36, hit: [6, 30],  r: 22, dmg: 3,  ang: 32, bkb: 5,  kbg: 8,  ammo: 7,  cool: 10, tone: [180, 300, 0.12], rehit: 6 },
+  // "Nearly double damage with heavy knockback, on a swing you have to commit to."
+  fireaxe:  { sw: 44, hit: [13, 17], r: 28, dmg: 15, ang: 42, bkb: 38, kbg: 88, ammo: 6,  cool: 30, tone: [420, 980, 0.12] },
+  // "The longest reach in the game by a wide margin ... also the slowest swing on the melee shelf."
+  chain:    { sw: 52, hit: [16, 24], r: 56, dmg: 12, ang: 44, bkb: 66, kbg: 90, ammo: 5,  cool: 34, tone: [260, 700, 0.14] },
+  // "Over twice the damage and more than twice the knockback of a bare hit, on the slowest windup."
+  bat:      { sw: 54, hit: [18, 23], r: 28, dmg: 18, ang: 44, bkb: 52, kbg: 104, ammo: 4, cool: 36, tone: [600, 1300, 0.16] },
+  // "Four swings, enormous damage and knockback on every one. Miss and you are wide open."
+  warhammer:{ sw: 60, hit: [22, 28], r: 30, dmg: 22, ang: 43, bkb: 58, kbg: 112, ammo: 4, cool: 40, tone: [150, 520, 0.2] },
+};
+// One move object per weapon, built once. `rehit` is what makes the chainsaw a grind instead of a
+// single hit: the same hitbox is allowed to connect again every N frames while it is out.
+const I3_MELEE_MV = {};
+for (const k in I3_MELEE) {
+  const m = I3_MELEE[k];
+  I3_MELEE_MV[k] = { total: m.sw, clip: 'punch', sfx: 'none',
+    hits: [H(m.hit[0], m.hit[1], 40, -44, m.r, m.dmg, m.ang, m.bkb, m.kbg, m.rehit ? { rehit: m.rehit } : undefined)] };
+}
 
 const Items3 = {
   game: null, strikes: [], rain: null, drops: null,
@@ -291,13 +416,20 @@ const Items3 = {
     Sfx.tone(420, 260, 0.09, 'square', 0.08);
     return true;
   },
-  // a melee weapon swing, with per-weapon ammo and a lockout so it can't be mashed
-  swing(f, it, kind) {
-    if (it.cd > 0) return true;
-    it.cd = ITEM_DEFS[kind].cool || 30;
+  // `swing()` went with the frying pan, 17 Oct: the pan and the long-dead prod were its only two
+  // callers, so it took I3_PAN and I3_PROD with it. The shelf swings through `melee()` below.
+  // The melee shelf's attack. One path for all twelve, because the only thing that differs between
+  // a nunchaku and a war hammer is the numbers in I3_MELEE, and a weapon whose feel lives in a
+  // table is a weapon you can tune against its own store card.
+  melee(f, it, kind) {
+    if (it.cd > 0) return true;                  // still recovering from the last swing
+    const m = I3_MELEE[kind];
+    it.cd = m.cool;
+    // ammo is the swing count the store card promises ("Four swings, then it is gone")
+    if (it.ammo == null) it.ammo = m.ammo;
     it.ammo--; if (it.ammo <= 0) f.dropAfter = kind;
-    if (kind === 'pan') { f.startMove(I3_PAN); Sfx.tone(1650, 380, 0.34, 'triangle', 0.2); Sfx.noise(0.06, 0.16, 3400); }
-    else { f.startMove(I3_PROD); Sfx.tone(300, 700, 0.06, 'square', 0.1); }
+    f.startMove(I3_MELEE_MV[kind]);
+    Sfx.tone(m.tone[0], m.tone[1], m.tone[2], 'square', 0.12);
     return true;
   },
   gun(f, it, def) {
@@ -576,6 +708,13 @@ const Items3 = {
   // ---- aegis drone: point defence. Shoots down the NEXT 3 projectiles aimed at you ----
   // Deliberately projectile-only: it answers zoning, never a melee mix-up, so it can't turn a
   // fight into "whoever bought the shield wins" the way an all-hit bubble would.
+  // Both shields grant through ONE helper: hits absorbed, how long, and what it says. Reusing
+  // `bubbleHits` means 41_combat's absorb check and 56_items2's pop already cover them.
+  giveGuard(f, hits, life, label) {
+    f.bubbleHits = hits; f.bubbleT = life;
+    Game.text(f.x, f.y - f.h - 30, label, '#9fe8ff', 1.2); Game.ring(f.x, f.y - f.h * 0.5, '#9fe8ff', 80);
+    return true;
+  },
   giveAegis(f) {
     f.aegis = 3; f.aegisT = 720;
     Game.text(f.x, f.y - f.h - 30, 'AEGIS ONLINE', '#9fe8ff', 1.2); Game.ring(f.x, f.y - f.h * 0.5, '#9fe8ff', 90);
@@ -824,7 +963,7 @@ const Items3 = {
     if (k === 'cluster') { if (adx < 420 && Rng.next() < 0.05) { o[toward] = true; press('attack'); return true; } return false; }
     if (k === 'strike' || k === 'donkey' || k === 'armageddon') { if (Rng.next() < 0.04) { press('attack'); return true; } return false; }
     if (k === 'zip' || k === 'boots') { if (Items2.offStage(f) && Rng.next() < 0.12) { if (f.x < 0) o.right = true; else o.left = true; press('attack'); return true; } return false; }
-    const reach = { pan: 110, prod: 90, flamer: 200, freeze: 480, homer: 700 }[k];
+    const reach = { flamer: 200, freeze: 480, homer: 700 }[k];
     if (reach && !(f.item.cd > 0) && adx < reach && Rng.next() < 0.06) {
       if ((dx > 0 ? 1 : -1) !== f.face) { o[toward] = true; return true; }
       press('attack'); return true;
@@ -850,11 +989,14 @@ const Items3 = {
 // 98 now reads it by name; this line is the belt, and it matches how 89_econ.js exports `Econ`.
 if (typeof window !== 'undefined') window.Items3 = Items3;
 
-// ---- hook 1: run Items3 at the end of every item frame (set 2+ only, so the bet arena never sees it)
+// ---- hook 1: run Items3 at the end of every item frame. Set 2+ (local), OR any fight the arsenal is
+// on for: casual online is seeded, so it sits at item set 1, and without the arsenalOn arm an arsenal
+// weapon that now DROPS there would lie on the stage with none of its per-frame behaviour running.
+// The bet arena still never sees it -- arsenalOn is false and its item set is 1.
 Items.update = (function (base) {
   return function () {
     base.call(this);
-    if (Game.itemSet >= 2) Items3.update(Game, Game.stage);
+    if (Game.itemSet >= 2 || Game.arsenalOn) Items3.update(Game, Game.stage);
   };
 })(Items.update);
 
@@ -884,3 +1026,26 @@ AI.think = (function (base) {
     return base.call(this, f, st);
   };
 })(AI.think);
+
+// ---- wire the melee shelf into ITEM_DEFS -------------------------------------------------------
+// Done as a loop rather than twelve hand-edited defs so the table above stays the single place the
+// numbers live. `ammo` is what the HUD counts down and what the store card quotes.
+for (const k in I3_MELEE) {
+  const d = ITEM_DEFS[k];
+  if (!d) continue;
+  d.ammo = I3_MELEE[k].ammo;
+  d.cool = I3_MELEE[k].cool;
+  d.use = ((kind) => (f, it) => Items3.melee(f, it, kind))(k);
+}
+
+// ---- BOXING GLOVES: the one that is not a swing ------------------------------------------------
+// "Hold them and all your normal attacks hit for more than double, with far more knockback.
+// Slightly slower windup. No ammo, they last the whole stock." That is the SWORD mechanic, word for
+// word -- `sword: {reach, dmg, kb, slow}` is how the Beam Sword, the Hero Sword and the Pipe Cannon
+// already buff the attacks you have (swordify, 40_fighter) -- so the gloves take that road rather
+// than a special case in the damage maths. It also gets them the slash audio and the combo rules
+// that 12_audio and 23_combo key off `def.sword`, which a bespoke multiplier would have missed.
+// reach is short on purpose: fist range, which is exactly what the counter line promises.
+ITEM_DEFS.gloves.sword = { reach: 14, dmg: 2.25, kb: 1.9, slow: 3, color: '#e8463c' };
+ITEM_DEFS.gloves.feelSword = { reach: 12, dmg: 1.75, kb: 1.5, slow: 3, color: '#e8463c' };
+ITEM_DEFS.gloves.ammo = 0;          // no ammo: they last the whole stock

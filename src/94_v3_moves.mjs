@@ -901,9 +901,21 @@
   V3.malletAng = function (f, d, t) {
     if (!d.charge) return -t * 0.55;                                   // the air version is a spin
     const w = (d.hits && d.hits[0] && d.hits[0].f) || [16, 20];
-    // 0 = straight overhead. The charge holds it reared just behind vertical (Smash's Hammer Flip), the
-    // swing carries it through to the deck out front: about 165 degrees of arc.
-    const t0 = d.charge.at || 8, t1 = w[0], t2 = w[1], UP = -0.55, DOWN = 2.32;
+    // 0 = STRAIGHT OVERHEAD, +90 degrees (1.57) = horizontal out front, +180 = straight down.
+    //
+    // 10/18, and this is the SHAPE, not the numbers: it swung from -0.55 (reared above the head) round
+    // to 2.32, so contact landed 43 degrees BELOW horizontal after sweeping over the top. That is an
+    // axe chop. Kirby's grounded Hammer Flip is a two-handed swing ACROSS, like a baseball bat: the
+    // hammer cocks back over the rear shoulder, and the head meets the opponent out front at body
+    // height. Nothing about it goes overhead.
+    //
+    // So: cock to -0.9 (52 degrees back off vertical, where a batter holds it) and make contact at
+    // 1.57 — dead level, out front. The follow-through below then dips it to about 2.0 (25 degrees
+    // under horizontal), which is where a bat finishes across the body.
+    //
+    // The arm pose does not need touching: pzMallet (97_v3_pose.mjs) reads this function and hands the
+    // same angle to pzSwingArms, so the hands, the body lean and the hammer all come down together.
+    const t0 = d.charge.at || 8, t1 = w[0], t2 = w[1], UP = -0.9, DOWN = 1.57;
     if (t <= t0) { const k = t0 ? t / t0 : 1; return UP * (1 - (1 - k) * (1 - k)); }        // wind-up, eases into the hold
     if (t < t1) { const k = (t - t0) / Math.max(1, t1 - t0); return UP + (DOWN - UP) * Math.pow(k, 1.75); }   // heavy, accelerating
     if (t <= t2) return DOWN + (t - t1) * 0.045;                                            // buried in the deck

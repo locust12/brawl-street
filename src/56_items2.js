@@ -39,15 +39,48 @@ const I2_SNIPE = { total: 70, clip: 'punch', gunAnim: true, fx: 'scope', sfx: 'n
 
 const Items2 = {
   game: null, crateT: 0,
-  inSet(d) { return !d.set || (d.weight > 0 && d.set <= (Game.itemSet || 1)); },
+  // THE STREET POOL (17 Oct). Duane: *"a lot of the weapons in the store ... should be more common
+  // and be added to the regular games ... only the fucking repetitive light saber pops up too much"*.
+  // A shop weapon with a `street` weight now also spawns in ORDINARY matches. The fairness rail is
+  // unchanged and is enforced here rather than by hoping: the street clause needs itemSet >= 2, and
+  // `Game.itemSet` is 1 for every seeded fight (60_game: `this.itemSet = seed ? 1 : 2`), so the bet
+  // arena and seeded online still cannot see a bought weapon. `weight` stays 0 on all of them, so
+  // nothing else that reads weight changes behaviour.
+  inSet(d) {
+    if (!d.set) return true;
+    if (d.weight > 0 && d.set <= (Game.itemSet || 1)) return true;
+    // THE ARSENAL DROPS WHEREVER A PURCHASE WAS ALREADY ALLOWED (10/18, see 57_items3.js). Gated on
+    // arsenalOn, not on itemSet, because that is the flag the server already turns OFF for every
+    // staked or ranked room — so bought weapons spawn in casual fights and still cannot reach a
+    // wagered match, and the bet arena (arsenalOn false) keeps its byte-identical spawn sequence.
+    if (d.set >= 2 && d.weight > 0 && Game.arsenalOn) return true;
+    return !!(d.street > 0 && (Game.itemSet || 1) >= 2);
+  },
+  // what a kind weighs in a draw: its street weight when it is here on the street ticket
+  // NOTE the `!d.set` arm: a classic item carries no `set` at all, and `undefined <= 2` is false,
+  // so without it every set-less kind weighed zero and both swords stopped spawning entirely.
+  // `w2` is a CASUAL-ONLY weight. The two swords were 15.7% of every drop and needed trimming, but
+  // they are classic kinds the seeded bet arena draws from, and changing `weight` rewrote 885 of the
+  // 1,092 recorded wagered fights (dev/detcheck.js caught it and dev/ship.sh refused to deploy). So
+  // the arena keeps the original `weight` and only itemSet >= 2 sees `w2`.
+  wOf(d) {
+    if (d.weight > 0 && (!d.set || d.set <= (Game.itemSet || 1))) {
+      return (d.w2 != null && (Game.itemSet || 1) >= 2) ? d.w2 : d.weight;
+    }
+    return d.street || 0;
+  },
   inHole(x) { for (const q of Game.holes) if (x > q.x0 && x < q.x1) return true; return false; },
   offStage(f) { const M = Game.stage.main; return f.x < M.x0 || f.x > M.x1 || f.y > M.top + 4 || (Game.holes.length > 0 && Items2.inHole(f.x)); },
 
   // per frame, set-2 matches only (called at the end of Items.update)
   update(G, st) {
-    if (this.game !== G.fighters) { this.game = G.fighters; this.crateT = G.feel ? FEEL.crateT(true) : irand(700, 1100); }   // Game.itemRate (25_feel)
+    if (this.game !== G.fighters) { this.game = G.fighters; this.crateT = G.feel ? FEEL.crateT(true) : irand(300, 500); }   // Game.itemRate (25_feel)
     if (G.itemsOn && !G.demoNoItems && G.countdown <= 0 && !G.endT && !(G.feel && FEEL.rate() === 'off') && --this.crateT <= 0) {
-      this.crateT = G.feel ? FEEL.crateT(false) : irand(1100, 1700);
+      // SMASH'S MEDIUM. Duane, 17 Oct, after we compared: this was irand(1100,1700), about 23s between
+      // crates, which sat next to Smash's VERY LOW (27s) rather than its normal. Smash Medium is
+      // 500-800 frames, 8.3-13.3s, so that is what this is now. Roughly 8 crates a match becomes
+      // roughly 18, and the shop weapons stay rare per crate rather than being made common.
+      this.crateT = G.feel ? FEEL.crateT(false) : irand(500, 800);
       if (G.items.filter(i => i.kind === 'crate').length < 2) {
         const x = rand(st.main.x0 + 80, st.main.x1 - 80);
         G.items.push({ kind: 'crate', x, y: st.blast.t + 110, vx: 0, vy: 0, age: 0, chute: true, hp: 0, ammo: 0 });
@@ -223,8 +256,8 @@ const Items2 = {
     it.dead = true; it.opened = true;
     const G = Game, hasFinal = G.fighters.some(f => f.finalReady) || G.items.some(i => i.kind === 'moonball' && !i.dead);
     const pool = Object.entries(ITEM_DEFS).filter(([k, d]) => k !== 'crate' && this.inSet(d) && !(k === 'moonball' && hasFinal));
-    let tot = pool.reduce((s, [, d]) => s + d.weight, 0), r = Rng.next() * tot, kind = pool[0][0];
-    for (const [k, d] of pool) { r -= d.weight; if (r <= 0) { kind = k; break; } }
+    let tot = pool.reduce((s, [, d]) => s + Items2.wOf(d), 0), r = Rng.next() * tot, kind = pool[0][0];
+    for (const [k, d] of pool) { r -= Items2.wOf(d); if (r <= 0) { kind = k; break; } }
     const def = ITEM_DEFS[kind];
     G.items.push({ kind, x: it.x, y: def.floating ? it.y - 60 : it.y - 12, vx: def.floating ? 0 : rand(-2, 2), vy: def.floating ? 0 : -7, age: 0, baseY: it.y - 60, hp: def.hp || 0, ammo: (Game.feel && def.feelAmmo != null ? def.feelAmmo : def.ammo) || 0 });
     G.text(it.x, it.y - 50, 'SUPPLY DROP', '#ffd45c', 1.1); Sfx.coin();

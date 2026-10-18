@@ -13,7 +13,13 @@
 const Net = (() => {
   const LW = 'brawlstreet.167-233-230-149.sslip.io';
   const DEFAULT_WS = 'wss://' + LW + '/ws';
-  const PLAY_URL = 'https://brawlstreet.lol/play/';
+  // WHERE THE GAME ACTUALLY IS. 17 Oct: this was 'https://brawlstreet.lol/play/', and that host does
+  // not answer at all -- curl gets a connection failure, not a 404 -- while brawlstreet.xyz/play/
+  // serves the 6 KB coming-soon placeholder. Both public domains are deliberately parked; the build
+  // people play is the private Vercel project (see the note in dev/ship.sh). So every room invite
+  // that fell back to this constant was a dead link, and the "Play online here" banner pointed at a
+  // domain that does not resolve. Duane hit it trying to make a room and share it.
+  const PLAY_URL = 'https://brawlstreet-desk-4k9m2x.vercel.app/play/';
   const BACKUP_URL = 'https://' + LW + '/';
   const PROTO = 1;
   const PSTAKES = [0, 0.01, 0.05, 0.1, 0.25];
@@ -69,6 +75,12 @@ const Net = (() => {
   }
   // after measuring, move to a closer region if there is one
   async function maybeSwitchRegion() {
+    // A PINNED SERVER IS NOT A SUGGESTION. With ?server= in the URL the socket always reconnects to
+    // that box, so letting this run anyway meant it "moved" to another region, closed the socket,
+    // came back on the SAME pinned box, and did it again -- and every one of those drops threw away
+    // the room the player had just made. Host made a room, host silently landed back on the home
+    // screen with no room and no message.
+    if (pinnedServer()) { renderHome(); return; }
     const before = N.me && N.me.region && N.me.region.id;
     await probeRegions(false);
     const r = pickRegion();
@@ -85,9 +97,21 @@ const Net = (() => {
     N.ws = null; N.everOpen = false; N.tries = 0; setTimeout(connect, 200);
   }
 
-  function serverUrl() {
-    if (N.regionUrl && /^wss?:\/\//.test(N.regionUrl)) return N.regionUrl;
+  // a server named in the URL: a deliberate pin, which also switches OFF the automatic region move
+  function pinnedServer() {
     try { const q = new URLSearchParams(location.search).get('server'); if (q && /^wss?:\/\/[\w.:\-[\]]+\/ws$/.test(q)) return q; } catch (e) { /* no search */ }
+    return null;
+  }
+  function serverUrl() {
+    // AN EXPLICIT ?server= WINS OVER THE SAVED REGION (10/18). This used to return the stored region
+    // first, so a link that names a server was silently ignored by every browser that had ever
+    // played -- which is every browser that matters. Two people trying to meet on one server by
+    // pasting the same pinned link both stayed where they were, and the room code "did not exist".
+    // A server named in the URL is a deliberate instruction; the saved region is only a default.
+    let pinned = null;
+    try { const q = new URLSearchParams(location.search).get('server'); if (q && /^wss?:\/\/[\w.:\-[\]]+\/ws$/.test(q)) pinned = q; } catch (e) { /* no search */ }
+    if (pinned) return pinned;
+    if (N.regionUrl && /^wss?:\/\//.test(N.regionUrl)) return N.regionUrl;
     if (location.hostname === LW) return 'wss://' + LW + '/ws';
     return DEFAULT_WS;
   }
@@ -363,6 +387,18 @@ const Net = (() => {
     view: null, lastRoom: null, realStake: null, wallet: null,
   };
 
+  // EVERY BUTTON ON THE ONLINE SCREENS GOES THROUGH HERE. send() answers false when the socket is
+  // not open, and the buttons used to throw that answer away: the player pressed Create, nothing
+  // happened, nothing was said, and pressing it twenty more times did nothing twenty more times. A
+  // press that cannot reach the server now says so and starts a reconnect, so the next one works.
+  function act(o, what) {
+    if (send(o)) { sfx(); return true; }
+    toast(N.conn === 'connecting'
+      ? 'Still connecting to the game server. One second.'
+      : 'Not connected to the game server. Reconnecting now, then press ' + (what || 'that') + ' again.', true);
+    if (!N.ws) connect();
+    return false;
+  }
   function send(o) {
     if (!N.ws || N.ws.readyState !== 1) return false;   // NetLockstep re-sends anything the socket did not take
     try { N.ws.send(JSON.stringify(o)); } catch (e) { return false; }
@@ -383,11 +419,19 @@ const Net = (() => {
     if (j !== lookSent && N.conn === 'open') { lookSent = j; send({ k: 'look', look: lk || null }); }
   }
   // cleared storage, new device, or a restored account: take the fighter back from the account
+  //
+  // SILENTLY, AND ONCE. This used to announce itself, and the announcement came back on every
+  // reconnect: the only guard was "does this device already have a look", so when CustomLook.set()
+  // did not stick -- storage blocked, or a look this build's creator will not take -- the next
+  // welcome adopted it again and said so again, for ever. Getting your own fighter back is not news
+  // worth a popup, and a popup that cannot be dismissed is worse than no popup.
+  let adopted = false;
   function adoptLook(lk) {
-    if (!lk || typeof CustomLook === 'undefined' || !CustomLook.set) return;
+    if (adopted || !lk || typeof CustomLook === 'undefined' || !CustomLook.set) return;
     let mine = null; try { mine = CustomLook.get(); } catch (e) { mine = null; }
     if (mine) return;                       // this device already has one; it wins and gets pushed up
-    try { CustomLook.set(lk); lookSent = JSON.stringify(CustomLook.get() || null); toast('Your saved fighter is back: ' + (lk.name || 'custom')); } catch (e) { /* creator not loaded */ }
+    adopted = true;                         // tried once this page load, whether or not it stuck
+    try { CustomLook.set(lk); lookSent = JSON.stringify(CustomLook.get() || null); } catch (e) { /* creator not loaded */ }
   }
 
   // A socket that drops and comes back is normal and the page handles it on its own, so it never
@@ -507,10 +551,26 @@ const Net = (() => {
         if (m.profile && m.profile.look) adoptLook(m.profile.look);
         lookSent = null; syncLook();
         renderHome();
+        // AN INVITE OPENED FROM COLD KNOWS ITS REGION BEFORE THE PAGE KNOWS THE REGIONS. fromHash()
+        // runs at boot, when the region list has not arrived yet, so `open()` could only remember the
+        // region the invite named. This is the first moment it can be acted on, and it has to beat
+        // both the join below and maybeSwitchRegion, or the guest asks the wrong box for the code.
+        if (N.wantRegion) {
+          const want = N.wantRegion, r = (regionList() || []).find(x => x && x.id === want);
+          N.wantRegion = null;
+          if (r && r.ws && r.ws !== N.regionUrl && (!N.me || !N.me.region || N.me.region.id !== want)) {
+            N.regionUrl = r.ws; store.set('netRegionUrl', r.ws); store.set('netRegion', r.id);
+            N.regionTry = {};
+            if (N.ws) { try { N.ws.close(4005, 'invite region'); } catch (e) { /* already gone */ } }
+            N.ws = null; N.everOpen = false; N.tries = 0;
+            setTimeout(connect, 80);
+            return;                       // the join rides along on the next welcome, on the right box
+          }
+        }
         maybeSwitchRegion().catch(() => {});
         // back after a drop mid-match: the server sends "resume" right away if the match is still on
         if (N.M && !N.M.shown) { const M = N.M; setTimeout(() => { if (N.M === M && !M.result && N.lock && N.lock.stalledFor > 2500) { toast('That match is over. Pick your next fight.'); endMatchView(); N.M = null; N.lock = null; restoreDemo(); showHome(); } }, 4000); }
-        if (N.pendingJoin && m.build.ok) { const c = N.pendingJoin; N.pendingJoin = null; send({ k: 'join', code: c }); }
+        if (N.pendingJoin && m.build.ok) { const c = N.pendingJoin; N.pendingJoin = null; N.lastJoin = c; send({ k: 'join', code: c }); }
         else if (N.lastRoom && !N.M && m.build.ok && N.view === 'room') send({ k: 'join', code: N.lastRoom });
         return;
       case 'pong': {
@@ -528,6 +588,9 @@ const Net = (() => {
       case 'toast': toast(m.msg); return;
       case 'err':
         if (m.code === 'build') { toast(m.msg, true); return; }
+        // "No room with code XXXXX" is usually not a bad code: it is the right code on another
+        // region's box. Ask the other regions before saying no to the player.
+        if (m.code === 'noroom' && N.lastJoin && sweepRegions(N.lastJoin)) return;
         toast(m.msg, true);
         if (m.code === 'noroom' && N.view === 'room' && !N.room) showHome();
         return;
@@ -939,11 +1002,18 @@ const Net = (() => {
       const xh = (M.handles || [])[i];
       return `<tr><td style="color:${slotColor(i)}">${k + 1}. ${esc(nm)}${xh ? ` <span class="ns-x">@${esc(xh)}</span>` : ''}${r.dropped && r.dropped.includes(i) ? ' (left)' : ''}</td><td>${esc(charName(p.char))}</td><td>${s.kos ?? 0}</td><td>${s.falls ?? 0}</td><td>${s.dealt ?? 0}%</td><td>${(r.deltas[i] > 0 ? '+' : '') + (r.deltas[i] ? fmt(r.deltas[i]) : '0')}</td></tr>`;
     }).join('');
-    byId('nsTable').innerHTML = `<thead><tr><th>Player</th><th>Fighter</th><th>KOs</th><th>Falls</th><th>Dealt</th><th>ETH</th></tr></thead><tbody>${rows}</tbody>`;
+    // the money column is headed with whatever the room actually pays in, not a hardcoded ETH
+    byId('nsTable').innerHTML = `<thead><tr><th>Player</th><th>Fighter</th><th>KOs</th><th>Falls</th><th>Dealt</th><th>${esc(r.real ? realUnit() : 'ETH')}</th></tr></thead><tbody>${rows}</tbody>`;
     const claim = byId('nsClaim');
     claim.hidden = !(r.real && r.real.claim && N.wallet && r.real.claim.toLowerCase() === N.wallet.toLowerCase()) && !(r.real && r.real.refund);
     if (r.real) {
-      claim.textContent = r.real.refund ? 'Refund stake' : 'Claim ' + fmt(M.pot) + ' ' + realUnit();
+      // What the wallet will actually receive, which is the pot LESS the cut the contract keeps. The
+      // button used to promise the gross pot (`Claim 2.000 USDC` on a 1 USDC-a-side fight that pays
+      // 1.900), so the winner read a number the chain was never going to send them. cutBps comes off
+      // the contract at sign-in; with no figure, say the pot rather than a wrong net.
+      const bps = N.me && N.me.real && N.me.real.cutBps;
+      const net = bps == null ? M.pot : M.pot * (1 - bps / 10000);
+      claim.textContent = r.real.refund ? 'Refund stake' : 'Claim ' + fmt(net) + ' ' + realUnit();
       claim.onclick = () => walletTx(r.real.escrow, r.real.refund ? SEL.refund : SEL.claim, r.real.id, 0n).then(() => { toast('Sent to your wallet'); claim.hidden = true; }).catch(e => toast(e.message, true));
     }
     byId('nsAgain').hidden = !N.room;
@@ -1107,18 +1177,20 @@ const Net = (() => {
     const rf = byId('nbRefill'); if (rf) rf.onclick = () => { send({ k: 'refill' }); sfx('coin'); };
     const nm = byId('nbName');
     nm.onchange = () => { const v = nm.value.replace(/[^\w .\-]/g, '').trim().slice(0, 16); nm.value = v; if (v) { store.set('netName', v); send({ k: 'name', name: v }); } };
-    byId('nbQuick2').onclick = () => { send({ k: 'quick', size: 2, stake: N.stake, stages: N.pool }); sfx(); };
-    byId('nbQuick4').onclick = () => { send({ k: 'quick', size: 4, stake: N.stake, stages: N.pool }); sfx(); };
+    byId('nbQuick2').onclick = () => act({ k: 'quick', size: 2, stake: N.stake, stages: N.pool }, 'quick match');
+    byId('nbQuick4').onclick = () => act({ k: 'quick', size: 4, stake: N.stake, stages: N.pool }, 'quick match');
     byId('nbMode').querySelectorAll('button').forEach(b => b.onclick = () => { N.mode = +b.dataset.v; byId('nbMode').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); sfx(); });
-    byId('nbCreate').onclick = () => { send({ k: 'create', size: N.mode, stake: N.stake, cpuFill: true, stocks: 3, items: true, stage: 'random' }); sfx(); };
-    byId('nbCreateReal').onclick = () => { send({ k: 'create', size: N.mode, stake: N.realStake, real: true, stocks: 3, items: true, stage: 'random' }); sfx(); };
+    byId('nbCreate').onclick = () => act({ k: 'create', size: N.mode, stake: N.stake, cpuFill: true, stocks: 3, items: true, stage: 'random' }, 'Create room');
+    byId('nbCreateReal').onclick = () => act({ k: 'create', size: N.mode, stake: N.realStake, real: true, stocks: 3, items: true, stage: 'random' }, 'Create room');
     const code = byId('nbCode');
     code.oninput = () => { code.value = code.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5); };
     code.onkeydown = e => { if (e.key === 'Enter') byId('nbJoin').click(); };
-    byId('nbJoin').onclick = () => { if (code.value.length < 5) return toast('Room codes have five letters'); send({ k: 'join', code: code.value }); sfx(); };
+    byId('nbJoin').onclick = () => { if (code.value.length < 5) return toast('Room codes have five letters'); N.lastJoin = code.value; act({ k: 'join', code: code.value }, 'Join'); };
     byId('nrLeave').onclick = () => { send({ k: 'leave' }); N.room = null; N.lastRoom = null; showHome(); };
-    byId('nrCopy').onclick = () => { if (N.room) copy(linkBase().replace(/#.*$/, '') + '#room:' + N.room.code); };
-    byId('nrStart').onclick = () => { send({ k: 'start' }); sfx(); };
+    // the link says WHICH BOX the room is on: a room lives on one server and a guest whose nearest
+    // region is a different one cannot see the code at all without this
+    byId('nrCopy').onclick = () => { if (!N.room) return; const rg = (N.room.region && N.room.region.id) || (N.me && N.me.region && N.me.region.id) || ''; copy(linkBase().replace(/#.*$/, '') + '#room:' + N.room.code + (rg ? '~' + rg : '')); };
+    byId('nrStart').onclick = () => act({ k: 'start' }, 'Start');
     byId('nrWallet').onclick = () => bindWallet().catch(e => toast(e.message || String(e), true));
     byId('nrMine').onclick = () => { const lk = N.me && N.me.profile && N.me.profile.look; if (lk) { send({ k: 'pick', char: lk.base }); sfx(); } };
     byId('nsAgain').onclick = () => { closeResult(true); send({ k: 'ready', on: true }); };
@@ -1147,13 +1219,63 @@ const Net = (() => {
     build();
     showHome();
     if (opts && opts.room) N.pendingJoin = opts.room;
-    if (N.conn === 'open' && N.me) { if (N.pendingJoin) { send({ k: 'join', code: N.pendingJoin }); N.pendingJoin = null; } return; }
+    // THE INVITE DECIDES THE SERVER, NOT THE PING. An invite names the region its room is in, and a
+    // room only exists on that one box, so a guest whose own nearest region is somewhere else has to
+    // go there or the code cannot be found. This is the whole bug behind "No room with code".
+    if (opts && opts.region) {
+      const r = (regionList() || []).find(x => x && x.id === opts.region);
+      if (r && r.ws && r.ws !== N.regionUrl) {
+        N.regionUrl = r.ws; store.set('netRegionUrl', r.ws); store.set('netRegion', r.id);
+        N.regionTry = {};
+        if (N.ws) { try { N.ws.close(4005, 'invite region'); } catch (e) { /* already gone */ } N.ws = null; N.everOpen = false; N.tries = 0; }
+        setTimeout(connect, 60);
+        return;
+      }
+      // the list is only known after a welcome; remember it so the retry below can use it
+      N.wantRegion = opts.region;
+    }
+    if (N.conn === 'open' && N.me) { if (N.pendingJoin) { N.lastJoin = N.pendingJoin; send({ k: 'join', code: N.pendingJoin }); N.pendingJoin = null; } return; }
+    setTimeout(connect, 30);
+  }
+  // A code that is not here may simply be on another box. Walk the other regions and ask each one,
+  // rather than telling the player their code is wrong when it is not.
+  function sweepRegions(code) {
+    const list = (regionList() || []).filter(r => r && r.ws && r.ws !== N.regionUrl);
+    N.sweep = N.sweep || { code: null, left: [] };
+    if (N.sweep.code !== code) N.sweep = { code, left: list.slice() };
+    const next = N.sweep.left.shift();
+    if (!next) { N.sweep = { code: null, left: [] }; return false; }
+    toast('Looking for ' + code + ' on ' + (next.label || next.id) + '…');
+    N.pendingJoin = code;
+    N.regionUrl = next.ws; store.set('netRegionUrl', next.ws); store.set('netRegion', next.id);
+    N.regionTry = {};
+    if (N.ws) { try { N.ws.close(4005, 'room sweep'); } catch (e) { /* already gone */ } }
+    N.ws = null; N.everOpen = false; N.tries = 0;
+    setTimeout(connect, 80);
+    return true;
+  }
+  // SIGN IN WITHOUT TAKING OVER THE SCREEN. Duane, 2026-10-16: *"i cant buy anything in the market.
+  // after my wallet is connected it should be possible"*. Every purchase needs an account, because
+  // the server owns every entitlement, and the only thing that opened the socket was pressing Play
+  // online. So the store told a player with a connected wallet to go somewhere else first and come
+  // back, which is a lecture, not a shop. `open()` cannot be used for this: it calls showHome() and
+  // would throw the player out of the store mid-purchase. This builds the lobby (hidden, as always)
+  // and connects, and that is all.
+  function signIn() {
+    build();
+    if (N.conn === 'open' && N.me) return;
     setTimeout(connect, 30);
   }
   function fromHash() {
     const h = location.hash || '';
-    const m = /^#room[:=]([A-Za-z0-9]{5})/.exec(h);
-    if (m) return open({ room: m[1].toUpperCase() });
+    // AN INVITE HAS TO SAY WHICH SERVER THE ROOM IS ON (10/18). A room lives in ONE region's memory,
+    // and since the second region went up every page picks its own closest one by ping. So the host
+    // made a room in Europe, the invite said nothing about that, the guest's page joined Singapore
+    // and asked IT for the code: "No room with code XXXXX". Nothing was wrong with the code.
+    // The link now carries the region after a ~, and old links without one still work through the
+    // region sweep in the error handler below.
+    const m = /^#room[:=]([A-Za-z0-9]{5})(?:~([a-z0-9_-]{1,12}))?/i.exec(h);
+    if (m) return open({ room: m[1].toUpperCase(), region: m[2] ? m[2].toLowerCase() : null });
     if (/^#online/.test(h)) return open();
     // came back within a minute of a running match (reload, crash): rejoin it
     const live = store.get('netLive', null);
@@ -1162,6 +1284,6 @@ const Net = (() => {
   addEventListener('hashchange', () => { if (/^#(room|online)/.test(location.hash)) fromHash(); });
   setTimeout(() => { try { fromHash(); } catch (e) { /* page still booting */ } }, 0);
 
-  return { active: false, open, frame, send, toast, esc, charName, artImg, fmt, fundCalls, on: fn => hooks.push(fn), get state() { return N; } };
+  return { active: false, open, signIn, frame, send, toast, esc, charName, artImg, fmt, fundCalls, on: fn => hooks.push(fn), get state() { return N; } };
 })();
 window.Net = Net;

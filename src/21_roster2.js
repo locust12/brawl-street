@@ -675,8 +675,13 @@ const ROSTER2 = [
       };
       const stoneLand = { total: 34, armor: 999, clip: 'guard', fx: 'stone', hits: [H(1, 4, 0, -12, 50, 6, 60, 44, 40, { radial: true })] };
       const stoneAir = {
-        total: 200, armor: 999, clip: 'guard', fx: 'stone', sfx: 'none', hits: [H(8, 199, 0, 4, 30, 14, -80, 26, 80)],
-        tick(f, t) { if (t < 8) { f.vy = Math.min(f.vy, -1); f.vx *= 0.6; } else { f.vy = 20; f.vx *= 0.85; } if (t > 24 && f.pressed('special')) f.endMove(); },
+        // 10/18: it used to hold itself UP for 8 frames (vy clamped to -1) before dropping, so a move
+        // whose whole point is a dead weight hovered for an eighth of a second first. Kirby's Stone
+        // snaps and plummets. Now 3 frames to transform, no rise at all, and 26 down (MOCHI falls at
+        // 9 normally and the fastest faller on the roster is 13, so this reads as a rock). The hitbox
+        // opens with the drop instead of five frames into it.
+        total: 200, armor: 999, clip: 'guard', fx: 'stone', sfx: 'none', hits: [H(3, 199, 0, 4, 30, 14, -80, 26, 80)],
+        tick(f, t) { if (t < 3) { f.vy = 0; f.vx *= 0.5; } else { f.vy = 26; f.vx *= 0.85; } if (t > 24 && f.pressed('special')) f.endMove(); },
         onLand(f) { Game.shake(10); Sfx.hit(0.8); Game.shock(f.x, f.y, '#b8b8c0'); f.startMove(stoneLand); },
       };
       const stoneGround = {
@@ -1314,19 +1319,28 @@ function TOPG_BAIL(f) {
     const oldSb = m.moves.sb;
     // ---- side special: a two-handed mallet. Rear it over the head (holding Special heats it up like a
     // poker), heave it through a 180 degree arc, bury it in the deck, and let the weight drag you on.
+    // 10/18: retimed onto Kirby's HAMMER FLIP, because *"mochi wasnt as good as kirby.. it was shit"*
+    // and the reason was the numbers, not the shape. Kirby's hammer is startup 11 from the charge,
+    // hits 14-16 then 17-25, FAF 54, and **19 % raw rising to 35 % fully charged** — it is the
+    // hardest single hit he owns. This was 17 % reaching 23 %, on a 62-frame move, with no armour at
+    // all. Ultimate also gives it invulnerability on frames 2-10 and super armour 11-17 on the
+    // ground, which is what makes it worth the commitment instead of a slow poke. (ultimateframedata.com/kirby)
     const MALLET = {
-      total: 62, clip: 'guard', fx: 'mallet', sigText: 'MALLET', sfx: 'none',
-      charge: { at: 12, key: 'special', max: 60, mult: 1.35 }, aiHold: [0, 48],
-      hits: [H(24, 28, m.w * 0.5 + 48, -m.h * 0.45, 56, 17, 40, 52, 112, { after: SIG })],
+      total: 54, clip: 'guard', fx: 'mallet', sigText: 'HAMMER', sfx: 'none',
+      charge: { at: 11, key: 'special', max: 124, mult: 1.84 }, aiHold: [0, 40],
+      armor: 60, armorF: [11, 17],
+      hits: [H(14, 16, m.w * 0.5 + 48, -m.h * 0.45, 56, 19, 40, 54, 112, { after: SIG }),
+             H(17, 25, m.w * 0.5 + 44, -m.h * 0.45, 52, 14, 42, 44, 98)],
       tick(f, t) {
         if (f.air) f.vy = Math.min(f.vy, 1.2);
-        if (t <= 12) { f.vx *= 0.6; if (t === 2) Sfx.tone(120, 80, 0.4, 'sine', 0.08); }           // plant, heave it up
-        else if (t < 24) { f.vx *= 0.82; if (t === 13) Sfx.swing(); }                              // the swing itself
-        else if (t <= 31) f.vx = f.face * 2.4;                                                     // dragged on by the head
+        if (t >= 2 && t <= 10 && !f.air) f.invuln = Math.max(f.invuln, 1);                         // invulnerable 2-10
+        if (t <= 11) { f.vx *= 0.6; if (t === 2) Sfx.tone(120, 80, 0.4, 'sine', 0.08); }           // plant, heave it up
+        else if (t < 14) { f.vx *= 0.82; if (t === 12) Sfx.swing(); }                              // the swing itself
+        else if (t <= 21) f.vx = f.face * 2.4;                                                     // dragged on by the head
         else f.vx *= 0.86;
-        if (t === 12 && f.move.charge > 20 && f.move.charge % 6 === 0) Game.chargeSpark(f);
-        if (t === 24) Game.shake(9);
-        if (t === 28) {                                                                            // impact: dust and a shock ring
+        if (t === 11 && f.move.charge > 20 && f.move.charge % 6 === 0) Game.chargeSpark(f);
+        if (t === 13) Game.shake(9);
+        if (t === 14) {                                                                            // impact: dust and a shock ring
           const hx = f.x + f.face * (m.w * 0.5 + 44);
           Game.shake(20); Game.flashT = Math.max(Game.flashT, 3);
           Sfx.hit(0.9); Sfx.tone(90, 55, 0.34, 'square', 0.14);
@@ -1339,14 +1353,16 @@ function TOPG_BAIL(f) {
     };
     // ---- neutral special: inhale. Wider and longer than the v1 one, and it drags in loose items and
     // light shots as well as fighters.
+    // 10/18: Kirby's inhale opens on frame 10, stays open to 44, and the whole move is 67 frames
+    // minimum with 19 frames of endlag when you let go. This was 8-58 over 72.
     const INHALE = {
-      total: 72, clip: 'cast', fx: 'inhale', aiHold: [16, 52], sfx: 'none',
+      total: 67, clip: 'cast', fx: 'inhale', aiHold: [10, 44], sfx: 'none',
       tick(f, t) {
         if (f.air) f.vy = Math.min(f.vy, 1.4);
         f.vx *= 0.72;                                                   // planted while the mouth is open
-        if (t < 8 || t > 58) return;
-        if (t > 24 && !f.in.special) { f.move.t = 58; return; }
-        if (t === 8) Sfx.noise(0.55, 0.1, 320);
+        if (t < 10 || t > 48) return;
+        if (t > 20 && !f.in.special) { f.move.t = 48; return; }
+        if (t === 10) Sfx.noise(0.55, 0.1, 320);
         const REACH = 230, mouthY = f.y - m.h * 0.5;
         for (const g of Game.fighters) {
           if (g === f || g.untouchable || g.hitlag > 0 || !MV2.PULLABLE.includes(g.state) || g.grabbed) continue;
@@ -1418,9 +1434,50 @@ function TOPG_BAIL(f) {
         if (t >= 150 || f.pressed('special') || f.pressed('attack') || f.pressed('smash')) mv.spit = 1;
       },
     };
+    // ---- up special: FINAL CUTTER on Kirby's timing. Three separate hits and he is slow to commit:
+    // startup 23 (this rose on frame 4, which is a shoryuken, not a cutter), the rising blade is
+    // 23-26 for 5 %, the fall 41-49 for 2 %, and the landing throws the shockwave for 6 %. The old
+    // one hit for 6 on the way up and raked for 5 all the way down, which is why it felt like a
+    // better move than Kirby's instead of the same one.
+    const CUTTER = {
+      total: 200, helpless: true, airOnce: 'up', clip: 'uppercut', fx: 'cutter', color: '#ffe066',
+      hits: [H(23, 26, m.w * 0.4, -m.h * 0.6, 30, 5, 85, 30, 30, { after: LINK }),
+             H(41, 49, m.w * 0.3, -m.h * 0.2, 28, 2, -70, 20, 40)],
+      tick(f, t) {
+        if (t < 23) { f.vx *= 0.8; if (f.air) f.vy = Math.min(f.vy, 1); }     // crouch and set
+        else if (t === 23) { f.vy = -15; Sfx.swing(); }
+        else if (t < 36) f.vx = f.dirX() * 2.5;
+        else if (t < 41) { f.vy = 0; f.noGrav = true; }                       // the hang at the top
+        else { f.vy = 17; f.vx *= 0.9; }
+      },
+      onLand(f) {
+        MV2.wave(f, f.face, { speed: 9, r: 16, dmg: 6, ang: 60, bkb: 36, kbg: 40, life: 28, color: '#ffe066' }); Game.shake(5);
+        f.startMove({ total: 18, clip: 'slam', hits: [H(1, 4, m.w * 0.5, -12, 32, 5, 50, 40, 50)] });
+      },
+    };
+    // ---- down special: STONE at Kirby's weight. Armour from frame 11 either way; **14 % grounded
+    // and 18 % out of the air**, against the 6 % and 14 % this had. A 6 % stone is not a threat, and
+    // the whole point of the move is that it is one.
+    const STONE_LAND = { total: 34, armor: 999, clip: 'guard', fx: 'stone', hits: [H(1, 4, 0, -12, 50, 14, 60, 48, 52, { radial: true })] };
+    const STONE_AIR = {
+      total: 200, armor: 999, clip: 'guard', fx: 'stone', sfx: 'none', hits: [H(29, 199, 0, 4, 32, 18, -80, 30, 86)],
+      tick(f, t) {
+        if (t < 11) { f.vy = Math.min(f.vy, -1); f.vx *= 0.6; return; }
+        if (t === 11) { Sfx.tone(90, 60, 0.3, 'square', 0.16); Game.puff(f.x, f.y - m.h * 0.4, 8, '#9aa0ac'); }
+        f.vy = 20; f.vx *= 0.85;
+        if (t > 24 && f.pressed('special')) f.endMove();                      // the 31-frame climb out
+      },
+      onLand(f) { Game.shake(12); Sfx.hit(0.85); Game.shock(f.x, f.y, '#b8b8c0'); f.startMove(STONE_LAND); },
+    };
+    const STONE_GROUND = {
+      total: 70, armor: 999, clip: 'guard', fx: 'stone', hits: [H(11, 16, 0, -m.h * 0.3, 42, 14, 60, 40, 52, { radial: true })],
+      tick(f, t) { f.vx *= 0.5; if (t > 24 && f.pressed('special')) f.endMove(); },
+    };
     m.moves2 = Object.assign({}, m.moves, {
       nb: INHALE,
       sb: Object.assign({}, MALLET, { start(f) { if (f.air) oldSb.start(f); } }),
+      ub: CUTTER,
+      db: Object.assign(split2(STONE_GROUND, STONE_AIR), { shout: 'STONE' }),
     });
   }
 }
