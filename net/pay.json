@@ -4,6 +4,53 @@
   "accept": 0.97,
   "pad": {},
   "chains": {
+    "1": {
+      "name": "Ethereum",
+      "rpc": "https://ethereum-rpc.publicnode.com",
+      "explorer": "https://etherscan.io",
+      "treasury": "0x02b321E3B31e4Ca53cee164BEedc314f7345F6d4",
+      "minConf": 1,
+      "_": "Mainnet ERC20. Both token contracts were read on chain 17 Oct with symbol(), name() and decimals() before being added, never from memory: USDC quotes \"USD Coin\" 6dp, USDT quotes \"Tether USD\" 6dp. USDT returns no bool from transfer, which the verifier already tolerates.",
+      "tokens": {
+        "ETH": {
+          "dec": 18,
+          "name": "Ethereum",
+          "symbol": "ETH",
+          "feed": "ETH"
+        },
+        "USDC": {
+          "addr": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+          "dec": 6,
+          "symbol": "USDC",
+          "name": "USD Coin",
+          "peg": 1
+        },
+        "USDT": {
+          "addr": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+          "dec": 6,
+          "symbol": "USDT",
+          "name": "Tether USD",
+          "peg": 1
+        }
+      }
+    },
+    "56": {
+      "name": "BNB Chain",
+      "rpc": "https://bsc-dataseed.binance.org",
+      "explorer": "https://bscscan.com",
+      "treasury": "0x02b321E3B31e4Ca53cee164BEedc314f7345F6d4",
+      "minConf": 1,
+      "_": "BUSD only. The contract was read on 16 Oct with symbol(), name() and decimals() before being added, never from memory. Paxos stopped minting BUSD, but it is not dead: 283,188,732 still circulate and it quotes at 1.0001, so the store takes it. The Binance-pegged SOL BEP-20 was removed 17 Oct: real SOL is taken on Solana itself, not as a wrapper here.",
+      "tokens": {
+        "BUSD": {
+          "addr": "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56",
+          "dec": 18,
+          "symbol": "BUSD",
+          "name": "Binance USD",
+          "peg": 1
+        }
+      }
+    },
     "4663": {
       "name": "Robinhood Chain",
       "rpc": "https://rpc.mainnet.chain.robinhood.com",
@@ -11,7 +58,12 @@
       "treasury": "0x02b321E3B31e4Ca53cee164BEedc314f7345F6d4",
       "minConf": 1,
       "tokens": {
-        "ETH": { "dec": 18, "name": "Ether", "symbol": "ETH", "feed": "ETH" },
+        "ETH": {
+          "dec": 18,
+          "name": "Ethereum",
+          "symbol": "ETH",
+          "feed": "ETH"
+        },
         "WOLV": {
           "addr": "0x945626601703d126877C33a3d0Def244c833550d",
           "dec": 18,
@@ -26,17 +78,29 @@
         }
       }
     },
-    "42161": {
-      "name": "Arbitrum One",
-      "rpc": "https://arb1.arbitrum.io/rpc",
-      "explorer": "https://arbiscan.io",
-      "treasury": "0x02b321E3B31e4Ca53cee164BEedc314f7345F6d4",
+    "solana": {
+      "name": "Solana",
+      "kind": "solana",
+      "rpc": "https://api.mainnet-beta.solana.com",
+      "explorer": "https://solscan.io",
+      "treasury": "",
+      "_treasury": "EMPTY ON PURPOSE. Solana needs its own receive address: a base58 account Duane controls, NOT an 0x one and NOT the RAKE bot wallet in wallet/solana-wake.json, which has a secret key on disk and is traded by the WAKE loop. Until this is set the server offers no Solana currency at all, which is the safe failure: a wrong address here sends a player's money somewhere nobody can reach. PAY_TREASURY_SOL=... overrides it without editing this file.",
       "minConf": 1,
-      "_": "The same chain the 1v1 escrow and the arena are already deployed on (BrawlEscrowToken 0x4f69E969..., RektArena 0x470032Fb...), with the real Circle USDC and the real Tether, and cents of gas per transfer.",
+      "_": "Every mint below was read off Jupiter's token API on 16 Oct, not from memory, because the symbol alone is worthless on Solana: the search for USDT also returns a token called 'Up Side Down Tesla' with the symbol USDT, and USDS returns one called 'U.S DOGE'. The server matches the MINT and refuses anything else, the same rule the EVM side applies to contract addresses.",
       "tokens": {
-        "ETH": { "dec": 18, "name": "Ether", "symbol": "ETH", "feed": "ETH" },
-        "USDC": { "addr": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", "dec": 6, "symbol": "USDC", "name": "USD Coin", "peg": 1 },
-        "USDT": { "addr": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", "dec": 6, "symbol": "USDT", "name": "Tether USD₮0", "peg": 1 }
+        "SOL": {
+          "dec": 9,
+          "name": "Solana",
+          "symbol": "SOL",
+          "feed": "SOL"
+        },
+        "USDC": {
+          "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "dec": 6,
+          "symbol": "USDC",
+          "name": "USD Coin",
+          "peg": 1
+        }
       }
     }
   }

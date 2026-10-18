@@ -20,6 +20,7 @@ services:
       # With REGIONS unset the server advertises only itself (from PUBLIC_URL).
       REGION: eu
       REGION_LABEL: Germany
+      REGIONS: '[{"id":"eu","label":"Germany","ws":"wss://brawlstreet.167-233-230-149.sslip.io/ws","http":"https://brawlstreet.167-233-230-149.sslip.io"},{"id":"sg","label":"Singapore","ws":"wss://brawlstreet.5-223-91-79.sslip.io/ws","http":"https://brawlstreet.5-223-91-79.sslip.io"}]'
     volumes:
       - ./engine:/app/engine:ro
       - ./public:/app/public:ro

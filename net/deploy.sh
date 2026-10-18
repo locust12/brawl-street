@@ -62,7 +62,16 @@ if [ "${1:-}" = "--code" ]; then
   rsync -az "$NET/econ-src/89_econ.js" "$HOST:$DEST/econ-src/89_econ.js"
   # pay.json rides along: the checkout is refused with "not taking payments yet" without it, which
   # is a silent failure rather than a loud one, so it must never be left behind by a deploy.
-  rsync -az "$NET/package.json" "$NET/package-lock.json" "$NET/server.js" "$NET/pay.json" "$NET/Dockerfile" "$NET/compose.yml" "$NET/.dockerignore" "$HOST:$DEST/"
+  rsync -az "$NET/package.json" "$NET/package-lock.json" "$NET/server.js" "$NET/pay.json" "$NET/Dockerfile" "$NET/.dockerignore" "$HOST:$DEST/"
+  # ONE COMPOSE FILE PER BOX (10/17). compose.yml is the lw file and declares the EXTERNAL "sinbook"
+  # network, which is Caddy's network on lw and does not exist anywhere else. Rsyncing it to sg
+  # replaced sg's own compose and `docker compose up` there died with "network sinbook declared as
+  # external, but could not be found": the running container survived so the region kept serving,
+  # but it could not be deployed to again. sg brings up its own Caddy on a network its compose owns.
+  COMPOSE="$NET/compose.yml"
+  [ -f "$NET/compose.$HOST.yml" ] && COMPOSE="$NET/compose.$HOST.yml"
+  echo "compose: $(basename "$COMPOSE") -> $HOST"
+  rsync -az "$COMPOSE" "$HOST:$DEST/compose.yml"
   rsync -az --delete "$NET/lib/" "$HOST:$DEST/lib/"
   # tools/ carries daily-survey.js, which the nightly report runs inside the container
   rsync -az --delete "$NET/tools/" "$HOST:$DEST/tools/"

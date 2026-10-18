@@ -102,13 +102,49 @@ setInterval(() => integrityStore.prune(), 10 * 60e3).unref();
 // X handle verification: a name over a fighter's head has to be an account that player proved they
 // control, not a free-text field. X_CLIENT_ID (from developer.x.com, which only Duane can create)
 // additionally turns on the OAuth route; without it the bio-code route works on its own.
-const { XVerify } = require('./lib/xverify');
+const { XVerify, okHandle } = require('./lib/xverify');
 const xv = new XVerify({ log, clientId: process.env.X_CLIENT_ID || null });
 setInterval(() => xv.prune(), 5 * 60e3).unref();
 
 const { Economy } = require('./lib/economy');
 const economy = new Economy({ dataDir: CFG.dataDir, accounts, log });
 setInterval(() => economy.flush(), 30e3).unref();
+
+// THE TOURNAMENT (lib/tourney.js): one event, open registration, a seeded single-elimination
+// bracket, and the record of every game in it. It owns no sockets and no rooms of its own -- the
+// four hooks below are the whole surface between it and this file, and a page can only ever ask it
+// to enter, withdraw, show the board, or say "I am at my match". Results reach it from `endMatch`
+// and nowhere else, so a client cannot report a score. Free entry, zero stake, no escrow.
+const { Tourney } = require('./lib/tourney');
+const tourney = new Tourney({ dataDir: CFG.dataDir, accounts, log });
+// Everyone to push the board to: every entrant, plus anyone sitting on the tournament screen. The
+// screen registers itself with `tstate`, so a spectator who never entered still sees it update.
+const tWatch = new Set();
+tourney.api = {
+  // The room for one bracket pair. A private, ranked, zero-stake 2-player room on the engine the
+  // checking-in player is running, tagged with the pair so `joinRoom` can refuse anyone else and so
+  // `endMatch` can tell a tournament game from a casual one. The caller is the host, which is only
+  // ever the first of the two to check in.
+  room: (p, c) => {
+    if (!c || !c.buildOk) return null;
+    const r = makeRoom(c, { priv: true, size: 2, stake: 0, stage: 'random', stocks: tourney.ev ? tourney.ev.stocks : 3,
+      items: false, cpuFill: false, real: false, ranked: true, pool: tourney.ev ? tourney.ev.stages.slice() : [] });
+    if (!r) return null;
+    r.tourney = { pid: p.pid, eid: tourney.ev ? tourney.ev.id : null, a: p.a, b: p.b };
+    if (!joinRoom(c, r)) { closeRoom(r); return null; }
+    return r.code;
+  },
+  push: (ids, msg) => { for (const id of ids || []) for (const x of byAcct.get(id) || []) sendTo(x, msg); },
+  sync: () => {
+    const seen = new Set();
+    const to = c => { if (!c || seen.has(c)) return; seen.add(c); sendTo(c, tourney.state(c.acct)); };
+    for (const id of tourney.everyone()) for (const x of byAcct.get(id) || []) to(x);
+    for (const c of tWatch) { if (clients.has(c)) to(c); else tWatch.delete(c); }
+  },
+  // A decided pair's room is finished with. Players still sitting in it are told why rather than
+  // being dropped silently, and a pair that is still playing its set keeps its room.
+  close: code => { const r = rooms.get(code); if (!r || r.state !== 'lobby') return; for (const m of r.members.slice()) leaveRoom(m.c, 'That tournament match is decided.'); closeRoom(r); },
+};
 
 // ---- THE VAULT, enforced here and not only in the page -----------------------------------------
 // Two secret stages and one secret fighter are sold rather than listed (CAT.vault in src/89_econ.js).
@@ -186,10 +222,13 @@ function roomView(r, forClient) {
 }
 // what the input delay will be for this room as it stands, so a rough match is visible before it starts
 function roomDelay(r) {
-  const rt = r.members.filter(m => m.c).map(m => netRtt(m.c));
+  // same trip measure the match itself will use, so the number the room shows is the number played
+  const rt = r.members.filter(m => m.c).map(m => (typeof tripMs === 'function' ? tripMs(m.c) : netRtt(m.c)));
   if (rt.length < 2) return null;
   const top = rt.slice().sort((a, b) => b - a);
-  return clamp(Math.ceil((top[0] / 2 + top[1] / 2 + 10) / (1000 / 60)) + 1, 2, CFG.maxDelay);
+  // DELAY_MARGIN_MS, not a hardcoded 10, for the same reason: tuning the margin must move the number
+  // the lobby promises as well as the one the match uses.
+  return clamp(Math.ceil((top[0] / 2 + top[1] / 2 + DELAY_MARGIN_MS) / (1000 / 60)) + 1, 2, CFG.maxDelay);
 }
 function broadcastRoom(r) { r.touched = Date.now(); for (const m of r.members) if (m.c) sendTo(m.c, roomView(r, m.c)); }
 
@@ -256,6 +295,11 @@ function joinRoom(c, r) {
   if (r.real && c.digest !== engine.digest) { err(c, 'Real-ETH matches need the current version of the game. Reload the page.', 'build'); return false; }
   if (r.members.length >= r.size) { err(c, 'That room is full.', 'full'); return false; }
   if (r.members.some(x => x.c && x.c.acct === c.acct)) { err(c, 'Your account is already in that room (another device or tab).', 'dupe'); return false; }
+  // A TOURNAMENT ROOM TAKES ITS TWO PLAYERS AND NOBODY ELSE. The code is handed out by the bracket,
+  // one player at a time, but a code is five characters and gets pasted into chat: without this, a
+  // third party who guessed or was given it could sit in a bracket seat, and the pair would fight a
+  // stranger. Checked here rather than in `join` so the friend-challenge path cannot route around it.
+  if (r.tourney && c.acct !== r.tourney.a && c.acct !== r.tourney.b) { err(c, 'That room is a tournament match between two other players.', 'tourney'); return false; }
   // Money and rating rooms: one person must not be able to sit in both seats and hand themselves
   // the pot or the Elo. Same device token or same network address is enough to refuse.
   // This is a speed bump, not a wall -- a hotspot or a VPN defeats it -- so the real backstop is
@@ -334,7 +378,14 @@ function maybeStart(r) {
 }
 
 function startMatch(r) {
-  if (matches.size >= CFG.maxMatches) { for (const m of r.members) err(m.c, 'The server is at capacity. Try again in a minute.'); return; }
+  // A FULL BOX SHOULD SEND PEOPLE SOMEWHERE, NOT JUST SAY NO. The refusal now carries a code and the
+  // other regions, so a page that was quick-matching can move itself to a box with room instead of
+  // leaving the player stuck on a server that is already as busy as it can usefully be.
+  if (matches.size >= CFG.maxMatches) {
+    const elsewhere = REGIONS.filter(x => x && x.id !== CFG.region).map(x => x.id);
+    for (const m of r.members) err(m.c, elsewhere.length ? 'This region is full. Moving you to another one.' : 'The server is at capacity. Try again in a minute.', 'capacity');
+    return;
+  }
   r.countdownAt = 0; r.readyBy = 0; r.fundAt = 0;
   if (r.real) {
     // Every seat human, every seat present. The FFA countdown and the host's Start button both land
@@ -359,12 +410,46 @@ function startMatch(r) {
 // ------------------------------------------------------------------ matches
 // input delay per player: their own one-way trip + the slowest other player's, plus jitter and a frame of margin
 const netRtt = c => Math.max(c.rtt, c.appRtt || 0);
+// INPUT DELAY, which is the whole feel of an online fight.
+//
+// Lockstep advances a tick only when every player's input for it has arrived, so each player runs
+// `delay` frames ahead of the fight and that lead has to cover the trip their input makes: to the
+// server (half their round trip) and on to the slowest other player (half of theirs). If the lead is
+// short the fight does not merely feel delayed, it FREEZES -- measured 20% of a fight spent frozen on
+// a 250 ms link -- and a freeze is far worse to play than a few extra frames of delay.
+//
+// DELAY_MARGIN_MS is the headroom on top of that trip. It was 10 ms, which left nothing for jitter on
+// the receiving side, for the 250 ms timer that relays input, or for a GC pause on either page. A
+// stall costs much more than a frame, so the margin is worth more than it costs: at 60 Hz every
+// 16.7 ms of margin is one frame.
+const DELAY_MARGIN_MS = +process.env.DELAY_MARGIN_MS || 10;
+const DELAY_JIT_MULT = process.env.DELAY_JIT_MULT == null ? 2 : +process.env.DELAY_JIT_MULT;
+// THE RENDER LOOP IS NOT THE NETWORK (10/18). The delay was built from the PAGE's own ping
+// (`appRtt`) plus TWICE the page's jitter, and that ping is answered by page JavaScript, so it waits
+// behind whatever frame the game is drawing. A browser that hitches reports its own frame time as
+// network lag, and the hitch is then counted twice. Measured on the live Singapore server with two
+// real browsers: a true 45 ms link produced delay 15, the hard maximum, which is 250 ms of input lag.
+//
+// `c.rtt` is different: it comes from WebSocket PING/PONG frames, which the browser's network stack
+// answers without touching page JavaScript, so it is the real trip and nothing else. That is what the
+// trip term is built from now. Client-side irregularity still deserves headroom -- lockstep really
+// does wait for a stuttering player -- but as a BOUNDED margin, not as the dominant term, because
+// the stall-driven bump in NetLockstep (up to +4 frames, 63_netsim.js) already adapts to a client
+// that genuinely cannot keep up, and it adapts on evidence instead of on a guess.
+const DELAY_JIT_CAP_MS = +process.env.DELAY_JIT_CAP_MS || 32;    // at most ~2 frames of jitter headroom
+function tripMs(c) {
+  if (!c) return 200;
+  // transport first; the page's own figure is only a fallback before any pong has landed
+  const transport = c.rtt > 0 ? c.rtt : (c.appRtt || 0);
+  const jit = Math.min(DELAY_JIT_MULT * (c.appJit || 0), DELAY_JIT_CAP_MS);
+  return transport + jit;
+}
 function computeDelays(M) {
-  const rt = M.slots.map(s => (s.human && !s.dropped ? (s.client && s.connected ? netRtt(s.client) + 2 * (s.client.appJit || 0) : 200) : 0));
+  const rt = M.slots.map(s => (s.human && !s.dropped ? (s.client && s.connected ? tripMs(s.client) : 200) : 0));
   return M.slots.map((s, i) => {
     if (!s.human) return 0;
     let other = 0; rt.forEach((v, j) => { if (j !== i && v > other) other = v; });
-    return clamp(Math.ceil((rt[i] / 2 + other / 2 + 10) / (1000 / 60)) + 1, 2, CFG.maxDelay);
+    return clamp(Math.ceil((rt[i] / 2 + other / 2 + DELAY_MARGIN_MS) / (1000 / 60)) + 1, 2, CFG.maxDelay);
   });
 }
 
@@ -422,6 +507,11 @@ function launch(r, real) {
   log('match', M.id, 'start', players.length + 'p', humans + ' humans', 'stage', stage, 'stake', r.stake, real ? 'REAL' : '');
 }
 
+// Everything a page needs to pick a match back up: the start message plus every input so far. Used
+// by the reconnect in `hello` and by a `join` for the room this socket is already playing in.
+function resumeMsg(M, i) {
+  return Object.assign(startMsg(M, i), { k: 'resume', log: M.slots.map(s => s.log), events: M.events, t: M.sim.Game.tick });
+}
 function startMsg(M, i) {
   return { k: 'start', id: M.id, cfg: M.cfg, names: M.names, you: i, delay: M.delays[i], startAt: M.startAt, now: Date.now(),
     stake: M.stake, pot: M.pot, real: M.real ? { id: M.real.id } : null, check: M.sim.NetSim.CHECK, looks: M.looks, handles: M.handles,
@@ -607,8 +697,13 @@ function finish(M, reason) {
   const cancelled = payee === undefined;
   const humans = M.slots.filter(x => x.human);
   const deltas = M.slots.map(x => (x.human ? -M.stake : 0));
+  // On a real match the winner does NOT receive the pot: the escrow keeps the cut, and claim() pays
+  // out pot less cut. Crediting the whole pot here put a number on the results screen (and in the
+  // table) that was 5% higher than what the wallet would ever receive -- on a 1 USDC-a-side fight it
+  // said +1.000 USDC against an actual +0.900. Practice matches have no cut and are unchanged.
+  const takeHome = M.real && escrow && escrow.cutBps != null ? M.pot * (1 - escrow.cutBps / 10000) : M.pot;
   if (cancelled) { reason = 'cancelled'; humans.forEach(x => { deltas[x.i] = 0; }); }
-  else deltas[payee] += M.pot;
+  else deltas[payee] += takeHome;
   // practice balances: stakes were taken at kickoff
   if (!M.real) {
     for (const x of humans) {
@@ -651,7 +746,7 @@ function finish(M, reason) {
   };
   const body = JSON.stringify(record);
   const replayHash = '0x' + crypto.createHash('sha256').update(body).digest('hex');
-  try { fs.writeFileSync(path.join(replayDir, M.id + '.json'), body); pruneReplays(); } catch (e) { log('replay write failed', e.message); }
+  saveReplay(M.id, body);
   let stats = [];
   try { stats = G.fighters.map(f => ({ kos: f.stats.kos, falls: f.stats.falls, dealt: Math.round(f.stats.dealt), taken: Math.round(f.stats.taken), stocks: f.stocks, dmg: Math.round(f.dmg), combo: f.stats.combo | 0 })); } catch (e) { stats = M.slots.map(() => ({})); }
   // XP, win/loss record and the MONTHLY ladder, computed from the server's own copy of the fight
@@ -692,14 +787,22 @@ function finish(M, reason) {
     if (x.client.seat && x.client.seat.M === M) { x.client.seat = null; presence(x.client); }
   }
   log('match', M.id, 'end', reason, 'winner', winner, 'payee', payee, 'ticks', G.tick);
-  if (CFG.tourneyKey) {
-    tourneyFeed.push({ id: M.id, at: Date.now(), code: r ? r.code : null, ranked: !!M.ranked, reason,
-      winner, cancelled, ticks: G.tick, replay: replayHash,
-      players: M.slots.map((x, i) => ({ slot: i, name: x.name, human: !!x.human, dropped: !!x.dropped,
-        acct: x.th ? accounts.get(x.th).id : null, x: (M.handles && M.handles[i]) || null,
-        stocks: stats[i] ? stats[i].stocks : null, dmg: stats[i] ? stats[i].dmg : null })) });
+  // THE FINISHED-MATCH RECORD. Built once and used twice: by the tournament, which is the only
+  // thing that may move a bracket, and by the keyed /api/matches feed. It is built whenever a
+  // tournament exists, not only when TOURNEY_KEY is set -- the key gates the HTTP feed, and gating
+  // the bracket on it too is what would have left the event unable to score its own matches.
+  const mrec = (CFG.tourneyKey || tourney.ev) ? { id: M.id, at: Date.now(), code: r ? r.code : null, ranked: !!M.ranked, reason,
+    winner, cancelled, ticks: G.tick, replay: replayHash,
+    players: M.slots.map((x, i) => ({ slot: i, name: x.name, human: !!x.human, dropped: !!x.dropped,
+      acct: x.th ? accounts.get(x.th).id : null, x: (M.handles && M.handles[i]) || null,
+      stocks: stats[i] ? stats[i].stocks : null, dmg: stats[i] ? stats[i].dmg : null })) } : null;
+  if (mrec && CFG.tourneyKey) {
+    tourneyFeed.push(mrec);
     if (tourneyFeed.length > CFG.tourneyKeep) tourneyFeed.splice(0, tourneyFeed.length - CFG.tourneyKeep);
   }
+  // Only a game played in a room the bracket opened can score, which tourney.js checks against the
+  // pair's own room code. A tournament player taking a casual quick match mid-round scores nothing.
+  if (mrec && r && r.tourney) { try { tourney.onMatch(mrec); } catch (e) { log('tourney result', e && e.message); } }
   M.sim = null;
   // the room goes back to its lobby with whoever is still here
   if (r) {
@@ -711,12 +814,61 @@ function finish(M, reason) {
   }
 }
 
-function pruneReplays() {
-  const files = fs.readdirSync(replayDir).filter(f => f.endsWith('.json'));
-  if (files.length <= CFG.keepReplays) return;
-  files.map(f => ({ f, t: fs.statSync(path.join(replayDir, f)).mtimeMs })).sort((a, b) => a.t - b.t)
-    .slice(0, files.length - CFG.keepReplays).forEach(x => fs.unlinkSync(path.join(replayDir, x.f)));
+// THE REPLAY STORE, and the biggest single source of lag this server had.
+//
+// One file per finished match, oldest pruned at CFG.keepReplays. Both halves of that used to happen
+// on the event loop at the instant a match ended: a synchronous write of the whole body, and then a
+// readdirSync plus a statSync of every file kept. At 400 kept that is 400 blocking stat calls per
+// match end -- measured under load at ~17,000 stat calls a second, ~0.5 s of every 5 s spent inside
+// the prune, an event-loop p99 over a second, and 85,000 Stats objects per 5 s for the GC to clear.
+//
+// In lockstep a blocked loop is not one slow match. Game time only advances when every input for a
+// tick has arrived, so a stalled loop is input delay added to every player in every match on the box
+// at once. That is what "it lags too much" was.
+//
+// So the file list lives in memory, built once at boot; the write is async; and the prune is an
+// unlink of a name already known. A replay is readable the instant the match ends because its body
+// is held in `replayHot` until the write lands.
+const replayNames = [];           // file names, oldest first
+const replayHot = new Map();      // id -> body, only while its write is in flight
+let replayHotBytes = 0;
+const REPLAY_HOT_MAX = +process.env.REPLAY_HOT_MAX || 64 * 1024 * 1024;
+
+function replayBoot() {
+  try {
+    const files = fs.readdirSync(replayDir).filter(f => f.endsWith('.json'));
+    files.map(f => { let t = 0; try { t = fs.statSync(path.join(replayDir, f)).mtimeMs; } catch (e) { /* vanished */ } return { f, t }; })
+      .sort((a, b) => a.t - b.t).forEach(x => replayNames.push(x.f));
+    while (replayNames.length > CFG.keepReplays) dropOldestReplay();
+  } catch (e) { log('replay boot failed', e.message); }
 }
+
+function dropOldestReplay() {
+  const f = replayNames.shift();
+  if (!f) return;
+  fs.unlink(path.join(replayDir, f), e => { if (e && e.code !== 'ENOENT') log('replay unlink failed', f, e.message); });
+}
+
+// Never drops a replay: they are the record a disputed match is settled from. If writes are falling
+// behind badly enough to hold REPLAY_HOT_MAX in memory, this takes the stall rather than the risk.
+function saveReplay(id, body) {
+  const name = id + '.json', file = path.join(replayDir, name);
+  if (replayHotBytes + body.length > REPLAY_HOT_MAX) {
+    try { fs.writeFileSync(file, body); replayNames.push(name); while (replayNames.length > CFG.keepReplays) dropOldestReplay(); }
+    catch (e) { log('replay write failed', id, e.message); }
+    return;
+  }
+  replayHot.set(id, body); replayHotBytes += body.length;
+  fs.writeFile(file, body, e => {
+    replayHot.delete(id); replayHotBytes -= body.length;
+    if (e) return log('replay write failed', id, e.message);
+    replayNames.push(name);
+    while (replayNames.length > CFG.keepReplays) dropOldestReplay();
+  });
+}
+// One readdir + stat pass, at boot, while nobody is playing. Declared above as `const`, so this call
+// has to live below them rather than up with the mkdir.
+replayBoot();
 
 // ------------------------------------------------------------------ real-money (escrow) flow, off by default
 //
@@ -901,10 +1053,23 @@ if (CFG.realMoney) {
 // ------------------------------------------------------------------ messages
 const LOBBY_KINDS = new Set(['name', 'quick', 'create', 'join', 'leave', 'pick', 'ready', 'set', 'start', 'widen', 'refill', 'wallet', 'stats', 'look',
   'social', 'friend_add', 'friend_accept', 'friend_decline', 'friend_remove', 'challenge', 'challenge_reply', 'recovery_new', 'recover', 'board',
-  'xclaim', 'xverify', 'xforget',
+  'xclaim', 'xverify', 'xforget', 'x_start', 'x_claim', 'x_unlink',
   // the checkout: each of these costs an outbound price-feed or RPC read, so they go in the SLOW
   // bucket with the other lobby messages rather than the 400/s one
   'paymenu', 'payquote', 'payclaim']);
+// Reads: they change nothing on the server and the page fires them whenever a panel opens, so they
+// get their own bucket rather than spending the one Create and Ready draw from. `paymenu`/`payquote`
+// stay in the action bucket on purpose -- each costs an outbound price feed or RPC read.
+const QUERY_KINDS = new Set(['stats', 'board', 'social', 'x_start', 'look']);
+// Actions: 30 deep refilling at 8/s. It was 24 at 5/s, which a player clicking through room settings
+// or the roster can reach, and reaching it means a refused Create. The flood that this is really
+// guarding against is bounded elsewhere and more tightly -- MAX_ROOMS_PER_IP caps open rooms per
+// address at 4, the funding budget caps real-money opens per account -- so being a little kinder here
+// costs nothing. Reads are 40 deep at 20/s: the page fires one per panel it opens.
+const ACT_BURST = +process.env.ACT_BURST || 30;
+const ACT_RATE = (+process.env.ACT_PER_SEC || 8) / 1000;
+const QRY_BURST = +process.env.QRY_BURST || 40;
+const QRY_RATE = (+process.env.QRY_PER_SEC || 20) / 1000;
 
 function onMessage(c, raw) {
   const now = Date.now();
@@ -913,8 +1078,19 @@ function onMessage(c, raw) {
   c.tok -= 1;
   let msg; try { msg = JSON.parse(raw); } catch (e) { return strike(c); }
   if (!msg || typeof msg.k !== 'string') return strike(c);
-  if (LOBBY_KINDS.has(msg.k)) {
-    c.ltok = Math.min(24, c.ltok + (now - c.ltokAt) * 0.005); c.ltokAt = now;
+  // TWO BUCKETS, NOT ONE. Everything in LOBBY_KINDS used to share one 24-deep bucket refilling at
+  // 5/s, which meant opening the leaderboard, the store and the social panel -- reads that change
+  // nothing -- could empty it and leave the next Create, Join or Ready refused with "Slow down a
+  // little". Measured: 19 of 40 `stats` in a row were refused, and the player then could not act.
+  // Reads now have their own, roomier bucket, so browsing the menus can never block playing.
+  // `leave` is charged to neither: it only releases a seat or a room, and refusing it is what left a
+  // player stuck in a room they had already left with a dead Create button.
+  if (QUERY_KINDS.has(msg.k)) {
+    c.qtok = Math.min(QRY_BURST, c.qtok + (now - c.qtokAt) * QRY_RATE); c.qtokAt = now;
+    if (c.qtok < 1) return err(c, 'Slow down a little.', 'rate');
+    c.qtok -= 1;
+  } else if (LOBBY_KINDS.has(msg.k) && msg.k !== 'leave') {
+    c.ltok = Math.min(ACT_BURST, c.ltok + (now - c.ltokAt) * ACT_RATE); c.ltokAt = now;
     if (c.ltok < 1) return err(c, 'Slow down a little.', 'rate');
     c.ltok -= 1;
   }
@@ -930,6 +1106,11 @@ function onMessage(c, raw) {
     case 'i': return onInput(c, msg);
     case 'h': return onHash(c, msg);
     case 'name': {
+      // Duane, 2026-10-16: *"you will use your X name when you are playing"*. A connected account
+      // plays under its handle, so a typed name is not an error here -- it is simply not used, and
+      // the player is told why instead of watching it silently snap back.
+      const a0 = accounts.get(c.th);
+      if (a0.x) { sendTo(c, meMsg(c)); return err(c, 'You play as @' + a0.x + ' while your X account is connected.', 'name'); }
       const n = cleanName(msg.name);
       if (!n) return err(c, 'Pick another name, that one is not allowed.', 'name');
       c.name = n; accounts.get(c.th).name = n; accounts.touch();
@@ -957,7 +1138,9 @@ function onMessage(c, raw) {
     case 'look': return onLook(c, msg);
     case 'xclaim': return xClaim(c, msg);
     case 'xverify': return xVerifyNow(c);
-    case 'xforget': return xForget(c);
+    case 'xforget': case 'x_unlink': return xForget(c);
+    case 'x_start': return sendTo(c, xState(c));
+    case 'x_claim': return xSignedIn(c, msg);
     case 'social': return sendTo(c, socialMsg(c));
     case 'board': return sendTo(c, Object.assign({ k: 'board' }, accounts.leaderboard(100), { mine: accounts.boardPlace(c.acct) }));
     case 'friend_add': return friendAdd(c, msg);
@@ -971,7 +1154,21 @@ function onMessage(c, raw) {
     // messages run the crypto checkout (lib/pay.js): a payment goes wallet -> treasury address and
     // is verified on-chain here, so no money and no key ever moves through this process.
     case 'econ': case 'econset': case 'buy':
-    case 'paymenu': case 'payquote': case 'payclaim': return void economy.handle(c, msg, { sendTo });
+    // the signed-in X account travels with the message: a receipt stamped with it can be found again
+    // from any device, any wallet and any region (lib/pay.js receipts)
+    case 'paymenu': case 'payquote': case 'payclaim': case 'payrestore': {
+      const a = accounts.byId(c.acct) || {};
+      return void economy.handle(c, msg, { sendTo, xid: a.xid || null, x: a.x || null });
+    }
+    // THE TOURNAMENT (lib/tourney.js). Four messages, and not one of them carries a result, an
+    // opponent, a round or a score: the page may enter, withdraw, read the board, and say it is at
+    // its match. Everything else about the bracket is decided from fights this server simulated.
+    case 'tstate': return tState(c);
+    case 'tjoin': return tJoin(c);
+    case 'tleave': return tLeave(c);
+    case 'tcheckin': return tCheckIn(c);
+    // Operator messages, refused outright on any socket that did not present TOURNEY_KEY in `hello`.
+    case 'tannounce': case 'tdraw': case 'tforce': return tAdmin(c, msg);
     default: return strike(c);
   }
 }
@@ -1062,9 +1259,20 @@ function hello(c, msg) {
     sendTo(old, { k: 'kicked', msg: 'You opened Brawlstreet online in another tab.' }); detach(old); old.ws.close(4000, 'replaced');
   }
   byToken.set(c.th, c);
+  // THE OPERATOR SOCKET, promised by the TOURNEY_KEY comment in CFG and never built. tools/
+  // tournament.js presents the key here and gets the three admin messages; every other socket is
+  // struck off for sending one. False whenever the key is unset, so a server with no key has no
+  // operator and the admin messages do not exist.
+  if (msg.opkey !== undefined) {
+    c.op = tourneyAuth(msg.opkey);
+    if (!c.op) { log('operator key refused from', c.id); return c.ws.close(4005, 'opkey'); }
+    log('operator socket', c.id);
+  }
   const acct = accounts.get(c.th);
   if (msg.test === true && !acct.test && mayMarkTest(c, msg)) { acct.test = true; accounts.touch(); }
-  c.name = cleanName(msg.name) || acct.name || 'Player ' + (1000 + rint(9000));
+  // A connected account always comes back as its handle: the page still sends whatever name it has
+  // in local storage, and honouring that would quietly undo the X name on every reload.
+  c.name = acct.x || cleanName(msg.name) || acct.name || 'Player ' + (1000 + rint(9000));
   acct.name = c.name;
   attachAcct(c, acct.id);
   const E = engine.get(msg.build);
@@ -1077,6 +1285,11 @@ function hello(c, msg) {
     chars: (E || engine.get(engine.digest)).chars, stakes: STAKES, stages: (E || engine.get(engine.digest)).stages, url: CFG.publicUrl, now: Date.now(),
     real: escrow ? Object.assign(escrow.info(), { stakes: REAL_STAKES }) : null, stats: statsMsg(), chatFree: CFG.chatFree, quickChat: chat.QUICK,
     region: { id: CFG.region, label: CFG.regionLabel }, regions: REGIONS,
+    // Enough for the title menu to paint its badge without opening the screen: is there an event,
+    // what phase, how many seats are gone, and when the next thing happens.
+    tn: tourney.ev ? { id: tourney.ev.id, name: tourney.ev.name, phase: tourney.phase, cap: tourney.ev.cap,
+      seats: tourney.seats(), opensAt: tourney.ev.opensAt, closesAt: tourney.ev.closesAt, startsAt: tourney.ev.startsAt,
+      mine: !!(tourney.entrant(acct.id) && tourney.entrant(acct.id).status !== 'out') } : null,
     profile: profileOf(acct) });
   sendTo(c, socialMsg(c));
   // back into a match that is still running?
@@ -1088,7 +1301,7 @@ function hello(c, msg) {
     S.client = c; S.connected = true; S.discAt = 0; c.seat = { M, i: S.i }; c.room = M.room;
     if (S.member) S.member.c = c;
     const G = M.sim.Game;
-    sendTo(c, Object.assign(startMsg(M, S.i), { k: 'resume', log: M.slots.map(s => s.log), events: M.events, t: G.tick }));
+    sendTo(c, resumeMsg(M, S.i));
     toPlayers(M, { k: 'lag', slots: [{ slot: S.i, back: true }] }, S.i);
     log('match', M.id, 'slot', S.i, 'rejoined');
     return;
@@ -1102,16 +1315,59 @@ function requireBuild(c) {
 }
 function validStake(r, v) { return r ? REAL_STAKES.includes(v) : STAKES.includes(v); }
 
+// THE DEAD CREATE BUTTON (2026-10-18), reported as room creation not succeeding reliably.
+//
+// `create` and `quick` both used to open with
+//     if (!requireBuild(c) || c.seat || (c.room && c.room.state !== 'lobby')) return;
+// a bare return, with nothing sent back. Whenever the server still had the socket attached to a seat
+// or to a room that was no longer in its lobby -- a match the page has already left behind, a `leave`
+// that was refused by the rate limiter, a result screen closed early -- the press was swallowed. No
+// room, no error, nothing for the page to react to or to recover from, so pressing it again did
+// nothing again. A player in that state has a dead Create button for the rest of the session.
+//
+// A player pressing Create or Quick has said plainly that they want a new match, so clear the stale
+// attachment and give them one. The exception is money: a wagered match must never be forfeited by a
+// stray click, so that one is refused out loud, with a code the page can show.
+function freeForLobby(c, what) {
+  if (c.seat && !c.seat.M.ended) {
+    const { M, i } = c.seat;
+    if (M.real) { err(c, 'You are still in a wagered match. Finish it, or leave it from the match screen.', 'inmatch'); return false; }
+    log('stale seat cleared by', what, 'match', M.id, 'slot', i);
+    M.slots[i].left = true; dropSeat(M, i, 'left');
+  }
+  c.seat = null;
+  const r = c.room;
+  if (r && r.state !== 'lobby') {
+    if (r.real) { err(c, 'You are still in a wagered room. Leave it first.', 'inmatch'); return false; }
+    c.room = null;
+    const k = r.members.findIndex(m => m.c === c);
+    if (k >= 0) r.members.splice(k, 1);
+    if (r.hostId === c.id && r.members.length) r.hostId = r.members[0].id;
+    if (!r.members.length && r.state !== 'match') closeRoom(r);
+  } else if (r) leaveRoom(c);
+  return true;
+}
+
 function quick(c, msg) {
-  if (!requireBuild(c) || c.seat || (c.room && c.room.state !== 'lobby')) return;
+  if (!requireBuild(c) || !freeForLobby(c, 'quick')) return;
   const size = msg.size === 4 ? 4 : 2, stake = Number(msg.stake) || 0;
   if (!validStake(false, stake)) return err(c, 'Pick one of the listed stakes.');
   const want = cleanPool(msg.stages, c.digest, c.acct);
   c.wantStages = want;
+  // A QUICK 1v1 IS RANKED, AND RANKED REFUSES TWO PLAYERS ON ONE ADDRESS. This loop skipped rooms
+  // holding the same ACCOUNT but not the same IP, so the matchmaker kept choosing a room that
+  // joinRoom was then obliged to refuse -- the player got "Someone on your connection is already in
+  // this room" and no match, while a perfectly good opponent sat in another room.
+  // Measured 10/18 with eight players in Germany and eight in Thailand all pressing Quick Match at
+  // once: 2 of 16 got a match, the rest were paired with their own countrymen and bounced. That is
+  // the shape of an event, where whole groups share one connection: a venue, an office, a family.
+  // Skipping those rooms HERE means they are never chosen, so the two groups pair across instead.
+  const ranked = size === 2;
   let best = null;
   for (const r of rooms.values()) {
     if (r.priv || !r.quick || r.real || r.state !== 'lobby' || r.size !== size || r.stake !== stake || r.members.length >= size || r === c.room || r.digest !== c.digest) continue;
     if (r.members.some(m => m.c && m.c.acct === c.acct)) continue;
+    if (ranked && !SAME_IP_OK && c.ip && r.members.some(m => m.c && m.c.ip && m.c.ip === c.ip)) continue;
     if (!poolsFit(r.pool, want)) continue;   // no map both sides want
     if (!best || r.created < best.created) best = r;
   }
@@ -1119,7 +1375,7 @@ function quick(c, msg) {
   joinRoom(c, best);
 }
 function create(c, msg) {
-  if (!requireBuild(c) || c.seat || (c.room && c.room.state !== 'lobby')) return;
+  if (!requireBuild(c) || !freeForLobby(c, 'create')) return;
   const real = !!(msg.real && escrow);
   const stake = Number(msg.stake) || 0;
   if (!validStake(real, stake)) return err(c, 'Pick one of the listed stakes.');
@@ -1131,10 +1387,22 @@ function create(c, msg) {
   if (r) joinRoom(c, r);
 }
 function join(c, msg) {
-  if (!requireBuild(c) || c.seat) return;
+  if (!requireBuild(c)) return;
   const code = String(msg.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
   const r = rooms.get(code);
   if (!r) return err(c, 'No room with code ' + (code || '?') + '. Check the code and try again.', 'noroom');
+  // THE ROOM THIS SOCKET IS ALREADY IN is not a request to go somewhere else. The page re-sends
+  // `join` for its last room after a reconnect (77_net.js, on welcome), and a reconnect into a live
+  // match has already been restored by `hello` with a `resume` -- so treating this as "leave what
+  // you are in and join" would forfeit the match the player just came back to. Answer with where
+  // they are instead.
+  if ((c.seat && c.seat.M.room === r) || c.room === r) {
+    if (c.seat && !c.seat.M.ended) return sendTo(c, resumeMsg(c.seat.M, c.seat.i));
+    return sendTo(c, roomView(r, c));
+  }
+  // Going somewhere else, so the same dead-button door as `create`: pasting a room code while the
+  // server still held a stale seat used to do nothing at all.
+  if (!freeForLobby(c, 'join')) return;
   joinRoom(c, r);
 }
 function leave(c) {
@@ -1212,7 +1480,7 @@ async function bindWallet(c, msg) {
   if (r.members.some(x => x !== m && x.addr && x.addr.toLowerCase() === addr.toLowerCase())) return err(c, 'That wallet is already in this room.');
   m.addr = addr; m.nonce = rid(8); broadcastRoom(r);
 }
-function walletMessage(r, m) { return `Brawlstreet online\nRoom ${r.code}\nPlayer ${m.id}\nNonce ${m.nonce}`; }
+function walletMessage(r, m) { return `Brawl Street online\nRoom ${r.code}\nPlayer ${m.id}\nNonce ${m.nonce}`; }
 
 function onInput(c, msg) {
   const seat = c.seat;
@@ -1296,13 +1564,87 @@ function xState(c) {
 // Binding an account to a verified X identity, from wherever the proof arrived.
 function xBind(a, r) {
   a.x = r.x; a.xid = r.xid; a.xav = r.xav; a.xat = Date.now();
+  // YOUR X NAME IS YOUR NAME. Duane, 2026-10-16: *"you will use your X name when you are playing
+  // for example"*. So the handle becomes the account name the moment it is proved -- name tags,
+  // lobby cards, the leaderboard and the friends list all read a.name, so this one line is what
+  // puts the connected handle everywhere a player is shown, with no screen having to know about X.
+  a.name = r.x;
   accounts.touch();
   log('x connected', a.id, '@' + r.x);
+}
+// Every socket on this account now plays under the handle, including tabs opened before the connect.
+function pushXName(accId) {
+  const a = accounts.byId(accId); if (!a || !a.x) return;
+  for (const c of connsFor(accId)) {
+    if (c.name === a.x) continue;
+    c.name = a.x;
+    if (c.room) { const m = c.room.members.find(x => x.c === c); if (m) m.name = a.x; }
+    sendTo(c, meMsg(c));
+  }
+  pushFriends(accId);
 }
 // Everyone currently connected on this account (a player may have the game open in two tabs).
 function connsFor(accId) { const out = []; for (const c of clients) { if (c.th && accounts.get(c.th).id === accId) out.push(c); } return out; }
 function pushXState(accId) {
-  for (const c of connsFor(accId)) { sendTo(c, xState(c)); if (c.room) broadcastRoom(c.room); }
+  const a = accounts.byId(accId);
+  pushXName(accId);
+  for (const c of connsFor(accId)) {
+    sendTo(c, xState(c));
+    // the title-screen plate (src/78b_xlink.js) listens for this one, not for xstate
+    if (a && a.x) sendTo(c, { k: 'x_linked', h: a.x });
+    if (c.room) broadcastRoom(c.room);
+  }
+}
+
+// ---- ONE-CLICK SIGN IN WITH X: the popup did the OAuth, this checks its signature -------------
+//
+// src/78b_xlink.js opens the verify origin (bs-xverify), X sends the player back there, and that
+// service hands the page a short HMAC token over the handle it read from `GET /2/users/me`. The
+// page is a client and cannot be trusted with "I am @someone" on its own -- a player could type
+// that message by hand -- so the token IS the proof: same secret, same payload, inside its ten
+// minutes, or nothing is bound. Without X_LINK_SECRET here there is no way to check it, so the
+// route refuses rather than trusting the claim; the bio-code route (xclaim) still works.
+const X_LINK_SECRET = process.env.X_LINK_SECRET || '';
+const b64urlBuf = s => Buffer.from(String(s).replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+function xLinkCheck(tok) {
+  if (!X_LINK_SECRET) return null;
+  const parts = String(tok || '').split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+  const want = crypto.createHmac('sha256', X_LINK_SECRET).update(parts[0]).digest();
+  const got = b64urlBuf(parts[1]);
+  if (got.length !== want.length || !crypto.timingSafeEqual(got, want)) return null;
+  let p; try { p = JSON.parse(b64urlBuf(parts[0]).toString('utf8')); } catch (e) { return null; }
+  if (!p || !p.h || !okHandle(String(p.h))) return null;
+  if (!p.exp || Date.now() > Number(p.exp)) return null;
+  if (!p.id || !/^[0-9]{1,25}$/.test(String(p.id))) return null;
+  return { x: String(p.h), xid: String(p.id), xav: null, xname: null, ok: true };
+}
+function xSignedIn(c, msg) {
+  if (!X_LINK_SECRET) return err(c, 'Sign in with X is not switched on yet. Connect your handle below instead.', 'x');
+  const r = xLinkCheck(msg && msg.tok);
+  if (!r) return err(c, 'That X sign-in could not be checked. Press Connect X again.', 'x');
+  const me = accounts.get(c.th);
+  const other = accounts.byXid(r.xid);
+  // same rule as the bio-code route: an X account that is already on an account is a SIGN-IN
+  if (other && other.id !== me.id) return xAdopt(c, Object.assign(r, { adopt: other.id }));
+  xv.cancel(me.id);                     // a half-finished bio-code claim is moot now
+  xBind(me, r);
+  pushXState(me.id);
+  xAvatar(me.id, r.x);
+}
+// The OAuth scope we ask for does not include the profile image, and asking for more to get an
+// avatar is not worth it. The public mirror already used by the bio-code route has it, so fill it
+// in afterwards, best effort: the connection is already done and must not wait on a third party.
+function xAvatar(accId, handle) {
+  Promise.resolve().then(() => xv.fetchProfile(handle)).then(p => {
+    const a = accounts.byId(accId);
+    if (!a || !p || String(a.x || '').toLowerCase() !== String(handle).toLowerCase()) return;
+    if (!p.avatar_url || a.xav === p.avatar_url) return;
+    a.xav = p.avatar_url;
+    if (p.screen_name) a.x = p.screen_name;       // the capitalisation the player actually uses
+    accounts.touch();
+    pushXState(accId);
+  }).catch(e => log('x avatar', e.message));
 }
 function xClaim(c, msg) {
   const me = accounts.get(c.th);
@@ -1359,12 +1701,25 @@ function xAdopt(c, r) {
   if (from && from !== target.id && scratch) economy.mergeInto(from, target.id);
   xBind(target, r);                       // refresh the handle and the avatar while we are here
   c.name = target.name || c.name;
+  // POINT THE DEVICE AT THE ACCOUNT, not just this socket. attachAcct only moves the in-memory
+  // socket index; accounts.adoptX moves the device token -> account mapping that is written to
+  // disk. Without it `accounts.get(c.th)` still answered with the old scratch account, so the
+  // screen read "This device only" immediately after signing in and the next reload went back to
+  // the empty account -- which is the one thing signing in exists to prevent.
+  accounts.adoptX(c.th, target);
   attachAcct(c, target.id);
+  // SIGNING IN IS ALSO A CLAIM TICKET. Merging the device's scratch account covers the purchase made
+  // minutes ago on this browser; it does nothing for one made on another device, another browser or
+  // another region. The receipt book knows which X account each purchase was made on and every
+  // region holds every receipt, so signing in hands back anything that is missing — no wallet
+  // needed, nothing moved off anybody else's account.
+  try { economy.restorePaid(target.id, { xid: target.xid }); } catch (e) { log('restore on sign-in', e.message); }
   log('x signed in', target.id, '@' + r.x, from && from !== target.id ? (scratch ? '(merged ' + from + ')' : '(left ' + from + ' alone)') : '');
   sendTo(c, Object.assign(meMsg(c), { recovered: true }));
   sendTo(c, socialMsg(c));
   sendTo(c, economy.state(target.id));    // the entitlements this device is here for
   sendTo(c, xState(c));
+  if (r.x) sendTo(c, { k: 'x_linked', h: r.x });
 }
 function xForget(c) {
   const a = accounts.get(c.th);
@@ -1483,10 +1838,55 @@ function recover(c, msg) {
   sendTo(c, socialMsg(c));
 }
 
+// ------------------------------------------------------------------ tournament
+// Opening the screen subscribes this socket to the board, so a spectator who never entered still
+// watches the bracket move. The set is swept on disconnect and on every push.
+function tState(c) { tWatch.add(c); sendTo(c, tourney.state(c.acct)); }
+function tJoin(c) {
+  if (!c.acct) return err(c, 'Sign in before you enter.', 'tourney');
+  const now = Date.now(); if (now - (c.lastTJoin || 0) < 2000) return err(c, 'One moment.', 'rate');
+  c.lastTJoin = now;
+  const r = tourney.join(c.acct);
+  sendTo(c, Object.assign({ k: 'tjoined' }, r));
+  sendTo(c, tourney.state(c.acct));
+}
+function tLeave(c) {
+  if (!c.acct) return;
+  const r = tourney.leave(c.acct);
+  sendTo(c, Object.assign({ k: 'tleft' }, r));
+  sendTo(c, tourney.state(c.acct));
+}
+// "I am at my match." The bracket opens the room on the first of the two to press it and hands the
+// same code to the second; this walks whoever pressed it into that room, so nobody copies a code.
+function tCheckIn(c) {
+  if (!c.acct) return err(c, 'Sign in first.', 'tourney');
+  if (!requireBuild(c)) return;
+  if (c.seat) return err(c, 'Finish the match you are in first.', 'tourney');
+  const r = tourney.checkIn(c.acct, c);
+  sendTo(c, Object.assign({ k: 'tmatch' }, r));
+  if (!r.ok || !r.code) return;
+  const room = rooms.get(r.code);
+  if (room && c.room !== room) joinRoom(c, room);
+  sendTo(c, tourney.state(c.acct));
+}
+// Operator only: the socket has to have presented TOURNEY_KEY in `hello`. Announcing writes the
+// event file; drawing closes entries early; forcing hands a disputed match to one side with a
+// reason that lands in the bracket. Everything here is also what the clock does on its own.
+function tAdmin(c, msg) {
+  if (!c.op) return strike(c);
+  let r;
+  if (msg.k === 'tannounce') r = tourney.announce(msg.ev || {});
+  else if (msg.k === 'tdraw') r = tourney.draw();
+  else r = tourney.force(String(msg.pid || ''), String(msg.acct || ''), msg.why);
+  log('tourney admin', msg.k, r && r.ok ? 'ok' : 'refused', r && r.msg ? r.msg : '');
+  sendTo(c, Object.assign({ k: 'tadmin', of: msg.k }, r));
+}
+
 // ------------------------------------------------------------------ connections
 function detach(c) {
   if (!clients.has(c)) return;
   clients.delete(c);
+  tWatch.delete(c);
   if (byToken.get(c.th) === c) byToken.delete(c.th);
   if (c.acct) { const set = byAcct.get(c.acct); if (set) { set.delete(c); if (!set.size) byAcct.delete(c.acct); } pushFriends(c.acct); }
   if (c.ip) { const n = (ipCount.get(c.ip) || 1) - 1; if (n <= 0) ipCount.delete(c.ip); else ipCount.set(c.ip, n); c.ip = null; }
@@ -1536,7 +1936,16 @@ const SEC_HEADERS = {
 };
 const server = http.createServer((req, res) => {
   for (const [k, v] of Object.entries(SEC_HEADERS)) res.setHeader(k, v);
-  if (req.url === '/healthz') {
+  // ROUTE ON THE PATH, NOT THE WHOLE URL (AAA4, 10/17).
+  // `/healthz` and `/ping` were matched with `req.url === '...'`, and 77_net.js measures a region by
+  // fetching `r.http + '/ping?t=' + t0` -- a cache-buster the strict compare can never match. So in
+  // production every region ping fell through to the static handler and came back **404 with no CORS
+  // header**, which is the browser error the page actually reports. Confirmed against the live
+  // server: `/ping` -> 200 with Access-Control-Allow-Origin, `/ping?t=123` -> 404.
+  // That is the whole region-latency measurement, silently dead -- including for the Singapore
+  // region added on 10/16 specifically to halve round-trip time, which nothing could ever select.
+  const PATH = (req.url || '').split('?')[0];
+  if (PATH === '/healthz') {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*', 'Timing-Allow-Origin': '*' });
     // `money` is everything the pre-real-money checklist says to alert on, so a monitor can poll
     // one URL: unsettled payouts, settlements that have been failing long enough to be at risk,
@@ -1546,7 +1955,7 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify(Object.assign(statsMsg(), { ok: true, engine: engine.digest, engines: engine.versions(), real: !!escrow, money, region: CFG.region, label: CFG.regionLabel })));
   }
   // tiny body, CORS-open: what the page times when it measures the round trip to each region
-  if (req.url === '/ping') { res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*', 'Timing-Allow-Origin': '*' }); return res.end(CFG.region); }
+  if (PATH === '/ping') { res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*', 'Timing-Allow-Origin': '*' }); return res.end(CFG.region); }
   if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET', 'Access-Control-Max-Age': '86400' }); return res.end(); }
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'method not allowed');
   // public leaderboard (Elo from ranked online 1v1s): all-time top 100 and this week's season
@@ -1556,6 +1965,28 @@ const server = http.createServer((req, res) => {
       : { updated: b.updated, season: b.season, all: b.all.slice(0, lim), week: b.week.slice(0, lim) };
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30', 'Access-Control-Allow-Origin': '*' });
     return res.end(JSON.stringify(body));
+  }
+  // THE PUBLIC BRACKET. No key: it carries exactly what the tournament screen shows any player, and
+  // every name in it is an X handle its owner connected on purpose. This is what an overlay, a bot
+  // or the site reads to put the bracket somewhere other than inside the game.
+  if (req.url.startsWith('/api/tourney')) {
+    const body = tourney.state(null);
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=10', 'Access-Control-Allow-Origin': '*' });
+    return res.end(JSON.stringify(body));
+  }
+  // THE RECEIPT BOOK, for the other regions. Same key as the bracket runner, and like it, without
+  // the env it is not a route at all. Each region keeps its own accounts, so a purchase made in
+  // Singapore left no trace in Germany and the player saw an empty arsenal; mirroring receipts means
+  // any region can hand back anything that was ever paid for, and a transaction credited on one
+  // region can no longer be claimed a second time on the other.
+  if (req.url.startsWith('/api/receipts')) {
+    if (!CFG.tourneyKey) return send(res, 404, 'not found');
+    const q = new URL(req.url, 'http://x').searchParams;
+    if (!tourneyAuth(req.headers['x-tourney-key'] || q.get('key'))) return send(res, 403, 'forbidden');
+    const p = economy.pay && economy.pay();
+    const sales = p ? p.receipts(+q.get('since') || 0) : [];
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    return res.end(JSON.stringify({ ok: true, region: CFG.region, sales }));
   }
   // Finished matches, for the tournament bracket runner. Needs TOURNEY_KEY both to exist and to be
   // presented; without the env it is not a route at all.
@@ -1571,6 +2002,12 @@ const server = http.createServer((req, res) => {
   // public replay files: seed, config and every input of a finished match, so anyone can re-run it
   const rm = /^\/api\/replay\/(m[0-9a-z]{6,24})$/.exec(req.url);
   if (rm) {
+    // still in flight: the match ended moments ago and its write has not landed yet
+    const hot = replayHot.get(rm[1]);
+    if (hot) {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=86400', 'Access-Control-Allow-Origin': '*' });
+      return res.end(hot);
+    }
     const f = path.join(replayDir, rm[1] + '.json');
     return fs.readFile(f, (e, buf) => {
       if (e) return send(res, 404, 'no such replay');
@@ -1583,7 +2020,16 @@ const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024, pe
 
 // Pages allowed to open a socket: the public site, this host, local test servers, claude.ai artifacts, and
 // sandboxed frames (Origin "null"). Non-browser clients send no Origin. Extra origins: ALLOWED_ORIGINS=a,b
-const ORIGINS = [/^https:\/\/(www\.)?brawlstreet\.lol$/, /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,
+const ORIGINS = [/^https:\/\/(www\.)?brawlstreet\.(lol|xyz)$/, /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,
+  // THE PRIVATE LINK IS A HOST THAT SERVES THE GAME (AAA4, 10/17). `dev/ship.sh` copies the page to
+  // $SITE/play and REKT-SITE/deploy-placeholder.sh pushes that to the Vercel project `bs-desk-4k9m2x`
+  // (team_kwsGfFfVaOsenXfLEoRGjW5r) -- so the build that actually gets played is served from a
+  // *.vercel.app origin that was not on this list, and every socket opened from it was closed with
+  // 1008 'origin'. Server-side refusing silently on the one link used for testing is the failure the
+  // audit named. Scoped to this project's own names (and its preview URLs, which are
+  // <project>-<hash>-<team>.vercel.app) rather than all of vercel.app, which would let any page on
+  // anyone's deployment open a socket here.
+  /^https:\/\/(bs|brawlstreet)-desk-4k9m2x[a-z0-9-]*\.vercel\.app$/,
   /^https:\/\/([a-z0-9-]+\.)*claude\.ai$/, /^https:\/\/([a-z0-9-]+\.)*claudeusercontent\.com$/, /^https:\/\/([a-z0-9-]+\.)*anthropic\.com$/, /^null$/];
 const EXTRA_ORIGINS = new Set((process.env.ALLOWED_ORIGINS || '').split(',').map(x => x.trim()).filter(Boolean).concat(CFG.publicUrl ? [new URL(CFG.publicUrl).origin] : []));
 function originOk(o) { return !o || EXTRA_ORIGINS.has(o) || ORIGINS.some(re => re.test(o)) || process.env.ALLOW_ANY_ORIGIN === '1'; }
@@ -1595,7 +2041,7 @@ wss.on('connection', (ws, req) => {
   if (n > CFG.maxConnPerIp) { ws.close(1013, 'too many connections'); return; }
   ipCount.set(ip, n);
   const c = { id: 'p' + (nextId++).toString(36) + rid(2), ws, ip, direct: isDirectLocal(req), th: null, name: '', rtt: 120, appRtt: 0, appJit: 0, room: null, seat: null, seenAt: Date.now(),
-    tok: 400, tokAt: Date.now(), ltok: 24, ltokAt: Date.now(), strikes: 0, pingAt: 0, buildOk: false };
+    tok: 400, tokAt: Date.now(), ltok: ACT_BURST, ltokAt: Date.now(), qtok: QRY_BURST, qtokAt: Date.now(), strikes: 0, pingAt: 0, buildOk: false };
   clients.add(c);
   ws.on('message', (data, isBinary) => { c.seenAt = Date.now(); if (!isBinary) onMessage(c, data.toString()); });
   ws.on('pong', () => { c.seenAt = Date.now(); if (c.pingAt) { const v = Date.now() - c.pingAt; c.rtt = c.rtt * 0.7 + v * 0.3; c.pingAt = 0; } });
@@ -1726,6 +2172,35 @@ function payLine() {
     return 'payments chain: ' + curs.map(c => c.symbol + '@' + c.chainId).join(' ') + ' -> ' + curs[0].to;
   } catch (e) { return 'payments ?'; }
 }
+// ---- PULL THE OTHER REGIONS' RECEIPTS ---------------------------------------------------------
+// A player is on one region at a time and their account only exists there, so the only thing that
+// can carry a purchase between boxes is the receipt: a verified transaction hash, the wallet that
+// sent it and the item it bought. Every region holds every receipt, so `payrestore` can hand back
+// anything that was ever paid for no matter where it was bought — and a transaction already
+// credited elsewhere arrives marked as spent, so it cannot buy a second copy here.
+// Read-only, best effort, and it never blocks anything: a region that is down just means the next
+// sweep picks its receipts up.
+function syncReceipts() {
+  const p = economy.pay && economy.pay();
+  if (!p || !CFG.tourneyKey || !Array.isArray(REGIONS) || !REGIONS.length) return;
+  const since = Date.now() - 180 * 24 * 3600e3;    // half a year of receipts is a few hundred KB
+  for (const r of REGIONS) {
+    if (!r || !r.http || r.id === CFG.region) continue;
+    const url = r.http.replace(/\/$/, '') + '/api/receipts?since=' + since;
+    Promise.resolve()
+      .then(() => fetch(url, { headers: { 'x-tourney-key': CFG.tourneyKey }, signal: AbortSignal.timeout(15000) }))
+      .then(x => (x.ok ? x.json() : null))
+      .then(j => {
+        if (!j || !j.ok || !Array.isArray(j.sales)) return;
+        const n = p.mergeReceipts(j.sales);
+        if (n) log('receipts: merged', n, 'from', r.id);
+      })
+      .catch(e => log('receipts sync', r.id, e && e.message));
+  }
+}
+setTimeout(syncReceipts, 20000);
+setInterval(syncReceipts, 10 * 60e3);
+
 server.listen(CFG.port, CFG.host, () => log('brawlstreet online on', CFG.host + ':' + CFG.port, 'engines', engine.versions().join(' '), ENGINE.chars.length + ' fighters', 'static', CFG.publicDir, '|', payLine()));
 
 module.exports = { server, CFG };

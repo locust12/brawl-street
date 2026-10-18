@@ -15,6 +15,7 @@ const ABI = [
     { name: 'playerCount', type: 'uint8' }, { name: 'depositCount', type: 'uint8' }, { name: 'paid', type: 'bool' }, { name: 'cutBps', type: 'uint16' },
     { name: 'winner', type: 'address' }, { name: 'replayHash', type: 'bytes32' }] }] },
   { type: 'function', name: 'operator', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'address' }] },
+  { type: 'function', name: 'cutBps', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint16' }] },
 ];
 // BrawlEscrowToken.open takes the token the match is played for, between the players and the stake.
 const MATCH_TOKEN = { type: 'function', name: 'getMatch', stateMutability: 'view', inputs: [{ name: 'id', type: 'bytes32' }], outputs: [{ name: '', type: 'tuple', components: [
@@ -39,6 +40,10 @@ const ABI_TOKEN = ABI.filter(e => e.name !== 'getMatch').concat([MATCH_TOKEN,
 // gas (bounded separately, in server.js) but can never delay a payout.
 const LANE_SETTLE = 0;   // report / cancel — money already in escrow, always goes first
 const LANE_OPEN = 1;     // open — speculative, triggered by a player action, expendable
+// How many times a transaction that failed for a reason the chain did not give is sent again, and the
+// step between attempts. A revert is never retried (see _pump).
+const OP_TRIES = +process.env.OPERATOR_TRIES || 4;
+const OP_BACKOFF_MS = +process.env.OPERATOR_BACKOFF_MS || 1500;
 
 class Escrow {
   constructor({ rpc, chainId, address, operatorKey, chainName, explorer, token, tokenSymbol, tokenDecimals }) {
@@ -56,11 +61,25 @@ class Escrow {
     this.pending = [];       // {lane, seq, fn, args, deadline, res, rej}
     this.busy = false;
     this.seq = 0;
-    this.sent = { open: 0, report: 0, cancel: 0, stale: 0, failed: 0 };
+    this.sent = { open: 0, report: 0, cancel: 0, stale: 0, failed: 0, retried: 0 };
+    this.log = (...a) => { if (process.env.QUIET !== '1') console.log('[escrow]', ...a); };
+    // The cut, read off the contract rather than configured here, so the page can tell a winner what
+    // they will actually receive instead of the gross pot. Null until the first read answers; a
+    // page that connects before then simply gets no figure rather than a wrong one.
+    this.cutBps = null;
+    this.readCut();
+  }
+  // Keeps trying: an RPC that is flaky for the first minute must not leave every page for the rest of
+  // the process's life showing a payout figure that is 5% too high.
+  async readCut() {
+    for (let i = 0; ; i++) {
+      try { this.cutBps = Number(await this.pub.readContract({ address: this.address, abi: this.abi, functionName: 'cutBps' })); return; }
+      catch (e) { await new Promise(r => setTimeout(r, Math.min(60e3, 2000 * Math.pow(2, Math.min(i, 5))))); }
+    }
   }
   info() {
     return { chainId: this.chainId, chainName: this.chainName, rpc: this.rpc, escrow: this.address, explorer: this.explorer,
-      token: this.token, tokenSymbol: this.tokenSymbol, tokenDecimals: this.tokenDecimals };
+      token: this.token, tokenSymbol: this.tokenSymbol, tokenDecimals: this.tokenDecimals, cutBps: this.cutBps };
   }
   // How much work is waiting, per lane. server.js refuses to open new funding when the open lane is
   // already backed up, so a flood cannot keep growing.
@@ -95,10 +114,29 @@ class Escrow {
         try {
           const hash = await this.wallet.writeContract({ address: this.address, abi: this.abi, functionName: it.fn, args: it.args });
           const rc = await this.pub.waitForTransactionReceipt({ hash, timeout: 120000 });
-          if (rc.status !== 'success') throw new Error(it.fn + ' reverted ' + hash);
+          if (rc.status !== 'success') { const err = new Error(it.fn + ' reverted ' + hash); err.reverted = true; throw err; }
           this.sent[it.fn] = (this.sent[it.fn] || 0) + 1;
           it.res(hash);
-        } catch (e) { this.sent.failed++; it.rej(e); }
+        } catch (e) {
+          // ONE FLAKY RPC CALL USED TO COST SOMEBODY THEIR WINNINGS. A `report` that threw was
+          // rejected and never sent again, so the pot sat in the escrow until REPORT_TIMEOUT and
+          // every player was refunded -- which for the winner is losing a fight they won. Arbitrum's
+          // public endpoints time out and prune, and two servers sharing one operator key collide on
+          // the nonce, so a transient failure is expected rather than exceptional.
+          //
+          // A REVERT is different and is never retried: the chain considered the call and refused it
+          // (already settled, not open, not the operator), and sending it again would only burn gas.
+          const transient = !e.reverted && (it.tries || 0) < OP_TRIES;
+          if (transient) {
+            it.tries = (it.tries || 0) + 1;
+            this.sent.retried = (this.sent.retried || 0) + 1;
+            this.log(it.fn + ' failed (' + String(e && e.message).split('\n')[0] + '), retry ' + it.tries + '/' + OP_TRIES);
+            await new Promise(r => setTimeout(r, OP_BACKOFF_MS * it.tries));
+            this.pending.push(it);
+            continue;
+          }
+          this.sent.failed++; it.rej(e);
+        }
       }
     } finally { this.busy = false; }
   }

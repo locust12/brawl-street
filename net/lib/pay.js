@@ -51,6 +51,9 @@ const HTTP_MS = 8000;            // every outbound call is bounded; a hung feed 
 
 const lc = s => String(s || '').toLowerCase();
 const isAddr = s => /^0x[0-9a-fA-F]{40}$/.test(String(s || ''));
+// base58, 32 bytes: 32..44 chars with no 0, O, I or l. Length alone is not proof, so the decode is
+// checked too wherever an address is actually used.
+const isSolAddr = s => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(String(s || ''));
 const hex = n => '0x' + BigInt(n).toString(16);
 
 // raw units -> a human string with at most `places` decimals and no trailing zeroes. The page shows
@@ -112,7 +115,15 @@ class Pay {
     const t = process.env.PAY_TREASURY;
     if (t) {
       if (!isAddr(t)) throw new Error('PAY_TREASURY is not an address: ' + t);
-      for (const ch of Object.values(cfg.chains || {})) ch.treasury = t;
+      // EVM chains ONLY. Solana addresses are base58 and 32 bytes, so stamping an 0x address onto
+      // the Solana chain would publish a destination that cannot receive anything and cannot be
+      // opened by anybody. It gets its own variable.
+      for (const ch of Object.values(cfg.chains || {})) if (ch.kind !== 'solana') ch.treasury = t;
+    }
+    const ts = process.env.PAY_TREASURY_SOL;
+    if (ts) {
+      if (!isSolAddr(ts)) throw new Error('PAY_TREASURY_SOL is not a Solana address: ' + ts);
+      for (const ch of Object.values(cfg.chains || {})) if (ch.kind === 'solana') ch.treasury = ts;
     }
     return cfg;
   }
@@ -145,6 +156,48 @@ class Pay {
     } catch (e) { this.log('pay flush failed', e.message); }
   }
 
+  // ---- THE RECEIPT BOOK IS SHARED BETWEEN REGIONS, 2026-10-17 ----------------------------------
+  // Duane: *"can u fix the system and make sure no one ever loses their items"*. Each region keeps
+  // its own accounts and its own receipts, so a purchase made on Singapore was invisible in Germany
+  // and the same player, signed in to the same X account, looked robbed. The receipt is the one
+  // piece of truth that is region-independent: a verified transaction hash, the wallet that sent it
+  // and the item it bought. Mirroring it everywhere means ANY region can hand back ANY paid item.
+  //
+  // It closes a hole as well as opening a door: `spent` is what stops one transaction being claimed
+  // twice, and it used to be per region, so a tx already credited in Germany could be claimed again
+  // in Singapore. A merged receipt marks its tx spent here too, so a payment buys exactly one item
+  // on exactly one account, whichever region it was made on.
+  receipts(since) {
+    const from = +since || 0;
+    return this.sales.filter(s => s && (s.at || 0) > from);
+  }
+  mergeReceipts(list) {
+    if (!Array.isArray(list)) return 0;
+    const have = new Set(this.sales.map(s => s && s.tx).filter(Boolean));
+    let n = 0;
+    for (const s of list) {
+      if (!s || !s.tx || !s.item || have.has(s.tx)) continue;
+      if (typeof s.tx !== 'string' || s.tx.length > 200) continue;
+      have.add(s.tx);
+      this.sales.push(s);
+      this.spent.add(String(s.chainId) + ':' + lc(s.tx));   // cannot be claimed again on this region
+      n++;
+    }
+    if (n) { this.sales.sort((a, b) => (a.at || 0) - (b.at || 0)); this.dirty = true; this.flush(); }
+    return n;
+  }
+  // Write the buyer's durable identity onto a receipt after the fact. The wallet is on it already;
+  // this adds the X account, so somebody who pays from one wallet and comes back with another is
+  // still recognised as the person who bought it.
+  tagSale(tx, fields) {
+    if (!tx || !fields) return false;
+    const s = this.sales.find(x => x && x.tx === tx);
+    if (!s) return false;
+    let changed = false;
+    for (const k of ['xid', 'x']) if (fields[k] && !s[k]) { s[k] = String(fields[k]).slice(0, 64); changed = true; }
+    if (changed) { this.dirty = true; this.flush(); }
+    return changed;
+  }
   enabled() { return !!(this.cfg && this.cfg.chains && Object.keys(this.cfg.chains).length); }
   chain(id) { return (this.cfg && this.cfg.chains && this.cfg.chains[String(id)]) || null; }
   // every currency the shop offers, flattened across chains, in the order the config lists them
@@ -153,10 +206,17 @@ class Pay {
     if (!this.enabled()) return out;
     for (const [cid, ch] of Object.entries(this.cfg.chains)) {
       if (ch.off) continue;
+      // A chain with no treasury offers NOTHING. Solana ships configured but unaddressed until a
+      // real receive account is set, and an unaddressed currency on the menu is a currency a player
+      // can pay into nowhere.
+      if (!ch.treasury) continue;
       for (const [cur, t] of Object.entries(ch.tokens || {})) {
         if (t.off) continue;
-        out.push({ cur, key: cid + ':' + cur, symbol: t.symbol || cur, name: t.name || cur, chainId: Number(cid),
-          chainName: ch.name || ('chain ' + cid), token: t.addr || null, dec: t.dec == null ? 18 : t.dec,
+        // 'solana' is not a number. Keeping the id as the STRING the config uses means find() and
+        // the spent-key both stay stable; Number(cid) made it NaN and every Solana quote collided.
+        out.push({ cur, key: cid + ':' + cur, symbol: t.symbol || cur, name: t.name || cur,
+          chainId: ch.kind === 'solana' ? cid : Number(cid), kind: ch.kind || 'evm',
+          chainName: ch.name || ('chain ' + cid), token: t.addr || t.mint || null, dec: t.dec == null ? 18 : t.dec,
           explorer: ch.explorer || '', rpc: ch.rpc, to: ch.treasury });
       }
     }
@@ -270,20 +330,25 @@ class Pay {
   async quote(acctId, { id, name, cents, cur, payer }) {
     if (!this.enabled()) return { ok: false, msg: 'The store is not taking payments yet.' };
     if (!acctId) return { ok: false, msg: 'Sign in to online play first.' };
-    if (!isAddr(payer)) return { ok: false, msg: 'Connect a wallet first.' };
     if (!(cents > 0)) return { ok: false, msg: 'That is not for sale.' };
     const m = this.find(cur);
     if (!m) return { ok: false, msg: 'That currency is not one the store takes.' };
     const ch = this.chain(m.chainId), t = ch.tokens[m.cur];
-    if (!isAddr(ch.treasury)) return { ok: false, msg: 'The store has no payment address set.' };
+    // Which ADDRESS SHAPE this chain speaks. A Solana wallet is base58 and case significant, so the
+    // 0x test would reject a perfectly good Phantom address and lc() would quietly corrupt one.
+    const sol = ch.kind === 'solana';
+    const okAddr = a => (sol ? isSolAddr(a) : isAddr(a));
+    const norm = a => (sol ? String(a) : lc(a));
+    if (!okAddr(payer)) return { ok: false, msg: 'Connect a wallet first.' };
+    if (!okAddr(ch.treasury)) return { ok: false, msg: 'The store has no payment address set.' };
     const usd = await this.usdOf(m.cur, ch, t);
     if (!(usd > 0)) return { ok: false, msg: 'The ' + m.symbol + ' price feed is down. Pick another currency.' };
     const pad = this.padFor(m.cur, t);
     const raw = tidy(unitsFor((cents / 100) * (1 + pad), usd, m.dec), m.dec);
     const ref = '0x' + crypto.randomBytes(16).toString('hex');
     const q = { ref, acct: acctId, item: id, name: name || id, cents, cur: m.cur, key: m.key, symbol: m.symbol,
-      chainId: m.chainId, chainName: m.chainName, token: m.token, dec: m.dec, to: lc(ch.treasury),
-      payer: lc(payer), amount: raw.toString(), rate: usd, pad, at: Date.now(), exp: Date.now() + QUOTE_TTL, done: false };
+      chainId: m.chainId, chainName: m.chainName, token: m.token, dec: m.dec, to: norm(ch.treasury),
+      payer: norm(payer), amount: raw.toString(), rate: usd, pad, at: Date.now(), exp: Date.now() + QUOTE_TTL, done: false };
     this.prune(acctId);
     this.quotes.set(ref, q);
     this.dirty = true; this.flush();
@@ -333,16 +398,28 @@ class Pay {
     if (!q) return { ok: false, msg: 'That checkout has expired. Start it again — nothing was charged.' };
     if (q.acct !== acctId) return { ok: false, msg: 'That checkout belongs to another account.' };
     if (q.done) return { ok: false, msg: 'That payment has already been credited.' };
-    if (!/^0x[0-9a-fA-F]{64}$/.test(String(tx || ''))) return { ok: false, msg: 'That is not a transaction hash.' };
+    const ch = this.chain(q.chainId);
+    if (!ch) return { ok: false, msg: 'That chain is no longer supported.' };
+    const isSol = ch.kind === 'solana';
+    // A Solana signature is 64 bytes of base58, not 32 bytes of hex, so the shape check has to know
+    // which chain it is looking at before it rejects anything.
+    if (isSol ? !/^[1-9A-HJ-NP-Za-km-z]{64,96}$/.test(String(tx || ''))
+              : !/^0x[0-9a-fA-F]{64}$/.test(String(tx || '')))
+      return { ok: false, msg: 'That is not a transaction ' + (isSol ? 'signature.' : 'hash.') };
     // The page polls this while a transaction confirms. One check per ref per 1.5s is plenty for
     // that and stops a tight retry loop turning one checkout into a few hundred RPC reads.
     if (Date.now() - (q.checkAt || 0) < 1500) return { ok: false, retry: true, msg: 'Checking that payment…' };
     q.checkAt = Date.now();
-    const hash = lc(tx);
+    // base58 is case SIGNIFICANT, so a Solana signature must not be lowercased the way a hex hash is.
+    const hash = isSol ? String(tx) : lc(tx);
     const spentKey = q.chainId + ':' + hash;
     if (this.spent.has(spentKey)) return { ok: false, msg: 'That transaction has already been used.' };
-    const ch = this.chain(q.chainId);
-    if (!ch) return { ok: false, msg: 'That chain is no longer supported.' };
+
+    if (isSol) {
+      const r = await this._solVerify(q, ch, hash);
+      if (r.err) return r.err;
+      return this._credit(acctId, q, spentKey, r.got, r.sent, ch);
+    }
 
     let rc, txo, head;
     try {
@@ -400,6 +477,16 @@ class Pay {
     // Refusing either keeps the money AND the item, which is the one outcome a shop must never
     // produce. So (1) is accepted outright and (2) is accepted while what arrived still covers the
     // sticker in dollars at the rate right now, down to `cfg.accept` (97% by default).
+    return this._credit(acctId, q, spentKey, got, sent, ch);
+  }
+
+  // THE SHARED TAIL. Everything from here is chain-agnostic: it only ever sees "how much left the
+  // payer" and "how much landed on the treasury", which both the EVM reader and the Solana reader
+  // produce. Keeping one copy means the shortfall rule, the replay locks and the receipt book
+  // cannot drift apart between the two chains.
+  async _credit(acctId, q, spentKey, got, sent, ch) {
+    const want = BigInt(q.amount);
+    const hash = spentKey.slice(spentKey.indexOf(':') + 1);
     let okAmt = got >= want || sent >= want, short = null;
     if (!okAmt) {
       const live = await this.usdOf(q.cur, ch, ch.tokens[q.cur]).catch(() => null);
@@ -426,6 +513,67 @@ class Pay {
     this.log('PAID', q.name, q.cents, 'cents in', fmtUnits(got, q.dec, 6), q.symbol, 'tx', hash);
     return { ok: true, paid: sale, item: q.item,
       msg: q.name + ' paid with ' + fmtUnits(got, q.dec, q.dec > 8 ? 4 : q.dec) + ' ' + q.symbol + '.' };
+  }
+
+  // ---- NATIVE SOLANA ---------------------------------------------------------------------------
+  // Read off BALANCE DELTAS, not off instruction shapes. A Phantom payment can arrive as a plain
+  // system transfer, as a transferChecked, or with an associated-token-account creation bundled in
+  // front of it, and a verifier that pattern-matches instructions says "no payment here" for the
+  // last one while the money is sitting in the treasury. pre/postBalances and pre/postTokenBalances
+  // are what the ledger itself recorded, so they are true whatever shape the client built.
+  async _solVerify(q, ch, sig) {
+    let t;
+    try {
+      t = await this.rpc(ch, 'getTransaction', [sig, {
+        encoding: 'jsonParsed',
+        maxSupportedTransactionVersion: 0,
+        commitment: (ch.minConf == null ? 1 : Number(ch.minConf)) > 1 ? 'finalized' : 'confirmed',
+      }]);
+    } catch (e) {
+      this.log('pay verify solana rpc failed', e.message);
+      return { err: { ok: false, retry: true, msg: 'Could not reach Solana to check that payment. Try again in a moment.' } };
+    }
+    // null is the normal answer for a signature the cluster has not caught up with yet, so it is a
+    // retry and never a refusal.
+    if (!t) return { err: { ok: false, retry: true, msg: 'That transaction has not confirmed yet. Try again in a moment.' } };
+    if (t.meta && t.meta.err) return { err: { ok: false, msg: 'That transaction failed on Solana, so nothing was charged.' } };
+
+    const keys = ((t.transaction || {}).message || {}).accountKeys || [];
+    const addr = i => { const k = keys[i]; return typeof k === 'string' ? k : (k && k.pubkey) || ''; };
+    // The fee payer is the first account and is always a signer: that is who paid.
+    if (addr(0) !== q.payer) return { err: { ok: false, msg: 'That payment came from a different wallet than this checkout.' } };
+
+    const meta = t.meta || {};
+    let got = 0n, sent = 0n;
+    if (!q.token) {
+      // native SOL, in lamports
+      const pre = meta.preBalances || [], post = meta.postBalances || [];
+      for (let i = 0; i < keys.length; i++) {
+        const d = BigInt(post[i] == null ? 0 : post[i]) - BigInt(pre[i] == null ? 0 : pre[i]);
+        if (addr(i) === q.to && d > 0n) got += d;
+        // what the payer gave up, minus the network fee, which is not part of the payment
+        if (i === 0 && d < 0n) sent += (-d) - BigInt(meta.fee || 0);
+      }
+      if (got === 0n) return { err: { ok: false, msg: 'No SOL payment to the store address is in that transaction.' } };
+    } else {
+      // an SPL token: the treasury's balance in THIS MINT, before and after. Matching on owner and
+      // mint rather than on a token-account address means it does not matter which account holds
+      // it, including one created inside the very transaction being checked.
+      const bal = (arr, owner) => {
+        let v = 0n;
+        for (const b of arr || []) {
+          if (b.mint !== q.token || b.owner !== owner) continue;
+          v += BigInt((b.uiTokenAmount || {}).amount || '0');
+        }
+        return v;
+      };
+      got = bal(meta.postTokenBalances, q.to) - bal(meta.preTokenBalances, q.to);
+      sent = bal(meta.preTokenBalances, q.payer) - bal(meta.postTokenBalances, q.payer);
+      if (got <= 0n) return { err: { ok: false, msg: 'No ' + q.symbol + ' payment to the store address is in that transaction.' } };
+    }
+    if (got < 0n) got = 0n;
+    if (sent < 0n) sent = 0n;
+    return { got, sent };
   }
 
   // what the operator wants to see: takings per currency, and the last few sales

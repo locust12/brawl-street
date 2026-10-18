@@ -484,8 +484,12 @@ class Economy {
         msg: 'Choose how to pay for ' + d.name + '.' };
     }
     if (this.mode !== 'stub') {
+      // Kept accurate on purpose: the old copy promised "everything on the $15 shelf is free by
+      // level 10", and there has been no $15 shelf since the 10/14 repricing. Five weapons unlock
+      // by playing (Med Kit at 4, Zip Hook at 10, Nitro Boots at 18, Riot Drone at 25, Flamethrower
+      // at 30); the rest are bought.
       return { k: 'buyres', ok: false, off: true,
-        msg: 'The store is not taking payments yet. Weapons unlock by level in the meantime — everything on the $15 shelf is free by level 10.' };
+        msg: 'The store is not taking payments yet. Five weapons still unlock by playing, from the Med Kit at level 4 to the Flamethrower at level 30.' };
     }
     return this.deliver(acctId, id, 'stub-purchase');
   }
@@ -812,6 +816,36 @@ class Economy {
     };
   }
 
+  // EVERY PAID ITEM FINDS ITS OWNER AGAIN. Give it an account and any identity that account can
+  // prove -- the wallet connected right now, the X account it is signed in to -- and it hands back
+  // every item that identity has ever paid for and this account does not already hold. The receipt
+  // book is mirrored between regions (lib/pay.js), so it does not matter which box the purchase was
+  // made on. Returns the names of what it added, empty when there was nothing to give back.
+  restorePaid(acctId, who) {
+    const p = this.pay();
+    if (!p || !acctId || !who) return [];
+    const want = who.addr ? String(who.addr).toLowerCase() : '';
+    const xid = who.xid ? String(who.xid) : '';
+    if (!want && !xid) return [];
+    const added = [];
+    for (const s of (p.sales || [])) {
+      if (!s || !s.item) continue;
+      // the wallet that paid, OR the X account it was bought on: somebody who pays from one wallet
+      // and comes back with another is still the person who bought it
+      const byWallet = want && s.payer && String(s.payer).toLowerCase() === want;
+      const byX = xid && s.xid && String(s.xid) === xid;
+      if (!byWallet && !byX) continue;
+      const d = C.BY.get(s.item);
+      // consumables are spent, not owned, so "already got one" cannot be answered for them
+      if (!d || d.type === 'consumable') continue;
+      if (this.owns(acctId, s.item)) continue;
+      const out = this.deliver(acctId, s.item, 'restore:' + (s.tx || ''));
+      if (out && out.ok) added.push(d.name || s.item);
+    }
+    if (added.length) this.log('restored ' + added.length + ' paid item(s) to ' + acctId + ' (' + (want || 'x:' + xid) + ')');
+    return added;
+  }
+
   // one place for the three client messages this session owns. Returns true when it handled one.
   handle(c, msg, api) {
     if (!c || !c.acct) return false;
@@ -850,9 +884,31 @@ class Economy {
       // verified payment for a $1.99 weapon can never be claimed against a $14.99 one.
       p.verify(c.acct, { ref: msg.ref, tx: msg.tx }).then(r => {
         if (!r.ok) { api.sendTo(c, Object.assign({ k: 'payres', ok: false }, r)); return; }
+        // stamp the buyer's X account onto the receipt while we know it: that is what lets the item
+        // be found again from another device, another wallet or another region
+        if (api && api.xid && r.paid && r.paid.tx) { try { p.tagSale(r.paid.tx, { xid: api.xid, x: api.x }); } catch (e) { /* receipt still valid */ } }
         const out = this.deliver(c.acct, r.item, 'paid:' + (r.paid && r.paid.cur) + ':' + (r.paid && r.paid.tx));
         api.sendTo(c, Object.assign({}, out, { k: 'payres', paid: r.paid, msg: out.ok ? out.msg : r.msg }));
       }).catch(bad);
+      return true;
+    }
+    // ---- RESTORE WHAT THIS WALLET PAID FOR, wired 2026-10-17 ----
+    // Duane, 17 Oct: *"last time i bought something from market. now its no longer in my arsenal. i
+    // spent real life money on this shit"*. He had: the Riot Shield was delivered to the account the
+    // device was on at the moment it paid, and he came back signed in to his X account, which is a
+    // different account. xAdopt only merges a scratch account at the moment of signing in, so a
+    // purchase made AFTER that, on a fresh device token, had no way home.
+    //
+    // The receipt book is the authority and it records the paying wallet, so a connected wallet can
+    // ask for its own purchases. This only ever ADDS, only items this exact wallet paid for, and
+    // only ones the account does not already hold -- it can never move an item off somebody else's
+    // account or grant anything that was not paid for.
+    if (msg.k === 'payrestore') {
+      const raw = typeof msg.addr === 'string' ? msg.addr.trim() : '';
+      if (raw.length > 100) { api.sendTo(c, { k: 'payrest', ok: false, added: [] }); return true; }
+      const added = this.restorePaid(c.acct, { addr: raw, xid: api && api.xid });
+      api.sendTo(c, { k: 'payrest', ok: true, added, n: added.length });
+      if (added.length) api.sendTo(c, this.state(c.acct));
       return true;
     }
     // THE LOCKER, wired 2026-10-15. `openCase` and `setWear` were written on 10/15 and never routed:
