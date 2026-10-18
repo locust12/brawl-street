@@ -60,7 +60,7 @@ const ok = (cond, what) => { console.log(`  ${cond ? 'ok  ' : 'FAIL'}  ${what}`)
     if (code) b.raw({ k: 'join', code });
     else b.raw({ k: 'create', size: 4, stake: 0.01, real: true, stocks: 3, items: true, stage: 'random' });
     const r = await b.until(m => m.k === 'room', 10000, 'room');
-    const msg = `Brawlstreet online\nRoom ${r.code}\nPlayer ${r.you}\nNonce ${r.nonce}`;
+    const msg = `Brawl Street online\nRoom ${r.code}\nPlayer ${r.you}\nNonce ${r.nonce}`;
     b.raw({ k: 'wallet', addr: a.address, sig: await a.signMessage({ message: msg }) });
     await b.until(m => m.k === 'room' && m.members.find(x => x.id === r.you && x.wallet), 10000, 'wallet bound');
     b.room = r; b.acct = a;

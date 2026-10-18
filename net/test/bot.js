@@ -14,14 +14,25 @@ class Bot {
     this.name = name; this.url = url; this.lat = opts.lat ?? 0; this.jit = opts.jit ?? 0;
     this.token = opts.token || crypto.randomBytes(32).toString('hex');
     this.sim = engine.create(); this.r = lcg(crypto.randomInt(1 << 30));
-    this.inbox = []; this.waiters = []; this.rtt = 0; this.jitE = 0; this.room = null; this.lock = null; this.results = []; this.desyncs = [];
+    this.inbox = []; this.waiters = []; this.rtt = 0; this.jitE = 0; this.offset = null; this.room = null; this.lock = null; this.results = []; this.desyncs = [];
     this.outQ = Promise.resolve(); this.inT = 0; this.outT = 0; this.hold = 0; this.intent = {};
   }
   connect() {
     return new Promise((res, rej) => {
-      this.ws = new WebSocket(this.url);
+      // same reason as light_bot: the server times the link with protocol ping/pong, so an injected
+      // delay has to apply to the pong as well or the server never sees the latency at all
+      this.ws = new WebSocket(this.url, { autoPong: !(this.lat || this.jit) });
+      this.ws.on('ping', d => {
+        if (!this.lat && !this.jit) return;
+        this.queue(this.qpong || (this.qpong = {}), d, data => { try { this.ws.pong(data); } catch (e) { /* closed */ } });
+      });
       this.ws.on('open', () => {
-        this.raw({ k: 'hello', v: 1, token: this.token, name: this.name, build: info.digest, test: true }); res();
+        // `test: true` only STICKS if the server believes us. On loopback it does; through Caddy it
+        // does not, unless we present the shared TEST_KEY (server.js mayMarkTest). Without it every
+        // bot run against a real region leaves PERMANENT accounts on the live leaderboard -- 220 of
+        // them had piled up on Singapore -- instead of being hidden and pruned within the hour.
+        this.raw({ k: 'hello', v: 1, token: this.token, name: this.name, build: info.digest, test: true,
+          testKey: process.env.TEST_KEY || undefined }); res();
         this.pinger = setInterval(() => this.send({ k: 'ping', t: performance.now(), rtt: this.rtt || 0, jit: this.jitE || 0 }), 1000);
       });
       this.ws.on('error', rej);
@@ -58,7 +69,18 @@ class Bot {
     if (m.k === 'drop' && this.lock) { if (m.slot === this.lock.me) this.lock.dropped = true; else this.lock.onDrop(m.slot, m.t, m.level); }
     if (m.k === 'net' && this.lock) { this.lock.setBase(m.delay[this.lock.me]); this.lock.delays = m.delay; this.lock.pings = m.ping; }
     if (m.k === 'need' && this.lock) { this.needs = (this.needs || 0) + 1; this.lock.onNeed(m.t); }
-    if (m.k === 'pong') { const v = performance.now() - m.t; this.jit = this.rtt ? this.jitE * 0.8 + Math.abs(v - this.rtt) * 0.2 : 0; this.jitE = this.jit; this.rtt = this.rtt ? this.rtt * 0.7 + v * 0.3 : v; }
+    // `this.jit` is the jitter this bot INJECTS (--jit) and `this.jitE` is what it MEASURES. This
+    // line used to assign the measurement to both, so one second after connecting the injected
+    // jitter was overwritten by the observed one and every --jit run quietly became a --jit 0 run.
+    if (m.k === 'pong') {
+      const v = performance.now() - m.t;
+      this.jitE = this.rtt ? this.jitE * 0.8 + Math.abs(v - this.rtt) * 0.2 : 0;
+      this.rtt = this.rtt ? this.rtt * 0.7 + v * 0.3 : v;
+      // server clock minus ours, corrected for the trip the pong made back (src/77_net.js does the
+      // same). begin() needs it to start the fight when the SERVER meant it to start, not one
+      // one-way delay later.
+      if (m.s) { const off = m.s - (Date.now() - v / 2); this.offset = this.offset == null ? off : this.offset * 0.8 + off * 0.2; }
+    }
     if (m.k === 'desync') this.desyncs.push(m);
     if (m.k === 'result') { this.results.push(m); if (!this.lock || this.lock.dropped || this.sim.NetSim.done) this.stop(); else this.stopAtEnd = true; }
     if (m.k !== 'i' && m.k !== 'pong' && m.k !== 'net') this.emit(m);
@@ -85,7 +107,8 @@ class Bot {
     this.startMsg = m;
     this.lock = new this.sim.NetLockstep(m, msg => this.send(msg));
     this.localEnd = null;
-    const t0 = performance.now(), wait = m.k === 'resume' ? 0 : Math.max(0, m.startAt - m.now);
+    const off = this.offset != null ? this.offset : (m.now - Date.now());
+    const t0 = performance.now(), wait = m.k === 'resume' ? 0 : Math.max(0, Math.min(8000, m.startAt - (Date.now() + off)));
     this.loop = setInterval(() => {
       const now = performance.now() - t0 - wait;
       if (now < 0) return;

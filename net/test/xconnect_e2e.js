@@ -86,13 +86,16 @@ const ok = (c, what) => { console.log(`  ${c ? 'ok  ' : 'FAIL'}  ${what}`); if (
   const mine = room.members.find(x => x.id === room.you);
   ok(mine && mine.x === 'alice_plays', 'the lobby card carries the handle');
 
-  console.log('\none X account cannot be worn by two players');
+  // A HANDLE ALREADY CONNECTED IS A SIGN-IN, NOT A REFUSAL (lib/xverify.js `claim`): it is usually
+  // the same person on a second device. They are let through to the bio step, and the proof decides
+  // -- if the handle is on an existing account the device ADOPTS it instead of making a duplicate.
+  // This used to assert an immediate refusal, which is the behaviour that was replaced.
+  console.log('\nan X account already connected is a sign-in, not a refusal');
   const B = await join('Bob');
   B.raw({ k: 'xclaim', handle: 'alice_plays' });
   await sleep(1200);
-  ok(had(B, m => m.k === 'err' && m.code === 'x' && /already connected/i.test(m.msg || '')),
-     'the second player is told at once, before being sent off to edit a bio');
-  ok(!(last(B, 'xstate') || {}).x, 'and gets nothing');
+  ok(!had(B, m => m.k === 'err' && m.code === 'x'), 'the second device is not refused outright');
+  ok(!(last(B, 'xstate') || {}).x, 'and is given nothing until it proves the code');
   // and the authoritative check still holds even if they get past the early one
   B.raw({ k: 'xclaim', handle: 'bob_plays' });
   await B.until(m => m.k === 'xstate', 8000, 'xstate b2');

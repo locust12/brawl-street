@@ -46,14 +46,21 @@ const fake = (bios, opts = {}) => async handle => {
     ok(v.pending('me') === null, 'the claim is consumed, so the code cannot be replayed');
   }
 
-  console.log('\none X account cannot wear two fighters');
+  // A HANDLE SOMEBODY ALREADY CONNECTED IS A SIGN-IN, NOT A REFUSAL (lib/xverify.js `claim`). This
+  // used to refuse, which is right for "somebody is wearing my handle" and wrong for the common
+  // case: the same person on a second device. The bio code still has to be proved, so nothing is
+  // weaker -- the proof now has two outcomes, and the second one is `adopt`. These two checks
+  // asserted the refusal that was deliberately replaced.
+  console.log('\nan X account already connected signs that device in instead');
   {
     const code = { v: null };
     const v = new XVerify({ fetchProfile: async h => ({ id: '42', screen_name: 'Duane', description: 'x ' + code.v }) });
-    code.v = v.claim('second', 'Duane').code;
+    const cl = v.claim('second', 'Duane', () => 'first');
+    code.v = cl.code;
+    ok(cl.restore === true, 'claiming a held handle is flagged as a restore, not an error');
     const r = await v.verify('second', () => 'first');     // already held by another account
-    ok(!!r.err && !r.ok, 'the second account is refused');
-    ok(/already connected/i.test(r.err), 'and told why');
+    ok(r.ok === true && !r.err, 'the second device is allowed through once it proves the code');
+    ok(r.adopt === 'first', 'and is handed the account that already holds the handle, to adopt');
     // the SAME account re-verifying is fine
     code.v = v.claim('first', 'Duane').code;
     const r2 = await v.verify('first', () => 'first');

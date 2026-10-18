@@ -21,9 +21,13 @@ const Module = require('module');
 const order = [];               // every transaction actually sent, in the order it was sent
 let sendMs = 20;                // how long a transaction "takes"
 let failNext = 0;               // make the next N sends throw, to test retry/backoff
+let revertNext = 0;             // make the next N sends REVERT on chain, which must never be retried
 const fakeViem = {
   createPublicClient: () => ({
-    waitForTransactionReceipt: async () => ({ status: 'success' }),
+    waitForTransactionReceipt: async () => {
+      if (revertNext > 0) { revertNext--; return { status: 'reverted' }; }
+      return { status: 'success' };
+    },
     readContract: async () => ({ status: 2, depositCount: 2, playerCount: 2, winner: '0x' + '1'.repeat(40), paid: false }),
     getBalance: async () => 10n ** 18n,
   }),
@@ -104,14 +108,36 @@ function check(name, ok, detail) {
     check('operator sends one transaction at a time', maxInFlight === 1, `peak concurrent writeContract calls: ${maxInFlight}`);
   }
 
-  // ------------------------------------------------------------------ 4. a failure rejects its own caller only
+  // ------------------------------------------------------------------ 4. transient failures are retried
+  //
+  // This used to assert that a thrown send rejects its caller. It does not any more, and must not:
+  // a `report` that threw once was never sent again, so the pot sat in the escrow until
+  // REPORT_TIMEOUT and everybody was refunded -- which for the winner is losing a fight they won.
+  // Arbitrum's public endpoints time out, and two servers sharing one operator key collide on the
+  // nonce, so a throw is an expected event and the transaction has to go out again.
   {
     const e = mk(); order.length = 0; sendMs = 5; failNext = 1;
-    const bad = e.cancel(id(1)).then(() => 'ok', () => 'rejected');
-    const good = e.cancel(id(2)).then(() => 'ok', () => 'rejected');
-    const [b, g] = await Promise.all([bad, good]);
+    const first = e.cancel(id(1)).then(() => 'ok', () => 'rejected');
+    const second = e.cancel(id(2)).then(() => 'ok', () => 'rejected');
+    const [b, g] = await Promise.all([first, second]);
     failNext = 0;
-    check('a failed transaction does not poison the queue', b === 'rejected' && g === 'ok', `first=${b} second=${g}`);
+    check('a transient failure is retried until it lands', b === 'ok' && g === 'ok', `first=${b} second=${g}`);
+    check('the retry does not lose the transaction behind it', order.length === 2, `${order.length} sent: ${order.join(' ')}`);
+    check('the retry is counted', e.stats().retried >= 1, `retried ${e.stats().retried}`);
+  }
+
+  // ------------------------------------------------------------------ 4b. a REVERT is terminal
+  //
+  // The chain considered the call and refused it (already settled, not open, not the operator).
+  // Sending it again would only burn gas, so the caller is rejected and the queue moves on.
+  {
+    const e = mk(); order.length = 0; sendMs = 5; revertNext = 1;
+    const bad = e.cancel(id(3)).then(() => 'ok', () => 'rejected');
+    const good = e.cancel(id(4)).then(() => 'ok', () => 'rejected');
+    const [b, g] = await Promise.all([bad, good]);
+    revertNext = 0;
+    check('a reverted transaction is NOT retried', b === 'rejected', `first=${b}`);
+    check('a revert does not poison the queue', g === 'ok', `second=${g}`);
   }
 
   // ------------------------------------------------------------------ 5. SettleQueue.actionable

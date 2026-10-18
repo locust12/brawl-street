@@ -217,14 +217,17 @@ const SCEN = {
     if (lk.name !== 'FrogbKing') probs.push('look name not sanitized: ' + lk.name);
     // parts the creator added later must survive the server round trip
     for (const k of ['skin', 'hair', 'haircol', 'shoes']) if (!lk[k]) probs.push('look lost ' + k);
-    if (lk.x !== 'duane_x') probs.push('x handle not normalised: ' + lk.x);
-    a.raw({ k: 'look', look: Object.assign({}, lk, { x: 'FuckLord' }) });
-    await new Promise(r => setTimeout(r, 300));
-    a.raw({ k: 'look', look: Object.assign({}, lk, { x: 'way_too_long_handle_here' }) });
-    const me2 = await a.until(m => m.k === 'me' && m.profile, 5000, 'handle rejected');
+    // A LOOK MAY NOT CARRY AN X HANDLE AT ALL any more, whatever it says. The handle used to be a
+    // free-text field on the custom fighter, so anybody could put @elonmusk over their head in a
+    // match people were betting on; cleanLook now drops `x` silently and only xverify can set it on
+    // the account. This scenario used to assert the opposite -- that a handle sent in a look was
+    // normalised and kept -- so it had been testing a hole that has since been closed.
+    if (lk.x) probs.push('a look kept a self-set x handle: ' + lk.x);
+    a.raw({ k: 'look', look: Object.assign({}, lk, { x: 'FuckLord', tint: 'ice' }) });
+    const me2 = await a.until(m => m.k === 'me' && m.profile && m.profile.look && m.profile.look.tint === 'ice', 5000, 'look with a handle in it');
     if (me2.profile.look.x) probs.push('bad x handle kept: ' + me2.profile.look.x);
-    a.raw({ k: 'look', look: lk });
-    await a.until(m => m.k === 'me' && m.profile.look && m.profile.look.x === 'duane_x', 5000, 'handle back');
+    a.raw({ k: 'look', look: Object.assign({}, lk, { tint: 'gold' }) });
+    await a.until(m => m.k === 'me' && m.profile.look && m.profile.look.tint === 'gold', 5000, 'look restored');
     // friends: A adds B by friend code, B accepts, both see each other online
     a.raw({ k: 'friend_add', q: 'BS-' + pb.fc });
     await b.until(m => m.k === 'social' && m.reqIn.length === 1, 5000, 'friend request');
@@ -238,7 +241,11 @@ const SCEN = {
     b.raw({ k: 'challenge_reply', code: ch.code, ok: true });
     const room = await a.until(m => m.k === 'room' && m.members.length === 2, 5000, 'challenge room');
     if (!room.ranked || !room.members.find(x => x.look && x.look.base === 'pepe')) probs.push('room lacks ranked flag or look');
-    if (!room.members.find(x => x.x === 'duane_x')) probs.push('room member has no x handle');
+    // The X handle in a room, a start message and a leaderboard row comes from a VERIFIED account
+    // now, which this scenario has no way to produce -- a look cannot carry one any more. That whole
+    // path has its own tests: xsignin_test.js, xverify_test.js, xclaim/xlive_fields.js. What is
+    // checked here is that the field exists and is null rather than missing.
+    if (room.members.some(x => x.x === undefined)) probs.push('room member is missing the x field entirely');
     // chat: quick line, filtered text, rate limit
     a.raw({ k: 'chat', q: 'gg' }); a.raw({ k: 'chat', t: 'nice <script>x</script> shit' });
     const q1 = await b.until(m => m.k === 'chat' && m.q === 'gg', 5000, 'quick chat');
@@ -254,7 +261,7 @@ const SCEN = {
     a.raw({ k: 'ready', on: true }); b.raw({ k: 'ready', on: true });
     const st = await a.until(m => m.k === 'start', 10000, 'start');
     if (!st.ranked || !st.looks || !st.looks[st.you] || st.looks[st.you].base !== 'pepe') probs.push('start message lacks looks/ranked');
-    if (!st.handles || st.handles[st.you] !== 'duane_x') probs.push('start message lacks the x handle');
+    if (!st.handles || st.handles.length !== st.names.length) probs.push('start message has no handles array');
     if (JSON.stringify(st.cfg).includes('FrogbKing')) probs.push('look leaked into the fight config');
     const R = await verify('friends + challenge -> ranked 1v1 with custom look', [a, b]);
     if (!R.elo || Object.keys(R.elo).length !== 2) probs.push('no Elo change on a ranked match');
@@ -270,11 +277,12 @@ const SCEN = {
     const rec = await n.until(m => m.k === 'me' && m.recovered, 5000, 'recovered');
     if (rec.profile.id !== pa.id || rec.profile.fc !== pa.fc || !rec.profile.look) probs.push('recovery did not restore the account');
     // the recovered device gets the fighter back, gear and handle included
-    if (!rec.profile.look || rec.profile.look.base !== 'pepe' || rec.profile.look.hair !== 'mohawk' || rec.profile.look.x !== 'duane_x') probs.push('recovery did not restore the custom fighter');
+    if (!rec.profile.look || rec.profile.look.base !== 'pepe' || rec.profile.look.hair !== 'mohawk') probs.push('recovery did not restore the custom fighter');
     // on the public server the test accounts are hidden from the board by design, so only check the row locally
     if (!REMOTE) {
       const mine = lb.all.find(r => r.name === a.name);
-      if (!lb.all.length || !mine || mine.x !== 'duane_x') probs.push('leaderboard row has no x handle: ' + JSON.stringify(mine));
+      if (!lb.all.length || !mine) probs.push('this account is missing from the leaderboard: ' + JSON.stringify(lb.all));
+      else if (mine.x === undefined) probs.push('leaderboard row is missing the x field entirely: ' + JSON.stringify(mine));
     } else if (lb.all.some(r => /^Soc\d/.test(r.name))) probs.push('test accounts leaked onto the public leaderboard');
     n.raw({ k: 'recover', code: 'AAAA-BBBB-CCCC-DDDD' });
     await n.until(m => m.k === 'err' && m.code === 'recover', 5000, 'bad code rejected');
@@ -286,18 +294,21 @@ const SCEN = {
   async maps() {
     const probs = [];
     const [a, b, c, d] = await bots(4, 'Map');
-    // a wants moon/keep, b wants keep/dojo -> they pair on keep
-    a.raw({ k: 'quick', size: 2, stake: 0, stages: ['moon', 'keep'] });
+    // a wants moon/chart, b wants chart/dojo -> they pair on chart.
+    // NOT `keep`: Shadow Keep became a VAULT stage on 16 Oct, and cleanPool strips a vault stage the
+    // account does not own straight out of a map request -- so both pools came back with no overlap
+    // at all and this scenario had been failing on that ever since. Use stages anyone can pick.
+    a.raw({ k: 'quick', size: 2, stake: 0, stages: ['moon', 'chart'] });
     await a.until(m => m.k === 'room', 5000, 'room a');
-    b.raw({ k: 'quick', size: 2, stake: 0, stages: ['keep', 'dojo'] });
+    b.raw({ k: 'quick', size: 2, stake: 0, stages: ['chart', 'dojo'] });
     const room = await b.until(m => m.k === 'room' && m.members.length === 2, 8000, 'paired');
-    if (room.picked !== 'keep') probs.push('picked map ' + room.picked + ' is not the overlap (keep)');
+    if (room.picked !== 'chart') probs.push('picked map ' + room.picked + ' is not the overlap (chart)');
     if (!room.quick || room.size !== 2) probs.push('not a quick 1v1 room');
     // the match really runs on that map
     a.raw({ k: 'pick', char: 'doge' }); b.raw({ k: 'pick', char: 'pepe' });
     a.raw({ k: 'ready', on: true }); b.raw({ k: 'ready', on: true });
     const st = await a.until(m => m.k === 'start', 15000, 'start');
-    if (st.cfg.stage !== 'keep') probs.push('match stage ' + st.cfg.stage + ' != picked keep');
+    if (st.cfg.stage !== 'chart') probs.push('match stage ' + st.cfg.stage + ' != picked chart');
     a.raw({ k: 'leave' }); b.raw({ k: 'leave' });
     // c wants isle only, d wants city only: no overlap, so two separate rooms
     c.raw({ k: 'quick', size: 2, stake: 0, stages: ['isle'] });

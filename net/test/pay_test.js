@@ -385,6 +385,55 @@ t('a paid item the account already holds is reported as held, not refused', () =
   assert.ok(r.ok && /already on your account/.test(r.msg), r.msg);
   fs.rmSync(d3, { recursive: true, force: true });
 });
+// ---------- nobody loses a paid item (10/17) ----------
+// The purchase lands on whatever account the device was on when it paid. Pay on one device, come
+// back on another -- or on the other region, where the account does not even exist -- and the
+// arsenal looked empty. The receipt is the thing that survives all of that.
+t('a paid item comes back to the wallet that paid for it, on a fresh account', () => {
+  const d5 = fs.mkdtempSync(path.join(os.tmpdir(), 'paytest5-'));
+  const accounts = new Accounts(d5); accounts.showTests = true;
+  const was = process.env.PAYMENTS; process.env.PAYMENTS = 'chain';
+  const econ = new Economy({ dataDir: d5, accounts, log });
+  econ._pay = mk({ dataDir: d5 });
+  const item = C.CAT.weapons.find(x => x.price > 0);
+  const bought = accounts.get(Accounts.hashToken('deviceA'));
+  const fresh = accounts.get(Accounts.hashToken('deviceB'));
+  econ._pay.sales.push({ at: Date.now(), acct: bought.id, item: item.id, name: item.name, cents: item.price, cur: 'USDC', chainId: 1, tx: hash('0x31'), payer: WALLET });
+  assert.ok(!econ.owns(fresh.id, item.id), 'the new account starts with nothing');
+  const added = econ.restorePaid(fresh.id, { addr: WALLET.toUpperCase() });   // case must not matter
+  assert.deepStrictEqual(added, [item.name], JSON.stringify(added));
+  assert.ok(econ.owns(fresh.id, item.id), 'and it is on the account afterwards');
+  assert.deepStrictEqual(econ.restorePaid(fresh.id, { addr: WALLET }), [], 'asking twice does not duplicate it');
+  assert.deepStrictEqual(econ.restorePaid(fresh.id, { addr: OTHER }), [], 'another wallet gets nothing');
+  if (was == null) delete process.env.PAYMENTS; else process.env.PAYMENTS = was;
+  fs.rmSync(d5, { recursive: true, force: true });
+});
+t('signing in to the X account the item was bought on brings it back without a wallet', () => {
+  const d6 = fs.mkdtempSync(path.join(os.tmpdir(), 'paytest6-'));
+  const accounts = new Accounts(d6); accounts.showTests = true;
+  const was = process.env.PAYMENTS; process.env.PAYMENTS = 'chain';
+  const econ = new Economy({ dataDir: d6, accounts, log });
+  econ._pay = mk({ dataDir: d6 });
+  const item = C.CAT.weapons.find(x => x.price > 0);
+  const a = accounts.get(Accounts.hashToken('deviceC'));
+  econ._pay.sales.push({ at: Date.now(), acct: 'gone', item: item.id, name: item.name, cents: item.price, cur: 'USDC', chainId: 1, tx: hash('0x32'), payer: OTHER, xid: '99887766' });
+  assert.deepStrictEqual(econ.restorePaid(a.id, { xid: '12345' }), [], 'a different X account gets nothing');
+  assert.deepStrictEqual(econ.restorePaid(a.id, { xid: '99887766' }), [item.name], 'the buyer gets it back');
+  assert.ok(econ.owns(a.id, item.id));
+  if (was == null) delete process.env.PAYMENTS; else process.env.PAYMENTS = was;
+  fs.rmSync(d6, { recursive: true, force: true });
+});
+t('a receipt from another region is merged once, and its tx cannot be spent twice', () => {
+  const d7 = fs.mkdtempSync(path.join(os.tmpdir(), 'paytest7-'));
+  const p = mk({ dataDir: d7 });
+  const far = { at: Date.now(), acct: 'sgacct', item: 'pipebomb', name: 'Pipe Bomb', cents: 199, cur: 'USDC', chainId: 1, tx: hash('0x33'), payer: WALLET };
+  assert.strictEqual(p.mergeReceipts([far]), 1, 'the first merge takes it');
+  assert.strictEqual(p.mergeReceipts([far]), 0, 'the second merge is a no-op');
+  assert.ok(p.spent.has('1:' + hash('0x33')), 'and the transaction is marked spent here too');
+  assert.strictEqual(p.receipts(0).filter(s => s.tx === far.tx).length, 1, 'one receipt, not two');
+  assert.strictEqual(p.mergeReceipts([{ at: Date.now(), item: 'pipebomb' }]), 0, 'a receipt with no tx is ignored');
+  fs.rmSync(d7, { recursive: true, force: true });
+});
 t('PAYMENTS unset: the checkout messages are refused outright', () => {
   const d4 = fs.mkdtempSync(path.join(os.tmpdir(), 'paytest4-'));
   const accounts = new Accounts(d4); accounts.showTests = true;
